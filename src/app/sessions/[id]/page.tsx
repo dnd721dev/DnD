@@ -1,8 +1,8 @@
 // @ts-nocheck
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { use, useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAccount } from 'wagmi'
 import { supabase } from '@/lib/supabase'
@@ -41,13 +41,17 @@ type CampaignParticipantRow = {
   role: string
 }
 
-export default function SessionPage() {
-  const params = useParams<{ id: string }>()
+type PageProps = {
+  params: Promise<{ id: string }>
+  searchParams?: Promise<Record<string, string | string[] | undefined>>
+}
+
+export default function SessionPage({ params }: PageProps) {
+  const { id } = use(params)
+  const sessionId = id
+
   const router = useRouter()
   const { address, isConnected } = useAccount()
-
-  // params.id is always defined for this route
-  const sessionId = params.id as string
 
   const [session, setSession] = useState<SessionRow | null>(null)
   const [characters, setCharacters] = useState<CharacterRow[]>([])
