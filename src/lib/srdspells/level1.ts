@@ -1,0 +1,56 @@
+// 1st-level spells
+
+import type { SrdSpell } from './types'
+
+export const LEVEL1_SPELLS: SrdSpell[] = [
+  {
+    name: 'Magic Missile',
+    level: 1,
+    school: 'Evocation',
+    castingTime: '1 action',
+    range: '120 feet',
+    components: 'V, S',
+    duration: 'Instantaneous',
+    damage: '3d4+3',
+    notes: 'Auto-hit darts of force. No attack or save in this simplified sheet.',
+    classes: ['sorcerer', 'wizard'],
+  },
+  {
+    name: 'Burning Hands',
+    level: 1,
+    school: 'Evocation',
+    castingTime: '1 action',
+    range: 'Self (15-foot cone)',
+    components: 'V, S',
+    duration: 'Instantaneous',
+    saveAbility: 'dex',
+    damage: '3d6',
+    notes: 'Dex save for half, fire damage.',
+    classes: ['sorcerer', 'wizard'],
+  },
+  {
+    name: 'Cure Wounds',
+    level: 1,
+    school: 'Evocation',
+    castingTime: '1 action',
+    range: 'Touch',
+    components: 'V, S',
+    duration: 'Instantaneous',
+    damage: '1d8+3',
+    notes: 'Heals instead of damage, but we use the roller for the amount.',
+    classes: ['bard', 'cleric', 'druid', 'paladin', 'ranger'],
+  },
+  {
+    name: 'Guiding Bolt',
+    level: 1,
+    school: 'Evocation',
+    castingTime: '1 action',
+    range: '120 feet',
+    components: 'V, S',
+    duration: '1 round',
+    attackRoll: true,
+    damage: '4d6',
+    notes: 'Ranged spell attack, radiant damage.',
+    classes: ['cleric'],
+  },
+]
