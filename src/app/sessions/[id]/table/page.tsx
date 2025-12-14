@@ -1,9 +1,10 @@
-import TableClient from './TableClient'
+import { use } from 'react'
+import dynamic from 'next/dynamic'
 
-interface PageProps {
-  params: { id: string }
-}
+// Keep TableClient client-only (wallet/livekit/map stuff)
+const TableClient = dynamic(() => import('./TableClient'), { ssr: false })
 
-export default function SessionTablePage({ params }: PageProps) {
-  return <TableClient sessionId={params.id} />
+export default function TablePage(props: { params: Promise<{ id: string }> }) {
+  const { id } = use(props.params)
+  return <TableClient sessionId={id} />
 }
