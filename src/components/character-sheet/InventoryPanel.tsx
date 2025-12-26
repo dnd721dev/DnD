@@ -5,17 +5,21 @@ import { supabase } from '@/lib/supabase'
 import type { CharacterSheetData, InventoryItem } from './types'
 import { ARMOR_DB, WEAPON_DB } from './equipment-db'
 
-function uid() {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36)
-}
-
 type AddMode = 'weapon' | 'armor' | 'shield' | 'custom'
 
-const CATEGORY_BY_MODE: Record<AddMode, InventoryItem['category']> = {
+// Your InventoryItem uses `kind`, not `category`
+type ItemKind = NonNullable<InventoryItem['kind']>
+
+const KIND_BY_MODE: Record<AddMode, ItemKind> = {
   weapon: 'weapon',
   armor: 'armor',
-  shield: 'shield',
-  custom: 'gear',
+  shield: 'armor', // treat shield as armor in inventory kind
+  custom: 'misc',
+}
+
+function rowIdFor(it: InventoryItem) {
+  // stable id for UI operations (remove/change qty)
+  return `${String(it.key ?? '')}::${String(it.name ?? '')}::${String(it.kind ?? '')}`
 }
 
 export function InventoryPanel({
@@ -29,8 +33,8 @@ export function InventoryPanel({
   const [status, setStatus] = useState('')
 
   const items = useMemo<InventoryItem[]>(
-    () => (Array.isArray(c.inventory_items) ? (c.inventory_items as any) : []),
-    [c.inventory_items],
+    () => (Array.isArray(c.inventory_items) ? (c.inventory_items as InventoryItem[]) : []),
+    [c.inventory_items]
   )
 
   const weaponOptions = useMemo(() => {
@@ -49,10 +53,10 @@ export function InventoryPanel({
   const [armorKey, setArmorKey] = useState<string>(armorOptions[0]?.key ?? '')
   const [qty, setQty] = useState(1)
 
-  // Custom fallback
+  // Custom
   const [customName, setCustomName] = useState('')
   const [customKey, setCustomKey] = useState('')
-  const [customCategory, setCustomCategory] = useState<NonNullable<InventoryItem['category']>>('gear')
+  const [customKind, setCustomKind] = useState<ItemKind>('misc')
 
   async function saveInventory(next: InventoryItem[]) {
     setSaving(true)
@@ -89,11 +93,10 @@ export function InventoryPanel({
       if (!weaponKey || !WEAPON_DB[weaponKey]) return
       const w = WEAPON_DB[weaponKey]
       newItem = {
-        id: uid(),
         key: w.key,
         name: w.name,
         qty: q,
-        category: 'weapon',
+        kind: 'weapon',
       }
     }
 
@@ -101,21 +104,20 @@ export function InventoryPanel({
       if (!armorKey || !ARMOR_DB[armorKey]) return
       const a = ARMOR_DB[armorKey]
       newItem = {
-        id: uid(),
         key: a.key,
         name: a.name,
         qty: q,
-        category: 'armor',
+        kind: 'armor',
       }
     }
 
     if (mode === 'shield') {
+      // Keep key stable so stacking works
       newItem = {
-        id: uid(),
         key: 'shield',
         name: 'Shield',
         qty: q,
-        category: 'shield',
+        kind: 'armor',
       }
     }
 
@@ -139,33 +141,50 @@ export function InventoryPanel({
   async function addCustom() {
     const q = Math.max(1, Number(qty) || 1)
     const name = customName.trim()
-    const key = customKey.trim() || null
+    const key = customKey.trim()
+
     if (!name && !key) {
       setStatus('Enter a name or key.')
       setTimeout(() => setStatus(''), 1200)
       return
     }
 
+    // Your InventoryItem.key is required string, so always produce one.
+    const finalKey = key || name.toLowerCase().replace(/\s+/g, '_') || `item_${Date.now()}`
+
     const newItem: InventoryItem = {
-      id: uid(),
-      key,
-      name: name || String(key),
+      key: finalKey,
+      name: name || finalKey,
       qty: q,
-      category: customCategory,
+      kind: customKind,
     }
 
-    await saveInventory([newItem, ...items])
+    // stack by key if it already exists
+    if (itemExistsByKey(newItem.key)) {
+      const next = items.map((it) => {
+        if (String(it.key ?? '').toLowerCase() === String(newItem.key).toLowerCase()) {
+          return { ...it, qty: (it.qty ?? 0) + q }
+        }
+        return it
+      })
+      await saveInventory(next)
+    } else {
+      await saveInventory([newItem, ...items])
+    }
+
     setCustomName('')
     setCustomKey('')
-    setCustomCategory('gear')
+    setCustomKind('misc')
   }
 
-  async function removeItem(itemId: string) {
-    await saveInventory(items.filter((it) => it.id !== itemId))
+  async function removeItem(rowId: string) {
+    await saveInventory(items.filter((it) => rowIdFor(it) !== rowId))
   }
 
-  async function changeQty(itemId: string, nextQty: number) {
-    const next = items.map((it) => (it.id === itemId ? { ...it, qty: Math.max(0, nextQty) } : it))
+  async function changeQty(rowId: string, nextQty: number) {
+    const next = items.map((it) =>
+      rowIdFor(it) === rowId ? { ...it, qty: Math.max(0, nextQty) } : it
+    )
     await saveInventory(next.filter((it) => (it.qty ?? 0) > 0))
   }
 
@@ -176,7 +195,7 @@ export function InventoryPanel({
         <div className="text-[11px] text-slate-500">{status}</div>
       </div>
 
-      {/* Add section (from libs + custom) */}
+      {/* Add section */}
       <div className="mb-3 space-y-2 rounded-lg bg-slate-900/50 p-2 text-xs">
         <div className="grid grid-cols-3 gap-2">
           <select
@@ -272,18 +291,23 @@ export function InventoryPanel({
             </div>
 
             <select
-              value={customCategory}
-              onChange={(e) => setCustomCategory(e.target.value as any)}
+              value={customKind}
+              onChange={(e) => setCustomKind(e.target.value as ItemKind)}
               className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-[12px] text-slate-100"
             >
               <option value="gear">gear</option>
+              <option value="tool">tool</option>
               <option value="consumable">consumable</option>
               <option value="treasure">treasure</option>
               <option value="misc">misc</option>
               <option value="weapon">weapon</option>
               <option value="armor">armor</option>
-              <option value="shield">shield</option>
             </select>
+
+            <div className="text-[10px] text-slate-500">
+              (Shield items are stored as kind <span className="font-mono">armor</span> with key{' '}
+              <span className="font-mono">shield</span>)
+            </div>
           </div>
         )}
       </div>
@@ -296,46 +320,51 @@ export function InventoryPanel({
           </div>
         )}
 
-        {items.map((it) => (
-          <div
-            key={it.id}
-            className="flex items-center justify-between gap-2 rounded-md bg-slate-900/70 px-2 py-2"
-          >
-            <div className="min-w-0">
-              <div className="truncate text-[12px] font-semibold text-slate-100">
-                {it.name}
-                {it.category ? (
-                  <span className="ml-2 text-[10px] font-normal text-slate-400">({it.category})</span>
+        {items.map((it) => {
+          const rid = rowIdFor(it)
+          return (
+            <div
+              key={rid}
+              className="flex items-center justify-between gap-2 rounded-md bg-slate-900/70 px-2 py-2"
+            >
+              <div className="min-w-0">
+                <div className="truncate text-[12px] font-semibold text-slate-100">
+                  {it.name}
+                  {it.kind ? (
+                    <span className="ml-2 text-[10px] font-normal text-slate-400">
+                      ({it.kind})
+                    </span>
+                  ) : null}
+                </div>
+                {it.key ? (
+                  <div className="text-[10px] text-slate-500">
+                    key: <span className="font-mono">{it.key}</span>
+                  </div>
                 ) : null}
               </div>
-              {it.key ? (
-                <div className="text-[10px] text-slate-500">
-                  key: <span className="font-mono">{it.key}</span>
-                </div>
-              ) : null}
-            </div>
 
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={0}
-                className="w-16 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[12px] text-slate-100"
-                value={it.qty ?? 1}
-                onChange={(e) => changeQty(it.id, Number(e.target.value))}
-                disabled={saving}
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  className="w-16 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[12px] text-slate-100"
+                  value={it.qty ?? 1}
+                  onChange={(e) => changeQty(rid, Number(e.target.value))}
+                  disabled={saving}
+                />
 
-              <button
-                type="button"
-                onClick={() => removeItem(it.id)}
-                disabled={saving}
-                className="rounded-md bg-red-600/20 px-2 py-1 text-[11px] text-red-200 hover:bg-red-600/30 disabled:opacity-60"
-              >
-                Remove
-              </button>
+                <button
+                  type="button"
+                  onClick={() => removeItem(rid)}
+                  disabled={saving}
+                  className="rounded-md bg-red-600/20 px-2 py-1 text-[11px] text-red-200 hover:bg-red-600/30 disabled:opacity-60"
+                >
+                  Remove
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </section>
   )
