@@ -54,7 +54,7 @@ export default function NewCampaignPage() {
         status: 'active',
       })
       .select('id')
-      .single()
+      .limit(1).maybeSingle()
 
     if (error) {
       console.error(error)

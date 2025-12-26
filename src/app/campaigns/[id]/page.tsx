@@ -68,7 +68,7 @@ export default function CampaignPage() {
               'id, title, description, join_mode, status, gm_wallet, join_password_hash'
             )
             .eq('id', campaignId)
-            .single(),
+            .limit(1).maybeSingle(),
           supabase
             .from('campaign_participants')
             .select('wallet_address, role')

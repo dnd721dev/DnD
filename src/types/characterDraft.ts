@@ -34,10 +34,7 @@ export interface CharacterDraft {
 
   proficiencyBonus?: number
 
-  savingThrows?: Record<
-    'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha',
-    boolean
-  >
+  savingThrows?: Record<'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha', boolean>
 
   skillProficiencies?: Record<string, 'none' | 'proficient' | 'expertise'>
 
@@ -48,10 +45,22 @@ export interface CharacterDraft {
   initiative?: number
   speed?: number
 
-  // Equipment
+  // Equipment (selected)
   packKey?: string | null
   mainWeaponKey?: string | null
   armorKey?: string | null
+
+  // ✅ Owned item keys seeded by Step 5 (from pack + chosen weapon/armor)
+  equipmentItems?: string[]
+
+  // ✅ Inventory items that get written to DB on final save (jsonb)
+  inventoryItems?: Array<{
+    id: string
+    key?: string | null
+    name: string
+    qty: number
+    category?: 'weapon' | 'armor' | 'shield' | 'gear' | 'consumable' | 'treasure' | 'misc'
+  }>
 
   // Spells
   knownSpells?: string[]

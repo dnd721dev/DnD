@@ -50,7 +50,7 @@ export default function EditProfilePage() {
         .from('profiles')
         .select('*')
         .eq('wallet_address', address.toLowerCase())
-        .maybeSingle<ProfileRow>()
+        .limit(1).maybeSingle<ProfileRow>()
 
       if (error) {
         console.error(error)

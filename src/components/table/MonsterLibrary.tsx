@@ -163,7 +163,7 @@ export default function MonsterLibrary({
       .select(
         'id, owner_wallet, name, cr, size, type, armor_class, hit_points, token_image_url, tags'
       )
-      .single()
+      .limit(1).maybeSingle()
 
     if (error) {
       console.error('Create monster error', error)

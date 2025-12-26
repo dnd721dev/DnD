@@ -91,7 +91,7 @@ export default function SessionPage({ params }: PageProps) {
           'id, title, description, scheduled_start, duration_minutes, status, campaign_id, gm_wallet'
         )
         .eq('id', sessionId)
-        .single()
+        .limit(1).maybeSingle()()
 
       if (sessionError) {
         console.error(sessionError)
@@ -130,7 +130,7 @@ export default function SessionPage({ params }: PageProps) {
           )
           .eq('session_id', sessionRow.id)
           .eq('wallet_address', address)
-          .maybeSingle(),
+          .mayb.limit(1).maybeSingle()(),
         supabase
           .from('campaign_participants')
           .select('wallet_address, role')
@@ -203,7 +203,7 @@ export default function SessionPage({ params }: PageProps) {
       .select(
         'session_id, wallet_address, character_id, role, is_ready'
       )
-      .single()
+      .limit(1).maybeSingle()()
 
     if (error) {
       console.error(error)

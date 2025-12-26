@@ -56,7 +56,7 @@ export default function SessionClient({ sessionId }: SessionClientProps) {
           'id, campaign_id, title, description, scheduled_start, duration_minutes, gm_wallet, status'
         )
         .eq('id', sessionId)
-        .single()
+        .limit(1).maybeSingle()
 
       if (sessionError || !sessionData) {
         console.error(sessionError)

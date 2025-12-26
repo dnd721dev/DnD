@@ -60,7 +60,7 @@ export default function SessionsClient({ campaignId }: Props) {
             .from('campaigns')
             .select('id, title, gm_wallet')
             .eq('id', campaignId)
-            .single(),
+            .limit(1).maybeSingle(),
           supabase
             .from('sessions')
             .select(
@@ -125,7 +125,7 @@ export default function SessionsClient({ campaignId }: Props) {
       .select(
         'id, title, description, scheduled_start, duration_minutes, status'
       )
-      .single()
+      .limit(1).maybeSingle()
 
     if (error) {
       console.error(error)

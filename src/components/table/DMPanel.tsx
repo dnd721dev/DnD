@@ -16,11 +16,9 @@ type DMPanelProps = {
 /**
  * DMPanel
  *
- * This is now a *pure GM tools* panel:
+ * Pure GM tools panel:
  * - Quick GM rolls (d20, advantage, disadvantage, damage dice)
  * - Round tracker + notes
- *
- * All monster listing / spawning is handled ONLY by <MonsterLibrary />.
  */
 export default function DMPanel({ encounterId, onRoll }: DMPanelProps) {
   const [round, setRound] = useState(1)
@@ -31,7 +29,7 @@ export default function DMPanel({ encounterId, onRoll }: DMPanelProps) {
     return Math.floor(Math.random() * sides) + 1
   }
 
-  function handleSingleRoll(label: string, formula: string, sides: number) {
+  function handleQuickRoll(label: string, formula: string, sides: number) {
     const result = rollDie(sides)
     onRoll({ label, formula, result })
   }
@@ -59,7 +57,7 @@ export default function DMPanel({ encounterId, onRoll }: DMPanelProps) {
   }
 
   function handleCustomRoll(formula: string) {
-    // VERY simple parser, just supports "XdY" (e.g. 2d6, 3d8)
+    // VERY simple parser, supports "XdY" (e.g. 2d6, 3d8)
     const match = formula.toLowerCase().match(/^(\d+)d(\d+)$/)
     if (!match) {
       alert('Use format like "2d6" or "3d8".')
@@ -69,7 +67,7 @@ export default function DMPanel({ encounterId, onRoll }: DMPanelProps) {
     const count = parseInt(match[1], 10)
     const sides = parseInt(match[2], 10)
 
-    if (!Number.isFinite(count) || !Number.isFinite(sides)) return
+    if (!Number.isFinite(count) || !Number.isFinite(sides) || count <= 0 || sides <= 0) return
 
     let total = 0
     for (let i = 0; i < count; i += 1) {
@@ -99,9 +97,7 @@ export default function DMPanel({ encounterId, onRoll }: DMPanelProps) {
       {/* Round tracker */}
       <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-2">
         <div className="mb-2 flex items-center justify-between">
-          <span className="text-xs font-semibold text-slate-100">
-            Round Tracker
-          </span>
+          <span className="text-xs font-semibold text-slate-100">Round Tracker</span>
           <div className="flex items-center gap-1">
             <button
               type="button"
@@ -110,9 +106,7 @@ export default function DMPanel({ encounterId, onRoll }: DMPanelProps) {
             >
               -
             </button>
-            <span className="min-w-[2rem] text-center text-sm font-bold">
-              {round}
-            </span>
+            <span className="min-w-[2rem] text-center text-sm font-bold">{round}</span>
             <button
               type="button"
               onClick={() => setRound(r => r + 1)}
@@ -129,13 +123,12 @@ export default function DMPanel({ encounterId, onRoll }: DMPanelProps) {
 
       {/* Quick GM rolls */}
       <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-2">
-        <p className="mb-2 text-xs font-semibold text-slate-100">
-          Quick GM Rolls
-        </p>
+        <p className="mb-2 text-xs font-semibold text-slate-100">Quick GM Rolls</p>
+
         <div className="mb-2 flex flex-wrap gap-1.5">
           <button
             type="button"
-            onClick={() => handleSingleRoll('GM d20', '1d20', 20)}
+            onClick={() => handleQuickRoll('GM d20', '1d20', 20)}
             className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:border-sky-500"
           >
             d20
@@ -156,50 +149,47 @@ export default function DMPanel({ encounterId, onRoll }: DMPanelProps) {
           </button>
           <button
             type="button"
-            onClick={() => handleSingleRoll('GM d12', '1d12', 12)}
+            onClick={() => handleQuickRoll('GM d12', '1d12', 12)}
             className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:border-sky-500"
           >
             d12
           </button>
           <button
             type="button"
-            onClick={() => handleSingleRoll('GM d10', '1d10', 10)}
+            onClick={() => handleQuickRoll('GM d10', '1d10', 10)}
             className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:border-sky-500"
           >
             d10
           </button>
           <button
             type="button"
-            onClick={() => handleSingleRoll('GM d8', '1d8', 8)}
+            onClick={() => handleQuickRoll('GM d8', '1d8', 8)}
             className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:border-sky-500"
           >
             d8
           </button>
           <button
             type="button"
-            onClick={() => handleSingleRoll('GM d6', '1d6', 6)}
+            onClick={() => handleQuickRoll('GM d6', '1d6', 6)}
             className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:border-sky-500"
           >
             d6
           </button>
           <button
             type="button"
-            onClick={() => handleSingleRoll('GM d4', '1d4', 4)}
+            onClick={() => handleQuickRoll('GM d4', '1d4', 4)}
             className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] hover:border-sky-500"
           >
             d4
           </button>
         </div>
 
-        {/* Simple custom roller */}
         <CustomRollInput onRoll={handleCustomRoll} />
       </section>
 
       {/* GM notes */}
       <section className="flex flex-1 flex-col rounded-lg border border-slate-800 bg-slate-900/60 p-2">
-        <p className="mb-1 text-xs font-semibold text-slate-100">
-          GM Notes (local)
-        </p>
+        <p className="mb-1 text-xs font-semibold text-slate-100">GM Notes (local)</p>
         <textarea
           value={gmNotes}
           onChange={e => setGmNotes(e.target.value)}
@@ -207,8 +197,7 @@ export default function DMPanel({ encounterId, onRoll }: DMPanelProps) {
           className="min-h-[80px] flex-1 resize-none rounded-md border border-slate-700 bg-slate-950 p-2 text-[11px] text-slate-100 outline-none focus:border-sky-500"
         />
         <p className="mt-1 text-[10px] text-slate-500">
-          These notes are only stored in your browser for now (not saved
-          to the database yet).
+          These notes are only stored in your browser for now (not saved to the database yet).
         </p>
       </section>
     </div>

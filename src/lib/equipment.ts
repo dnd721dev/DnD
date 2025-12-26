@@ -400,7 +400,7 @@ export const GEAR: Record<GearKey, GearItem> = {
     category: 'scholar',
     weight: 0,
     costGp: '0.02',
-    description: 'A single sheet of parchment suitable for writing.',
+    description: 'A.limit(1).maybeSingle() sheet of parchment suitable for writing.',
   },
   sandOrBlotter: {
     key: 'sandOrBlotter',

@@ -35,7 +35,7 @@ export default function ProfileNavButton() {
         .from('profiles')
         .select('username')
         .eq('wallet_address', address.toLowerCase())
-        .maybeSingle<ProfileRow>();
+        .limit(1).maybeSingle<ProfileRow>();
 
       if (error) {
         console.error('Failed to load profile for nav:', error);

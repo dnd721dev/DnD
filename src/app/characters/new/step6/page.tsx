@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAccount } from 'wagmi'
 import { loadDraft, saveDraft, clearDraft } from '@/lib/characterDraft'
@@ -9,14 +9,10 @@ import { RACE_LIST, getRace, type RaceKey } from '@/lib/races'
 import { proficiencyForLevel } from '@/lib/rules'
 import { supabase } from '@/lib/supabase'
 
-type Abilities = {
-  str: number
-  dex: number
-  con: number
-  int: number
-  wis: number
-  cha: number
-}
+import type { Abilities } from '../../../../types/character'
+import { WEAPONS } from '@/lib/weapons'
+import { ARMORS } from '@/lib/armor'
+import { getPack, getGear, type PackKey } from '@/lib/equipment'
 
 const DEFAULT_ABILITIES: Abilities = {
   str: 10,
@@ -38,6 +34,111 @@ const DEFAULT_BONUSES: Abilities = {
 
 function abilityMod(score: number): number {
   return Math.floor((score - 10) / 2)
+}
+
+function norm(raw: any) {
+  return String(raw ?? '').trim().toLowerCase()
+}
+
+function makeId() {
+  // browser-safe id (avoids depending on crypto in older envs)
+  return `inv_${Date.now()}_${Math.random().toString(16).slice(2)}`
+}
+
+function normalizePackKey(raw: string | null | undefined): PackKey | null {
+  const k = String(raw ?? '').trim()
+  if (!k) return null
+
+  // exact match
+  const exact = getPack(k as any)
+  if (exact) return exact.key
+
+  // allow legacy-ish keys
+  const lower = k.toLowerCase()
+  if (lower.includes('burgl')) return 'burglars'
+  if (lower.includes('diplo')) return 'diplomats'
+  if (lower.includes('dungeon')) return 'dungeoneers'
+  if (lower.includes('entertain')) return 'entertainers'
+  if (lower.includes('explorer')) return 'explorers'
+  if (lower.includes('priest')) return 'priests'
+  if (lower.includes('scholar')) return 'scholars'
+
+  return null
+}
+
+type InventoryItem = {
+  id: string
+  key?: string | null
+  name: string
+  qty: number
+  category?: 'weapon' | 'armor' | 'shield' | 'gear' | 'consumable' | 'treasure' | 'misc'
+}
+
+/**
+ * Build inventory items from:
+ * - pack contents (gear with quantities)
+ * - chosen weapon (qty 1)
+ * - chosen armor (qty 1)
+ *
+ * NOTE: shield is handled by inventory presence; we’re not adding a shield toggle in Step 5 yet.
+ */
+function buildInventoryFromDraft(draft: CharacterDraft): InventoryItem[] {
+  const counts = new Map<string, { name: string; category: InventoryItem['category']; qty: number }>()
+
+  // pack => gear (skips placeholder keys because getGear will return undefined)
+  const packKey = normalizePackKey(draft.packKey ?? null)
+  if (packKey) {
+    const pack = getPack(packKey)
+    if (pack?.items?.length) {
+      for (const it of pack.items) {
+        const q = Number(it.quantity ?? 0)
+        if (q <= 0) continue
+        const gear = getGear(it.item as any)
+        if (!gear) continue
+
+        const key = String(gear.key)
+        const prev = counts.get(key)
+        if (prev) prev.qty += q
+        else counts.set(key, { name: gear.name, category: 'gear', qty: q })
+      }
+    }
+  }
+
+  // weapon
+  const wKey = norm(draft.mainWeaponKey ?? '')
+  const w = (WEAPONS as any)[wKey]
+  if (w && w.key) {
+    const key = String(w.key)
+    const prev = counts.get(key)
+    if (prev) prev.qty += 1
+    else counts.set(key, { name: w.name ?? key, category: 'weapon', qty: 1 })
+  }
+
+  // armor (exclude shield category if it ever exists in ARMORS)
+  const aKey = norm(draft.armorKey ?? '')
+  const a = (ARMORS as any)[aKey]
+  if (a && a.key && a.category !== 'shield') {
+    const key = String(a.key)
+    const prev = counts.get(key)
+    if (prev) prev.qty += 1
+    else counts.set(key, { name: a.name ?? key, category: 'armor', qty: 1 })
+  }
+
+  // convert map => array
+  const out: InventoryItem[] = []
+  for (const [key, v] of counts.entries()) {
+    out.push({
+      id: makeId(),
+      key,
+      name: v.name,
+      qty: v.qty,
+      category: v.category ?? 'misc',
+    })
+  }
+
+  // sort nice for UI
+  out.sort((a, b) => (a.category ?? '').localeCompare(b.category ?? '') || a.name.localeCompare(b.name))
+  return out
 }
 
 export default function NewCharacterStep6Page() {
@@ -62,8 +163,7 @@ export default function NewCharacterStep6Page() {
       ...DEFAULT_BONUSES,
       ...(existing.abilityBonuses ?? {}),
     }
-    const proficiencyBonus =
-      existing.proficiencyBonus ?? proficiencyForLevel(level)
+    const proficiencyBonus = existing.proficiencyBonus ?? proficiencyForLevel(level)
 
     const merged: CharacterDraft = {
       ...existing,
@@ -77,6 +177,12 @@ export default function NewCharacterStep6Page() {
       flaws: existing.flaws ?? '',
       notes: existing.notes ?? '',
     }
+
+    // If Step 5 seeded equipmentItems, keep it
+    merged.equipmentItems = Array.isArray(existing.equipmentItems) ? existing.equipmentItems : merged.equipmentItems
+
+    // Pre-build inventory for consistency
+    merged.inventoryItems = buildInventoryFromDraft(merged)
 
     setDraft(merged)
     saveDraft(merged)
@@ -93,10 +199,11 @@ export default function NewCharacterStep6Page() {
           proficiencyBonus: proficiencyForLevel(1),
         }
 
-      const next: CharacterDraft = {
-        ...current,
-        ...update,
-      }
+      const next: CharacterDraft = { ...current, ...update }
+
+      // Keep inventory synced (cheap + prevents surprises)
+      next.inventoryItems = buildInventoryFromDraft(next)
+
       saveDraft(next)
       return next
     })
@@ -163,48 +270,60 @@ export default function NewCharacterStep6Page() {
       setError(null)
 
       const level = draft.level ?? 1
-      const proficiencyBonus =
-        draft.proficiencyBonus ?? proficiencyForLevel(level)
+      const proficiencyBonus = draft.proficiencyBonus ?? proficiencyForLevel(level)
 
       const raceKey = (draft.raceKey as RaceKey) ?? (RACE_LIST[0]?.key as RaceKey)
-      const race = getRace(raceKey)
 
-      // ✅ Store a FLAT abilities object in the DB
-      const abilitiesPayload: Abilities =
-        finalAbilities ??
-        (draft.baseAbilities as Abilities | null) ??
-        DEFAULT_ABILITIES
+      // store FLAT abilities object
+      const abilitiesPayload: Abilities = finalAbilities ?? (draft.baseAbilities as Abilities | null) ?? DEFAULT_ABILITIES
+
+      const inventory_items = buildInventoryFromDraft(draft)
+
+      // If you later add shield selection, this is where we’ll write equipment_items = ['shield']
+      const equipment_items: string[] | null = null
 
       const payload: Record<string, any> = {
         // identity
         wallet_address: address,
-        name: draft.name,
+        name: draft.name.trim(),
         level,
-        class_key: draft.classKey ?? 'fighter',
-        subclass_key: draft.subclassKey ?? null,
-        race_key: raceKey,
-        background_key: draft.backgroundKey ?? 'soldier',
+        race: raceKey ?? null,
+
+        // class/background (keep your current naming)
+        main_job: draft.classKey ?? 'fighter',
+        subclass: draft.subclassKey ?? null,
+        background: draft.backgroundKey ?? 'soldier',
         alignment: draft.alignment ?? null,
 
         // core stats
-        proficiency_bonus: proficiencyBonus,
+        proficiency: proficiencyBonus,
         abilities: abilitiesPayload,
-        saving_throws: draft.savingThrows ?? {},
+        saving_throw_profs: draft.savingThrows
+          ? Object.entries(draft.savingThrows)
+              .filter(([, v]) => !!v)
+              .map(([k]) => k)
+          : [],
         skill_proficiencies: draft.skillProficiencies ?? {},
         passive_perception: passivePerception,
 
         // combat-ish fields
         hp: draft.maxHp ?? 0,
-        armor_class: draft.armorClass ?? 10,
+        hit_points_current: draft.currentHp ?? null,
+        hit_points_max: draft.maxHp ?? null,
+        ac: draft.armorClass ?? 10,
 
-        // equipment
+        // equipment keys (used by sheet + calc)
         main_weapon_key: draft.mainWeaponKey ?? null,
         armor_key: draft.armorKey ?? null,
         equipment_pack: draft.packKey ?? null,
+        equipment_items,
+
+        // ✅ inventory (used by EquipmentPanel for ownership-enforced dropdowns)
+        inventory_items,
 
         // spells
-        known_spells: draft.knownSpells ?? [],
-        prepared_spells: draft.preparedSpells ?? [],
+        spells_known: draft.knownSpells ?? [],
+        spells_prepared: draft.preparedSpells ?? [],
 
         // NFT
         nft_contract: draft.nft_contract ?? null,
@@ -219,11 +338,7 @@ export default function NewCharacterStep6Page() {
         notes: draft.notes ?? '',
       }
 
-      const { data, error: insertError } = await supabase
-        .from('characters')
-        .insert(payload)
-        .select()
-        .single()
+      const { data, error: insertError } = await supabase.from('characters').insert(payload).select().limit(1).maybeSingle()
 
       if (insertError) {
         console.error(insertError)
@@ -235,11 +350,8 @@ export default function NewCharacterStep6Page() {
       clearDraft()
       setSaving(false)
 
-      if (data?.id) {
-        router.push(`/characters/${data.id}`)
-      } else {
-        router.push('/characters')
-      }
+      if (data?.id) router.push(`/characters/${data.id}`)
+      else router.push('/characters')
     } catch (err: any) {
       console.error(err)
       setError(err?.message || 'Unexpected error saving character.')
@@ -248,103 +360,73 @@ export default function NewCharacterStep6Page() {
   }
 
   if (!ready || !draft) {
-    return (
-      <div className="text-sm text-slate-300">
-        Loading final step…
-      </div>
-    )
+    return <div className="text-sm text-slate-300">Loading final step…</div>
   }
 
   return (
     <div className="space-y-6">
-      {/* Step header */}
       <div className="space-y-1">
-        <h2 className="text-lg md:text-xl font-semibold text-white">
-          Step 6 — Personality & Final Save
-        </h2>
+        <h2 className="text-lg md:text-xl font-semibold text-white">Step 6 — Personality & Final Save</h2>
         <p className="text-xs md:text-sm text-slate-400">
-          Lock in who your character is, then save them to your DND721 roster on-chain-linked via your wallet.
+          Lock in who your character is, then save them to your DND721 roster.
         </p>
       </div>
 
-      {/* Personality grid */}
+      <div className="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-300">
+        Inventory to save: <span className="font-semibold">{draft.inventoryItems?.length ?? 0}</span> items
+        <span className="text-slate-500"> (from your pack + chosen weapon/armor)</span>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Left column */}
         <div className="space-y-3 text-xs">
-          {/* Personality Traits */}
           <div className="space-y-1">
-            <label className="font-semibold text-slate-300">
-              Personality Traits
-            </label>
+            <label className="font-semibold text-slate-300">Personality Traits</label>
             <textarea
               rows={4}
               className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
               value={draft.personalityTraits ?? ''}
-              onChange={(e) =>
-                updateDraft({ personalityTraits: e.target.value })
-              }
+              onChange={(e) => updateDraft({ personalityTraits: e.target.value })}
             />
-            <p className="text-[11px] text-slate-500">
-              Little quirks, habits, and behaviors that define how they act.
-            </p>
+            <p className="text-[11px] text-slate-500">Little quirks, habits, and behaviors that define how they act.</p>
           </div>
 
-          {/* Ideals */}
           <div className="space-y-1">
-            <label className="font-semibold text-slate-300">
-              Ideals
-            </label>
+            <label className="font-semibold text-slate-300">Ideals</label>
             <textarea
               rows={3}
               className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
               value={draft.ideals ?? ''}
               onChange={(e) => updateDraft({ ideals: e.target.value })}
             />
-            <p className="text-[11px] text-slate-500">
-              What they believe in, fight for, or will never compromise on.
-            </p>
+            <p className="text-[11px] text-slate-500">What they believe in, fight for, or will never compromise on.</p>
           </div>
 
-          {/* Bonds */}
           <div className="space-y-1">
-            <label className="font-semibold text-slate-300">
-              Bonds
-            </label>
+            <label className="font-semibold text-slate-300">Bonds</label>
             <textarea
               rows={3}
               className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
               value={draft.bonds ?? ''}
               onChange={(e) => updateDraft({ bonds: e.target.value })}
             />
-            <p className="text-[11px] text-slate-500">
-              People, places, or oaths they’re tied to.
-            </p>
+            <p className="text-[11px] text-slate-500">People, places, or oaths they’re tied to.</p>
           </div>
 
-          {/* Flaws */}
           <div className="space-y-1">
-            <label className="font-semibold text-slate-300">
-              Flaws
-            </label>
+            <label className="font-semibold text-slate-300">Flaws</label>
             <textarea
               rows={3}
               className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
               value={draft.flaws ?? ''}
               onChange={(e) => updateDraft({ flaws: e.target.value })}
             />
-            <p className="text-[11px] text-slate-500">
-              The cracks in their armor that make them interesting.
-            </p>
+            <p className="text-[11px] text-slate-500">The cracks in their armor that make them interesting.</p>
           </div>
         </div>
 
-        {/* Right column */}
         <div className="space-y-3 text-xs">
-          {/* Notes */}
           <div className="space-y-1 h-full">
-            <label className="font-semibold text-slate-300">
-              Notes
-            </label>
+            <label className="font-semibold text-slate-300">Notes</label>
             <textarea
               rows={18}
               className="w-full h-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
@@ -358,14 +440,10 @@ export default function NewCharacterStep6Page() {
         </div>
       </div>
 
-      {/* Error bar */}
       {error && (
-        <div className="rounded-md border border-red-500 bg-red-900/50 px-3 py-2 text-xs text-red-100">
-          {error}
-        </div>
+        <div className="rounded-md border border-red-500 bg-red-900/50 px-3 py-2 text-xs text-red-100">{error}</div>
       )}
 
-      {/* Footer nav */}
       <div className="flex justify-between items-center pt-4 border-t border-slate-800 mt-4">
         <button
           type="button"

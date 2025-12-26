@@ -550,7 +550,7 @@ export const SUBCLASS_FEATURES: SubclassFeaturesMap = {
   },
   warlock_hexblade: {
     1: [
-      'Hexblade’s Curse — you focus a supernatural curse on a single foe to strike them harder (see official rules).',
+      'Hexblade’s Curse — you focus a supernatural curse on a.limit(1).maybeSingle() foe to strike them harder (see official rules).',
       'Hex Warrior — you gain martial and magical benefits when fighting with favored weapons (see official rules).',
     ],
   },

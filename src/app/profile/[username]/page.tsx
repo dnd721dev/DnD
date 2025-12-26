@@ -50,7 +50,7 @@ export default function PublicProfilePage() {
         .from('profiles')
         .select('*')
         .eq('username', username)
-        .maybeSingle<ProfileRow>()
+        .limit(1).maybeSingle<ProfileRow>()
 
       if (error) {
         console.error('Profile load error:', error)

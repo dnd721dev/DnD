@@ -211,7 +211,7 @@ export function abilityScoreToModifier(score: number): number {
 }
 
 /**
- * Compute a single skill modifier, given:
+ * Compute a.limit(1).maybeSingle() skill modifier, given:
  * - the skill key
  * - a map of ability scores
  * - proficiency bonus

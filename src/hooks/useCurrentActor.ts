@@ -11,7 +11,7 @@ export function useCurrentActor(encounterId: string) {
   useEffect(() => {
     const load = async () => {
       const { data: state } = await supabase.from('encounter_state')
-        .select('turn_index, combat_active').eq('encounter_id', encounterId).maybeSingle();
+        .select('turn_index, combat_active').eq('encounter_id', encounterId).limit(1).maybeSingle();
 
       const { data: rows } = await supabase.from('encounter_initiative')
         .select('id, token_id, init_value, sort_order').eq('encounter_id', encounterId);
