@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, type ChangeEvent } from 'react'
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
 import { useAccount } from 'wagmi'
 import { supabase } from '@/lib/supabase'
 import GMSidebar from '@/components/table/GMSidebar'
@@ -14,7 +14,6 @@ import { MapSection } from '@/components/table/tableclient/components/MapSection
 import { GMQuickRolls } from '@/components/table/tableclient/components/GMQuickRolls'
 import { useSessionWithCampaign } from '@/components/table/tableclient/hooks/useSessionWithCampaign'
 import { useEncounter } from '@/components/table/tableclient/hooks/useEncounter'
-import { useSessionCharacters } from '@/components/table/tableclient/hooks/useSessionCharacters'
 import { useSessionRolls } from '@/components/table/tableclient/hooks/useSessionRolls'
 import { useMonsterPanel } from '@/components/table/tableclient/hooks/useMonsterPanel'
 import {
@@ -30,6 +29,18 @@ interface TableClientProps {
   sessionId: string
 }
 
+type CharacterRow = {
+  id: string
+  name: string
+  level: number | null
+  class_key: string | null
+  race_key: string | null
+  abilities?: any
+  hit_points_max?: number | null
+  hp?: number | null
+  ac?: number | null
+}
+
 export default function TableClient({ sessionId }: TableClientProps) {
   const { address } = useAccount()
 
@@ -40,16 +51,6 @@ export default function TableClient({ sessionId }: TableClientProps) {
   // Session + encounter
   const { session, setSession, loading, error } = useSessionWithCampaign(sessionId)
   const { encounterId, encounterLoading, encounterError } = useEncounter(session)
-
-  // Player characters
-  const {
-    characters,
-    selectedCharacter,
-    setSelectedCharacter,
-    charsLoading,
-    charsError,
-    setCharsError,
-  } = useSessionCharacters({ address, sessionId, hasMounted })
 
   // Dice log
   const { diceLog, showDiceLog, setShowDiceLog, pushRollLocal } = useSessionRolls({
@@ -62,6 +63,12 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
   // Per-token combat conditions (GM only, local state)
   const [tokenConditions, setTokenConditions] = useState<Record<string, string[]>>({})
+
+  // ✅ Campaign Character state (locked)
+  const [characters, setCharacters] = useState<CharacterRow[]>([])
+  const [selectedCharacter, setSelectedCharacter] = useState<CharacterRow | null>(null)
+  const [charsLoading, setCharsLoading] = useState(false)
+  const [charsError, setCharsError] = useState<string | null>(null)
 
   // ---------- Early render states ----------
 
@@ -96,6 +103,171 @@ export default function TableClient({ sessionId }: TableClientProps) {
   const campaignMeta = session.campaigns?.[0]
   const roomName = campaignMeta?.livekit_room_name || `session-${session.id}`
   const mapUrl = session.map_image_url || ''
+
+  const campaignId = session.campaign_id ?? null
+
+  // ✅ Load characters + campaign selection ONCE per campaignId/address (players only)
+  useEffect(() => {
+    if (!hasMounted) return
+    if (!campaignId) return
+
+    // GM can run without a character
+    if (isGm) {
+      setCharsError(null)
+      setCharsLoading(false)
+      setCharacters([])
+      setSelectedCharacter(null)
+      return
+    }
+
+    if (!address) {
+      setCharsError('Connect your wallet to load your campaign character.')
+      setCharsLoading(false)
+      setCharacters([])
+      setSelectedCharacter(null)
+      return
+    }
+
+    const load = async () => {
+      setCharsLoading(true)
+      setCharsError(null)
+
+      // 1) Load all characters for this wallet (so sidebar can still show info)
+      const charsRes = await supabase
+        .from('characters')
+        .select('id, name, level, class_key, race_key, abilities, hit_points_max, hp, ac')
+        .eq('wallet_address', address)
+        .order('created_at', { ascending: true })
+
+      if (charsRes.error) {
+        console.error('characters load error', charsRes.error)
+        setCharsError(charsRes.error.message)
+        setCharsLoading(false)
+        return
+      }
+
+      const chars = (charsRes.data as any as CharacterRow[]) ?? []
+      setCharacters(chars)
+
+      // 2) Load Campaign Character selection
+      const selRes = await supabase
+        .from('campaign_character_selections')
+        .select('character_id')
+        .eq('campaign_id', campaignId)
+        .eq('wallet_address', address)
+        .limit(1)
+        .maybeSingle()
+
+      if (selRes.error) {
+        console.error('campaign_character_selections error', selRes.error)
+        setCharsError(selRes.error.message)
+        setSelectedCharacter(null)
+        setCharsLoading(false)
+        return
+      }
+
+      const selectedId = (selRes.data as any)?.character_id ?? null
+      if (!selectedId) {
+        setCharsError('No Campaign Character selected. Go to the campaign page and select one.')
+        setSelectedCharacter(null)
+        setCharsLoading(false)
+        return
+      }
+
+      const found = chars.find((c) => c.id === selectedId) ?? null
+      if (!found) {
+        setCharsError('Your selected Campaign Character was not found in your characters list.')
+        setSelectedCharacter(null)
+        setCharsLoading(false)
+        return
+      }
+
+      setSelectedCharacter(found)
+      setCharsLoading(false)
+    }
+
+    void load()
+  }, [hasMounted, campaignId, address, isGm])
+
+  // ✅ Ensure session_players row matches campaign character (players only)
+  useEffect(() => {
+    if (!session?.id) return
+    if (!campaignId) return
+    if (!address) return
+    if (isGm) return
+    if (!selectedCharacter?.id) return
+
+    const ensure = async () => {
+      const { error } = await supabase
+        .from('session_players')
+        .upsert(
+          {
+            session_id: session.id,
+            wallet_address: address,
+            character_id: selectedCharacter.id,
+            role: 'player',
+            is_ready: false,
+          },
+          { onConflict: 'session_id,wallet_address' }
+        )
+
+      if (error) console.error('session_players upsert error', error)
+    }
+
+    void ensure()
+  }, [session?.id, campaignId, address, isGm, selectedCharacter?.id])
+
+  // ✅ Ensure PC token exists for this wallet (players only)
+  useEffect(() => {
+    if (!encounterId) return
+    if (!address) return
+    if (isGm) return
+    if (!selectedCharacter) return
+
+    const ensurePcToken = async () => {
+      try {
+        const { data: existing, error: existingError } = await supabase
+          .from('tokens')
+          .select('id')
+          .eq('encounter_id', encounterId)
+          .eq('type', 'pc')
+          .eq('owner_wallet', address)
+          .limit(1)
+          .maybeSingle()
+
+        if (existingError && (existingError as any).code !== 'PGRST116') {
+          console.error('tokens existing pc error', existingError)
+        }
+
+        if (!existing) {
+          const hp = getCharacterMaxHP(selectedCharacter)
+          const ac = getCharacterAC(selectedCharacter)
+
+          const { error: insertError } = await supabase.from('tokens').insert({
+            encounter_id: encounterId,
+            type: 'pc',
+            label: selectedCharacter.name || 'PC',
+            x: 100,
+            y: 100,
+            owner_wallet: address,
+            hp,
+            current_hp: hp,
+            ac,
+          })
+
+          if (insertError) {
+            console.error('Failed to create PC token', insertError)
+          } else if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('dnd721-tokens-updated', { detail: { source: 'campaign-char' } }))
+          }
+        }
+      } catch (err) {
+        console.error('Error ensuring PC token', err)
+      }
+    }
+
+    void ensurePcToken()
+  }, [encounterId, address, isGm, selectedCharacter])
 
   // ---------- Dice persistence ----------
 
@@ -135,7 +307,8 @@ export default function TableClient({ sessionId }: TableClientProps) {
           roller_name
         `
         )
-        .limit(1).maybeSingle()
+        .limit(1)
+        .maybeSingle()
 
       if (error) {
         console.error('session_rolls insert error', error)
@@ -211,6 +384,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
   }
 
   async function handleAbilityCheck(abilityKey: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha', label: string) {
+    if (!selectedCharacter) return
     const score = getAbilityScore(selectedCharacter, abilityKey)
     const mod = abilityMod(score)
     const d20 = Math.floor(Math.random() * 20) + 1
@@ -244,6 +418,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
   }
 
   async function handleInitiative() {
+    if (!selectedCharacter) return
     const dexScore = getAbilityScore(selectedCharacter, 'dex')
     const mod = abilityMod(dexScore)
     const d20 = Math.floor(Math.random() * 20) + 1
@@ -262,7 +437,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
       rollerName,
     })
 
-    // Also upsert into initiative_entries for this encounter
+    // Upsert initiative for this encounter
     if (encounterId && address) {
       const { error } = await supabase
         .from('initiative_entries')
@@ -280,9 +455,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
           { onConflict: 'encounter_id,wallet_address' }
         )
 
-      if (error) {
-        console.error('initiative_entries upsert error', error)
-      }
+      if (error) console.error('initiative_entries upsert error', error)
     }
 
     const entry: DiceEntry = {
@@ -296,85 +469,6 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
     pushRollLocal(entry)
     setShowDiceLog(true)
-  }
-
-  // ---------- Character selection (players) ----------
-
-  async function handleSelectCharacter(characterId: string) {
-    if (!address || !session) {
-      setCharsError('Connect your wallet to select a character.')
-      return
-    }
-
-    setCharsError(null)
-
-    // ✅ FIX: avoid `.limit(1).maybeSingle()()` throwing "Cannot coerce..."
-    const { data, error } = await supabase
-      .from('session_characters')
-      .upsert(
-        {
-          session_id: session.id,
-          wallet_address: address,
-          character_id: characterId,
-          is_active: true,
-        },
-        { onConflict: 'session_id,wallet_address' }
-      )
-      .select('character_id')
-      .limit(1)
-      .limit(1).maybeSingle()
-
-    if (error) {
-      console.error('session_characters upsert error', error)
-      setCharsError(error.message)
-      return
-    }
-
-    const updatedId = (data as any)?.character_id ?? characterId
-    const found = characters.find(c => c.id === updatedId) ?? null
-    setSelectedCharacter(found)
-
-    // Ensure a PC token exists on the map for this wallet+character
-    if (encounterId && address && found) {
-      try {
-        const { data: existing, error: existingError } = await supabase
-          .from('tokens')
-          .select('id')
-          .eq('encounter_id', encounterId)
-          .eq('type', 'pc')
-          .eq('owner_wallet', address)
-          .limit(1).maybeSingle()
-
-        if (existingError && (existingError as any).code !== 'PGRST116') {
-          console.error('tokens existing pc error', existingError)
-        }
-
-        if (!existing) {
-          const hp = getCharacterMaxHP(found)
-          const ac = getCharacterAC(found)
-
-          const { error: insertError } = await supabase.from('tokens').insert({
-            encounter_id: encounterId,
-            type: 'pc',
-            label: found.name || 'PC',
-            x: 100,
-            y: 100,
-            owner_wallet: address,
-            hp,
-            current_hp: hp,
-            ac,
-          })
-
-          if (insertError) {
-            console.error('Failed to create PC token', insertError)
-          } else if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('dnd721-tokens-updated', { detail: { source: 'pc-selection' } }))
-          }
-        }
-      } catch (err) {
-        console.error('Error ensuring PC token', err)
-      }
-    }
   }
 
   // ---------- Map upload (GM only) ----------
@@ -412,7 +506,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
       return
     }
 
-    setSession(prev => (prev ? { ...prev, map_image_url: publicUrl } : prev))
+    setSession((prev) => (prev ? { ...prev, map_image_url: publicUrl } : prev))
     alert('Map updated successfully!')
   }
 
@@ -484,7 +578,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
       address={address}
       roomName={roomName}
       showDiceLog={showDiceLog}
-      onToggleDiceLog={() => setShowDiceLog(v => !v)}
+      onToggleDiceLog={() => setShowDiceLog((v) => !v)}
     />
   )
 
@@ -529,12 +623,12 @@ export default function TableClient({ sessionId }: TableClientProps) {
                 token={openMonsterToken}
                 monster={openMonsterData}
                 conditions={tokenConditions[String(openMonsterToken.id)] ?? []}
-                onToggleCondition={condition => {
+                onToggleCondition={(condition) => {
                   const key = String(openMonsterToken.id)
-                  setTokenConditions(prev => {
+                  setTokenConditions((prev) => {
                     const existing = prev[key] ?? []
                     const has = existing.includes(condition)
-                    const next = has ? existing.filter(c => c !== condition) : [...existing, condition]
+                    const next = has ? existing.filter((c) => c !== condition) : [...existing, condition]
                     return { ...prev, [key]: next }
                   })
                 }}
@@ -553,6 +647,23 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
   // ---------- Player layout ----------
 
+  // 🔒 If player hasn’t selected a Campaign Character, block the table
+  if (!address) {
+    return <div className="p-4 text-sm text-yellow-300">Connect your wallet to join the table.</div>
+  }
+
+  if (charsLoading) {
+    return <div className="p-4 text-sm text-slate-400">Loading your campaign character…</div>
+  }
+
+  if (charsError || !selectedCharacter) {
+    return (
+      <div className="p-4 text-sm text-red-300">
+        {charsError ?? 'No Campaign Character selected. Go to the campaign page and pick one.'}
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-[calc(100vh-2rem)] flex-col gap-2 p-2 sm:p-4">
       {topBar}
@@ -563,21 +674,16 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
           <PlayerSidebar
             address={address ?? null}
+            // keep list, but selection is locked by us
             characters={characters}
             selectedCharacter={selectedCharacter}
             selectedCharacterId={selectedCharacter?.id ?? null}
-            charsError={charsError}
-            charsLoading={charsLoading}
-            onSelectCharacter={id => {
-              if (!id) {
-                setSelectedCharacter(null)
-                if (address) {
-                  const key = `table_selected_char_${sessionId}_${address.toLowerCase()}`
-                  window.localStorage.removeItem(key)
-                }
-                return
-              }
-              void handleSelectCharacter(id)
+            charsError={null}
+            charsLoading={false}
+            onSelectCharacter={() => {
+              // 🔒 locked on purpose
+              setCharsError('Character is locked to your Campaign Character. Change it on the campaign page.')
+              setTimeout(() => setCharsError(null), 1800)
             }}
             onAbilityCheck={handleAbilityCheck}
             onInitiative={handleInitiative}

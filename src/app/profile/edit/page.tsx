@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, FormEvent } from 'react'
-import { useAccount } from 'wagmi'
+import { useAccount, useSignMessage } from 'wagmi'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -20,6 +20,7 @@ type ProfileRow = {
 
 export default function EditProfilePage() {
   const { address, isConnected } = useAccount()
+  const { signMessageAsync } = useSignMessage()
   const router = useRouter()
 
   const [loading, setLoading] = useState(true)
@@ -50,7 +51,8 @@ export default function EditProfilePage() {
         .from('profiles')
         .select('*')
         .eq('wallet_address', address.toLowerCase())
-        .limit(1).maybeSingle<ProfileRow>()
+        .limit(1)
+        .maybeSingle<ProfileRow>()
 
       if (error) {
         console.error(error)
@@ -77,7 +79,9 @@ export default function EditProfilePage() {
     e.preventDefault()
     if (!address) return
 
-    if (!username.trim()) {
+    const cleanUsername = username.trim()
+
+    if (!cleanUsername) {
       setError('Username is required')
       return
     }
@@ -87,7 +91,7 @@ export default function EditProfilePage() {
 
     const payload = {
       wallet_address: address.toLowerCase(),
-      username: username.trim(),
+      username: cleanUsername,
       display_name: displayName.trim() || null,
       bio: bio.trim() || null,
       avatar_url: avatarUrl.trim() || null,
@@ -98,29 +102,43 @@ export default function EditProfilePage() {
       twitch: twitch.trim() || null,
     }
 
-    const { error: upsertError } = await supabase
-      .from('profiles')
-      .upsert(payload, { onConflict: 'wallet_address' })
+    try {
+      // Wallet signature proves ownership (since we aren't using Supabase Auth)
+      const message = `DND721 Profile Update\nWallet: ${payload.wallet_address}\nTime: ${new Date().toISOString()}`
+      const signature = await signMessageAsync({ message })
 
-    setSaving(false)
+      const res = await fetch('/api/profiles/upsert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...payload,
+          message,
+          signature,
+        }),
+      })
 
-    if (upsertError) {
-      console.error(upsertError)
-      setError(upsertError.message)
-      return
+      const body = await res.json()
+
+      setSaving(false)
+
+      if (!res.ok || !body?.ok) {
+        setError(body?.error || 'Failed to save profile')
+        return
+      }
+
+      router.push(`/profile/${encodeURIComponent(payload.username)}`)
+    } catch (err: any) {
+      console.error(err)
+      setSaving(false)
+      setError(err?.message || 'Failed to save profile')
     }
-
-    // Go to public profile page
-    router.push(`/profile/${payload.username}`)
   }
 
   if (!isConnected) {
     return (
       <div className="max-w-xl mx-auto mt-10 p-4">
         <h1 className="text-2xl font-bold mb-4">Edit Profile</h1>
-        <p className="text-sm text-gray-400">
-          Connect your wallet to create or edit your profile.
-        </p>
+        <p className="text-sm text-gray-400">Connect your wallet to create or edit your profile.</p>
       </div>
     )
   }
@@ -136,122 +154,99 @@ export default function EditProfilePage() {
   return (
     <div className="max-w-xl mx-auto mt-10 p-4">
       <h1 className="text-2xl font-bold mb-4">Edit Profile</h1>
-      {error && (
-        <p className="mb-4 text-sm text-red-400">
-          {error}
-        </p>
-      )}
+
+      {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm font-semibold mb-1">
-            Username
-          </label>
+          <label className="block text-sm font-semibold mb-1">Username</label>
           <input
             className="w-full rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-sm outline-none focus:border-indigo-500"
             placeholder="your-name"
             value={username}
-            onChange={e => setUsername(e.target.value)}
+            onChange={(e) => setUsername(e.target.value)}
           />
-          <p className="mt-1 text-xs text-gray-500">
-            This is your public handle. It must be unique.
-          </p>
+          <p className="mt-1 text-xs text-gray-500">This is your public handle. It must be unique.</p>
         </div>
 
         <div>
-          <label className="block text-sm font-semibold mb-1">
-            Display name
-          </label>
+          <label className="block text-sm font-semibold mb-1">Display name</label>
           <input
             className="w-full rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-sm outline-none focus:border-indigo-500"
             placeholder="How you want to appear"
             value={displayName}
-            onChange={e => setDisplayName(e.target.value)}
+            onChange={(e) => setDisplayName(e.target.value)}
           />
         </div>
 
         <div>
-          <label className="block text-sm font-semibold mb-1">
-            Bio
-          </label>
+          <label className="block text-sm font-semibold mb-1">Bio</label>
           <textarea
             className="w-full rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-sm outline-none focus:border-indigo-500"
             rows={4}
             placeholder="A few lines about you as a player or DM…"
             value={bio}
-            onChange={e => setBio(e.target.value)}
+            onChange={(e) => setBio(e.target.value)}
           />
         </div>
 
         <div>
-          <label className="block text-sm font-semibold mb-1">
-            Avatar URL
-          </label>
+          <label className="block text-sm font-semibold mb-1">Avatar URL</label>
           <input
             className="w-full rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-sm outline-none focus:border-indigo-500"
             placeholder="https://..."
             value={avatarUrl}
-            onChange={e => setAvatarUrl(e.target.value)}
+            onChange={(e) => setAvatarUrl(e.target.value)}
           />
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-semibold mb-1">
-              Location
-            </label>
+            <label className="block text-sm font-semibold mb-1">Location</label>
             <input
               className="w-full rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-sm outline-none focus:border-indigo-500"
               placeholder="City, Country"
               value={location}
-              onChange={e => setLocation(e.target.value)}
+              onChange={(e) => setLocation(e.target.value)}
             />
           </div>
           <div>
-            <label className="block text-sm font-semibold mb-1">
-              Timezone
-            </label>
+            <label className="block text-sm font-semibold mb-1">Timezone</label>
             <input
               className="w-full rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-sm outline-none focus:border-indigo-500"
               placeholder="e.g. EST, PST, GMT+1"
               value={timezone}
-              onChange={e => setTimezone(e.target.value)}
+              onChange={(e) => setTimezone(e.target.value)}
             />
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
-            <label className="block text-sm font-semibold mb-1">
-              Twitter / X
-            </label>
+            <label className="block text-sm font-semibold mb-1">Twitter / X</label>
             <input
               className="w-full rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-sm outline-none focus:border-indigo-500"
               placeholder="@handle"
               value={twitter}
-              onChange={e => setTwitter(e.target.value)}
+              onChange={(e) => setTwitter(e.target.value)}
             />
           </div>
           <div>
-            <label className="block text-sm font-semibold mb-1">
-              Discord
-            </label>
+            <label className="block text-sm font-semibold mb-1">Discord</label>
             <input
               className="w-full rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-sm outline-none focus:border-indigo-500"
               placeholder="username#0000"
               value={discord}
-              onChange={e => setDiscord(e.target.value)}
+              onChange={(e) => setDiscord(e.target.value)}
             />
           </div>
           <div>
-            <label className="block text-sm font-semibold mb-1">
-              Twitch
-            </label>
+            <label className="block text-sm font-semibold mb-1">Twitch</label>
             <input
               className="w-full rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-sm outline-none focus:border-indigo-500"
               placeholder="channel name"
               value={twitch}
-              onChange={e => setTwitch(e.target.value)}
+              onChange={(e) => setTwitch(e.target.value)}
             />
           </div>
         </div>

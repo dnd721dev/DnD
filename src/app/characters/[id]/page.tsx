@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { roll } from '@/lib/dice'
+import { roll, rollD20WithCrit, rollDamageWithCrit } from '@/lib/dice'
 import type { Abilities } from '../../../types/character'
 
 import type { CharacterSheetData, RollEntry } from '@/components/character-sheet/types'
@@ -21,6 +21,11 @@ import { deriveStats } from '@/components/character-sheet/calc'
 import { CombatStatsPanel } from '@/components/character-sheet/CombatStatsPanel'
 import { EquipmentPanel } from '@/components/character-sheet/EquipmentPanel'
 import { InventoryPanel } from '@/components/character-sheet/InventoryPanel'
+import { ResourcesPanel } from '@/components/character-sheet/ResourcesPanel'
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n))
+}
 
 export default function CharacterSheetPage() {
   const params = useParams<{ id: string }>()
@@ -29,13 +34,20 @@ export default function CharacterSheetPage() {
   const [c, setC] = useState<CharacterSheetData | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // ✅ Track whether last attack roll was a crit (for doubling damage dice)
+  const [lastAttackWasCrit, setLastAttackWasCrit] = useState(false)
+
+  // ✅ Resource values (persisted locally per character)
+  const [resourceValues, setResourceValues] = useState<Record<string, number>>({})
+
   useEffect(() => {
     ;(async () => {
       const { data, error } = await supabase
         .from('characters')
         .select('*')
         .eq('id', id)
-        .limit(1).maybeSingle()
+        .limit(1)
+        .maybeSingle()
 
       if (error) console.error(error)
       setC(data as any)
@@ -68,6 +80,38 @@ export default function CharacterSheetPage() {
     return deriveStats(c, abilities)
   }, [c, abilities])
 
+  // ✅ Load persisted resource values once we have derived resources
+  useEffect(() => {
+    if (!d) return
+    const key = `dnd721:char:${id}:resources`
+    try {
+      const raw = localStorage.getItem(key)
+      const saved = raw ? (JSON.parse(raw) as Record<string, number>) : {}
+      const next: Record<string, number> = {}
+
+      for (const r of d.resources ?? []) {
+        const fallback = r.current ?? r.max
+        const savedVal = typeof saved?.[r.key] === 'number' ? saved[r.key] : fallback
+        next[r.key] = clamp(savedVal, 0, r.max)
+      }
+
+      setResourceValues(next)
+    } catch {
+      const next: Record<string, number> = {}
+      for (const r of d.resources ?? []) next[r.key] = clamp(r.current ?? r.max, 0, r.max)
+      setResourceValues(next)
+    }
+  }, [d, id])
+
+  // ✅ Persist resource values
+  useEffect(() => {
+    if (!d) return
+    const key = `dnd721:char:${id}:resources`
+    try {
+      localStorage.setItem(key, JSON.stringify(resourceValues))
+    } catch {}
+  }, [resourceValues, d, id])
+
   const [rollLog, setRollLog] = useState<RollEntry[]>([])
 
   function showRoll(label: string, formula: string, result: number) {
@@ -92,14 +136,61 @@ export default function CharacterSheetPage() {
 
   function rollMainAttack() {
     if (!d) return
-    const r = roll(d.attackFormula)
-    showRoll(`Attack — ${d.weaponName ?? 'Unarmed'}`, d.attackFormula, r.total)
+
+    const critRange = (d as any).critRange ?? 20
+    const r = rollD20WithCrit(d.attackFormula, critRange)
+
+    setLastAttackWasCrit(Boolean(r.isCrit))
+
+    const label = r.isCrit
+      ? `CRIT Attack — ${d.weaponName ?? 'Unarmed'}`
+      : `Attack — ${d.weaponName ?? 'Unarmed'}`
+
+    showRoll(label, d.attackFormula, r.total)
   }
 
   function rollMainDamage() {
     if (!d) return
-    const r = roll(d.damageFormula)
-    showRoll(`Damage — ${d.weaponName ?? 'Unarmed'}`, d.damageFormula, r.total)
+
+    const r = rollDamageWithCrit(d.damageFormula, lastAttackWasCrit)
+
+    const label = lastAttackWasCrit
+      ? `CRIT Damage — ${d.weaponName ?? 'Unarmed'}`
+      : `Damage — ${d.weaponName ?? 'Unarmed'}`
+
+    showRoll(label, r.formula, r.total)
+
+    // reset after spending the crit
+    setLastAttackWasCrit(false)
+  }
+
+  function onChangeResource(key: string, next: number) {
+    if (!d) return
+    const r = d.resources.find((x) => x.key === key)
+    if (!r) return
+    setResourceValues((prev) => ({ ...prev, [key]: clamp(next, 0, r.max) }))
+  }
+
+  function onShortRest() {
+    if (!d) return
+    setResourceValues((prev) => {
+      const next = { ...prev }
+      for (const r of d.resources ?? []) {
+        if (r.recharge === 'short_rest') next[r.key] = r.max
+      }
+      return next
+    })
+  }
+
+  function onLongRest() {
+    if (!d) return
+    setResourceValues((prev) => {
+      const next = { ...prev }
+      for (const r of d.resources ?? []) {
+        if (r.recharge === 'short_rest' || r.recharge === 'long_rest') next[r.key] = r.max
+      }
+      return next
+    })
   }
 
   if (loading) {
@@ -117,6 +208,15 @@ export default function CharacterSheetPage() {
       <div className="grid gap-4 md:grid-cols-[1.4fr,2fr,1.2fr]">
         <div className="space-y-3">
           <AbilitiesPanel abilities={abilities} onRollAbilityCheck={rollAbilityCheck} />
+
+          {/* ✅ NEW: Resource buttons */}
+          <ResourcesPanel
+            resources={d.resources ?? []}
+            values={resourceValues}
+            onChange={onChangeResource}
+            onShortRest={onShortRest}
+            onLongRest={onLongRest}
+          />
 
           <CombatStatsPanel d={d} onAttack={rollMainAttack} onDamage={rollMainDamage} />
 
@@ -136,7 +236,6 @@ export default function CharacterSheetPage() {
             }}
           />
 
-          {/* ✅ NEW: Inventory system (saved to characters.inventory_items) */}
           <InventoryPanel
             c={c}
             onSaved={(patch) => {
@@ -144,12 +243,7 @@ export default function CharacterSheetPage() {
             }}
           />
 
-          <SkillsPanel
-            c={c}
-            abilities={abilities}
-            profBonus={d.profBonus}
-            passivePerception={d.passivePerception}
-          />
+          <SkillsPanel c={c} abilities={abilities} profBonus={d.profBonus} passivePerception={d.passivePerception} />
 
           <TraitsFeaturesPanel c={c} />
         </div>

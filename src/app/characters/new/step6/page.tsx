@@ -14,6 +14,9 @@ import { WEAPONS } from '@/lib/weapons'
 import { ARMORS } from '@/lib/armor'
 import { getPack, getGear, type PackKey } from '@/lib/equipment'
 
+// ✅ NEW: for HP calc
+import type { ClassKey } from '@/lib/subclasses'
+
 const DEFAULT_ABILITIES: Abilities = {
   str: 10,
   dex: 10,
@@ -41,7 +44,6 @@ function norm(raw: any) {
 }
 
 function makeId() {
-  // browser-safe id (avoids depending on crypto in older envs)
   return `inv_${Date.now()}_${Math.random().toString(16).slice(2)}`
 }
 
@@ -49,11 +51,9 @@ function normalizePackKey(raw: string | null | undefined): PackKey | null {
   const k = String(raw ?? '').trim()
   if (!k) return null
 
-  // exact match
   const exact = getPack(k as any)
   if (exact) return exact.key
 
-  // allow legacy-ish keys
   const lower = k.toLowerCase()
   if (lower.includes('burgl')) return 'burglars'
   if (lower.includes('diplo')) return 'diplomats'
@@ -74,18 +74,9 @@ type InventoryItem = {
   category?: 'weapon' | 'armor' | 'shield' | 'gear' | 'consumable' | 'treasure' | 'misc'
 }
 
-/**
- * Build inventory items from:
- * - pack contents (gear with quantities)
- * - chosen weapon (qty 1)
- * - chosen armor (qty 1)
- *
- * NOTE: shield is handled by inventory presence; we’re not adding a shield toggle in Step 5 yet.
- */
 function buildInventoryFromDraft(draft: CharacterDraft): InventoryItem[] {
   const counts = new Map<string, { name: string; category: InventoryItem['category']; qty: number }>()
 
-  // pack => gear (skips placeholder keys because getGear will return undefined)
   const packKey = normalizePackKey(draft.packKey ?? null)
   if (packKey) {
     const pack = getPack(packKey)
@@ -104,7 +95,6 @@ function buildInventoryFromDraft(draft: CharacterDraft): InventoryItem[] {
     }
   }
 
-  // weapon
   const wKey = norm(draft.mainWeaponKey ?? '')
   const w = (WEAPONS as any)[wKey]
   if (w && w.key) {
@@ -114,7 +104,6 @@ function buildInventoryFromDraft(draft: CharacterDraft): InventoryItem[] {
     else counts.set(key, { name: w.name ?? key, category: 'weapon', qty: 1 })
   }
 
-  // armor (exclude shield category if it ever exists in ARMORS)
   const aKey = norm(draft.armorKey ?? '')
   const a = (ARMORS as any)[aKey]
   if (a && a.key && a.category !== 'shield') {
@@ -124,7 +113,6 @@ function buildInventoryFromDraft(draft: CharacterDraft): InventoryItem[] {
     else counts.set(key, { name: a.name ?? key, category: 'armor', qty: 1 })
   }
 
-  // convert map => array
   const out: InventoryItem[] = []
   for (const [key, v] of counts.entries()) {
     out.push({
@@ -136,9 +124,54 @@ function buildInventoryFromDraft(draft: CharacterDraft): InventoryItem[] {
     })
   }
 
-  // sort nice for UI
   out.sort((a, b) => (a.category ?? '').localeCompare(b.category ?? '') || a.name.localeCompare(b.name))
   return out
+}
+
+// ✅ NEW: class hit die + HP calc (kept local so you can paste one file)
+function hitDieForClass(classKeyRaw: string | null | undefined): number {
+  const k = String(classKeyRaw ?? 'fighter').toLowerCase()
+  switch (k) {
+    case 'barbarian':
+      return 12
+    case 'fighter':
+    case 'paladin':
+    case 'ranger':
+      return 10
+    case 'sorcerer':
+    case 'wizard':
+      return 6
+    case 'bard':
+    case 'cleric':
+    case 'druid':
+    case 'monk':
+    case 'rogue':
+    case 'warlock':
+    case 'artificer':
+    default:
+      return 8
+  }
+}
+
+function averageHpPerLevel(hitDie: number): number {
+  // d6=4, d8=5, d10=6, d12=7
+  return Math.floor(hitDie / 2) + 1
+}
+
+function calcMaxHp(args: { classKey: ClassKey | string; level: number; conScore: number }): number {
+  const level = Math.max(1, Math.min(20, Math.floor(args.level || 1)))
+  const hitDie = hitDieForClass(String(args.classKey))
+  const conMod = abilityMod(args.conScore)
+
+  // Level 1: max hit die + CON
+  const level1 = hitDie + conMod
+  if (level === 1) return Math.max(1, level1)
+
+  // Later levels: average + CON each level
+  const perLevel = averageHpPerLevel(hitDie) + conMod
+  const laterLevels = (level - 1) * perLevel
+
+  return Math.max(1, level1 + laterLevels)
 }
 
 export default function NewCharacterStep6Page() {
@@ -150,7 +183,6 @@ export default function NewCharacterStep6Page() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Load + normalize draft
   useEffect(() => {
     const existing = loadDraft()
 
@@ -178,10 +210,7 @@ export default function NewCharacterStep6Page() {
       notes: existing.notes ?? '',
     }
 
-    // If Step 5 seeded equipmentItems, keep it
     merged.equipmentItems = Array.isArray(existing.equipmentItems) ? existing.equipmentItems : merged.equipmentItems
-
-    // Pre-build inventory for consistency
     merged.inventoryItems = buildInventoryFromDraft(merged)
 
     setDraft(merged)
@@ -200,8 +229,6 @@ export default function NewCharacterStep6Page() {
         }
 
       const next: CharacterDraft = { ...current, ...update }
-
-      // Keep inventory synced (cheap + prevents surprises)
       next.inventoryItems = buildInventoryFromDraft(next)
 
       saveDraft(next)
@@ -214,7 +241,6 @@ export default function NewCharacterStep6Page() {
     router.push('/characters/new/step5')
   }
 
-  // Final abilities for derived stuff like passive perception
   const finalAbilities: Abilities | null = useMemo(() => {
     if (!draft) return null
 
@@ -265,31 +291,63 @@ export default function NewCharacterStep6Page() {
       return
     }
 
+    const walletLower = address.toLowerCase()
+
     try {
       setSaving(true)
       setError(null)
 
+      // ✅ PRE-CHECK: make sure profile mapping exists (prevents vague RLS errors)
+      const { data: prof, error: profErr } = await supabase
+        .from('profiles')
+        .select('wallet_address, user_id')
+        .eq('wallet_address', walletLower)
+        .maybeSingle()
+
+      if (profErr) {
+        console.error(profErr)
+        setError(profErr.message || 'Failed to verify profile.')
+        setSaving(false)
+        return
+      }
+
+      if (!prof) {
+        setError('Profile not linked yet. Disconnect + reconnect your wallet and try again.')
+        setSaving(false)
+        return
+      }
+
       const level = draft.level ?? 1
       const proficiencyBonus = draft.proficiencyBonus ?? proficiencyForLevel(level)
-
       const raceKey = (draft.raceKey as RaceKey) ?? (RACE_LIST[0]?.key as RaceKey)
 
-      // store FLAT abilities object
-      const abilitiesPayload: Abilities = finalAbilities ?? (draft.baseAbilities as Abilities | null) ?? DEFAULT_ABILITIES
+      const abilitiesPayload: Abilities =
+        finalAbilities ?? (draft.baseAbilities as Abilities | null) ?? DEFAULT_ABILITIES
+
+      // ✅ NEW: compute HP from class + level + CON
+      const classKey = (String(draft.classKey ?? 'fighter').toLowerCase() as ClassKey)
+      const computedMaxHp = calcMaxHp({
+        classKey,
+        level,
+        conScore: abilitiesPayload.con,
+      })
+
+      const computedCurrentHp =
+        typeof (draft as any).currentHp === 'number' && Number.isFinite((draft as any).currentHp)
+          ? Math.max(0, Math.min((draft as any).currentHp, computedMaxHp))
+          : computedMaxHp
 
       const inventory_items = buildInventoryFromDraft(draft)
-
-      // If you later add shield selection, this is where we’ll write equipment_items = ['shield']
       const equipment_items: string[] | null = null
 
       const payload: Record<string, any> = {
-        // identity
-        wallet_address: address,
+        // ✅ identity
+        wallet_address: walletLower,
         name: draft.name.trim(),
         level,
         race: raceKey ?? null,
 
-        // class/background (keep your current naming)
+        // class/background
         main_job: draft.classKey ?? 'fighter',
         subclass: draft.subclassKey ?? null,
         background: draft.backgroundKey ?? 'soldier',
@@ -307,18 +365,18 @@ export default function NewCharacterStep6Page() {
         passive_perception: passivePerception,
 
         // combat-ish fields
-        hp: draft.maxHp ?? 0,
-        hit_points_current: draft.currentHp ?? null,
-        hit_points_max: draft.maxHp ?? null,
+        hp: computedMaxHp,
+        hit_points_current: computedCurrentHp,
+        hit_points_max: computedMaxHp,
         ac: draft.armorClass ?? 10,
 
-        // equipment keys (used by sheet + calc)
+        // equipment keys
         main_weapon_key: draft.mainWeaponKey ?? null,
         armor_key: draft.armorKey ?? null,
         equipment_pack: draft.packKey ?? null,
         equipment_items,
 
-        // ✅ inventory (used by EquipmentPanel for ownership-enforced dropdowns)
+        // inventory
         inventory_items,
 
         // spells
@@ -326,9 +384,9 @@ export default function NewCharacterStep6Page() {
         spells_prepared: draft.preparedSpells ?? [],
 
         // NFT
-        nft_contract: draft.nft_contract ?? null,
-        nft_token_id: draft.nft_token_id ?? null,
-        avatar_url: draft.avatar_url ?? null,
+        nft_contract: (draft as any).nft_contract ?? null,
+        nft_token_id: (draft as any).nft_token_id ?? null,
+        avatar_url: (draft as any).avatar_url ?? null,
 
         // personality
         personality_traits: draft.personalityTraits ?? '',
@@ -338,7 +396,12 @@ export default function NewCharacterStep6Page() {
         notes: draft.notes ?? '',
       }
 
-      const { data, error: insertError } = await supabase.from('characters').insert(payload).select().limit(1).maybeSingle()
+      const { data, error: insertError } = await supabase
+        .from('characters')
+        .insert(payload)
+        .select()
+        .limit(1)
+        .maybeSingle()
 
       if (insertError) {
         console.error(insertError)
@@ -441,7 +504,9 @@ export default function NewCharacterStep6Page() {
       </div>
 
       {error && (
-        <div className="rounded-md border border-red-500 bg-red-900/50 px-3 py-2 text-xs text-red-100">{error}</div>
+        <div className="rounded-md border border-red-500 bg-red-900/50 px-3 py-2 text-xs text-red-100">
+          {error}
+        </div>
       )}
 
       <div className="flex justify-between items-center pt-4 border-t border-slate-800 mt-4">

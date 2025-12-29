@@ -4,6 +4,9 @@ import { abilityMod } from './utils'
 import { proficiencyForLevel } from '@/lib/rules'
 import { skillDisplay } from './skills'
 import { computeArmorClass, computeMainAttack } from './equipment-calc'
+import { applySubclassToDerived } from '@/lib/applySubclassEffects'
+import type { DerivedResource } from '@/lib/applySubclassEffects'
+import { getClassResources } from '@/lib/classResources' // ✅ NEW
 
 export type DerivedStats = {
   level: number
@@ -26,6 +29,12 @@ export type DerivedStats = {
   attackFormula: string
   damageFormula: string
   damageType: string | null
+
+  // ✅ Subclass-aware fields
+  critRange: number
+  flags: Record<string, any>
+  notes: string[]
+  resources: DerivedResource[]
 }
 
 export function deriveStats(c: CharacterSheetData, abilities: Abilities): DerivedStats {
@@ -42,7 +51,7 @@ export function deriveStats(c: CharacterSheetData, abilities: Abilities): Derive
   } satisfies Record<keyof Abilities, number>
 
   // HP: prefer explicit max/current fields, otherwise fallback
-  const hpMax = c.hit_points_max ?? c.hp ?? 0
+  let hpMax = c.hit_points_max ?? c.hp ?? 0
   const hpCurrent =
     c.hit_points_current ??
     (c.hit_points_max != null ? c.hit_points_max : c.hp != null ? c.hp : 0)
@@ -62,7 +71,7 @@ export function deriveStats(c: CharacterSheetData, abilities: Abilities): Derive
 
   const initiative = mods.dex
 
-  return {
+  const d: DerivedStats = {
     level,
     profBonus,
     mods,
@@ -81,5 +90,25 @@ export function deriveStats(c: CharacterSheetData, abilities: Abilities): Derive
     attackFormula: atk.attackFormula,
     damageFormula: atk.damageFormula,
     damageType: atk.damageType,
+
+    critRange: 20,
+    flags: {},
+    notes: [],
+    resources: [],
   }
+
+  // ✅ Add CORE CLASS resources (Rage, Ki, Bardic Inspiration, etc.)
+  // IMPORTANT: this assumes your column is `class_key` (string like "fighter", "barbarian").
+  // If yours is named differently, tell me and I’ll swap it.
+  const classKey = (c as any).class_key as any
+  d.resources = [...(d.resources ?? []), ...getClassResources(classKey, level)]
+
+  // ✅ Apply subclass rules (SRD + DND721 custom)
+  applySubclassToDerived(c as any, abilities as any, d as any)
+
+  // clamp
+  if (d.hpCurrent > d.hpMax) d.hpCurrent = d.hpMax
+  hpMax = d.hpMax
+
+  return d
 }

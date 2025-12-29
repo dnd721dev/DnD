@@ -1,73 +1,92 @@
-'use client';
+'use client'
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { useAccount } from 'wagmi';
-import { supabase } from '@/lib/supabase';
+import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import { useAccount } from 'wagmi'
 
-type ProfileRow = {
-  username: string | null;
-};
+type ApiOk = {
+  ok: true
+  profile: { username: string | null }
+}
+
+type ApiErr = {
+  ok: false
+  error: string
+}
+
+function isApiOk(v: any): v is ApiOk {
+  return Boolean(v && v.ok === true && v.profile && typeof v.profile === 'object')
+}
 
 export default function ProfileNavButton() {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected } = useAccount()
 
-  // 👇 Prevent hydration mismatch: don't render anything until mounted
-  const [mounted, setMounted] = useState(false);
-  const [username, setUsername] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const [mounted, setMounted] = useState(false)
+  const [username, setUsername] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!mounted) return;
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    if (!mounted) return
+
     if (!isConnected || !address) {
-      setUsername(null);
-      return;
+      setUsername(null)
+      setLoading(false)
+      return
     }
 
-    const loadProfile = async () => {
-      setLoading(true);
+    const load = async () => {
+      setLoading(true)
 
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('username')
-        .eq('wallet_address', address.toLowerCase())
-        .limit(1).maybeSingle<ProfileRow>();
+      try {
+        const res = await fetch(
+          `/api/profiles/by-wallet?wallet=${encodeURIComponent(address.toLowerCase())}`,
+          {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' },
+            cache: 'no-store',
+          }
+        )
 
-      if (error) {
-        console.error('Failed to load profile for nav:', error);
-        setUsername(null);
-      } else if (data?.username) {
-        setUsername(data.username);
-      } else {
-        setUsername(null);
+        const text = await res.text()
+
+        let parsed: any
+        try {
+          parsed = JSON.parse(text)
+        } catch {
+          console.error('ProfileNavButton: non-JSON response:', text.slice(0, 200))
+          setUsername(null)
+          return
+        }
+
+        if (!isApiOk(parsed)) {
+          // ok:false or unexpected shape
+          setUsername(null)
+          return
+        }
+
+        setUsername(parsed.profile.username ?? null)
+      } catch (err) {
+        console.error('ProfileNavButton: fetch failed', err)
+        setUsername(null)
+      } finally {
+        setLoading(false)
       }
+    }
 
-      setLoading(false);
-    };
+    void load()
+  }, [mounted, isConnected, address])
 
-    void loadProfile();
-  }, [mounted, isConnected, address]);
+  if (!mounted) return null
+  if (!isConnected || !address) return null
 
-  // ❌ On server + first client render: return nothing → no mismatch
-  if (!mounted) return null;
-
-  // Not connected: no profile button, just wallet button
-  if (!isConnected || !address) return null;
-
-  // Optional tiny loading state
   if (loading && !username) {
-    return (
-      <div className="text-xs text-gray-400">
-        Loading profile…
-      </div>
-    );
+    return <div className="text-xs text-gray-400">Loading profile…</div>
   }
 
-  // Connected but no profile yet → send to edit/create
   if (!username) {
     return (
       <Link
@@ -76,16 +95,15 @@ export default function ProfileNavButton() {
       >
         Set up profile
       </Link>
-    );
+    )
   }
 
-  // Normal case: profile exists
   return (
     <Link
-      href={`/profile/${username}`}
+      href={`/profile/${encodeURIComponent(username)}`}
       className="text-sm px-3 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 transition"
     >
       My Profile
     </Link>
-  );
+  )
 }

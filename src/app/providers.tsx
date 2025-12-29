@@ -1,21 +1,21 @@
-'use client';
+'use client'
 
-import { ReactNode, useEffect, useState } from 'react';
-import { WagmiProvider } from 'wagmi';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { wagmiConfig } from '@/lib/wagmi';
-import { initWeb3Modal } from '@/lib/web3modal';
+import { WagmiProvider } from 'wagmi'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { wagmiConfig } from '@/lib/wagmi'
+import { initWeb3Modal } from '@/lib/web3modal'
+import { useEffect, useState } from 'react'
 
-export default function Providers({ children }: { children: ReactNode }) {
-  const [qc] = useState(() => new QueryClient());
+export default function Providers({ children }: { children: React.ReactNode }) {
+  const [queryClient] = useState(() => new QueryClient())
 
   useEffect(() => {
-    initWeb3Modal(); // safe on client
-  }, []);
+    initWeb3Modal()
+  }, [])
 
   return (
     <WagmiProvider config={wagmiConfig}>
-      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </WagmiProvider>
-  );
+  )
 }

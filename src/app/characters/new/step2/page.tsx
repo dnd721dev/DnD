@@ -1,12 +1,15 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { loadDraft, saveDraft } from '@/lib/characterDraft'
 import type { CharacterDraft } from '../../../../types/characterDraft'
 import { RACE_LIST, type RaceKey } from '@/lib/races'
 import { BACKGROUND_LIST, type BackgroundKey } from '@/lib/backgrounds'
 import { proficiencyForLevel } from '@/lib/rules'
+
+// ✅ pull subclasses from the real library
+import { CLASS_SUBCLASSES, type ClassKey, type SubclassKey } from '@/lib/subclasses'
 
 const CLASS_OPTIONS = [
   { key: 'fighter', label: 'Fighter' },
@@ -23,13 +26,6 @@ const CLASS_OPTIONS = [
   { key: 'druid', label: 'Druid' },
 ]
 
-const SUBCLASS_OPTIONS = [
-  { key: '', label: '— Any / None —' },
-  { key: 'champion', label: 'Champion (Fighter)' },
-  { key: 'thief', label: 'Thief (Rogue)' },
-  { key: 'evoker', label: 'Evoker (Wizard)' },
-]
-
 const ALIGNMENT_OPTIONS = [
   { value: '', label: '— None / Undeclared —' },
   { value: 'LG', label: 'Lawful Good' },
@@ -43,6 +39,16 @@ const ALIGNMENT_OPTIONS = [
   { value: 'CE', label: 'Chaotic Evil' },
 ]
 
+function getSubclassOptions(classKeyRaw: string | null | undefined) {
+  const ck = String(classKeyRaw ?? 'fighter').toLowerCase() as ClassKey
+  const list = CLASS_SUBCLASSES[ck] ?? []
+  return [{ key: '', label: '— Any / None —' }, ...list] as Array<{
+    key: string
+    label: string
+    source?: string
+  }>
+}
+
 export default function NewCharacterStep2Page() {
   const router = useRouter()
   const [draft, setDraft] = useState<CharacterDraft | null>(null)
@@ -51,14 +57,7 @@ export default function NewCharacterStep2Page() {
 
   function ensureAbilities(base?: CharacterDraft['baseAbilities']) {
     if (base) return base
-    return {
-      str: 10,
-      dex: 10,
-      con: 10,
-      int: 10,
-      wis: 10,
-      cha: 10,
-    }
+    return { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }
   }
 
   useEffect(() => {
@@ -67,17 +66,20 @@ export default function NewCharacterStep2Page() {
     const level = existing.level ?? 1
     const classKey = existing.classKey ?? 'fighter'
     const raceKey =
-      existing.raceKey ??
-      (RACE_LIST.length > 0 ? (RACE_LIST[0].key as RaceKey) : 'human')
+      existing.raceKey ?? (RACE_LIST.length > 0 ? (RACE_LIST[0].key as RaceKey) : 'human')
     const backgroundKey =
       existing.backgroundKey ??
-      (BACKGROUND_LIST.length > 0
-        ? (BACKGROUND_LIST[0].key as BackgroundKey)
-        : 'soldier')
+      (BACKGROUND_LIST.length > 0 ? (BACKGROUND_LIST[0].key as BackgroundKey) : 'soldier')
 
     const baseAbilities = ensureAbilities(existing.baseAbilities)
-    const proficiencyBonus =
-      existing.proficiencyBonus ?? proficiencyForLevel(level)
+    const proficiencyBonus = existing.proficiencyBonus ?? proficiencyForLevel(level)
+
+    // If a stored subclass isn't valid for the stored class, clear it
+    const subclassOptions = getSubclassOptions(classKey)
+    const allowedSubclassKeys = new Set(subclassOptions.map((o) => String(o.key)))
+    const existingSubclass = String(existing.subclassKey ?? '')
+    const safeSubclass =
+      existingSubclass && !allowedSubclassKeys.has(existingSubclass) ? null : existing.subclassKey ?? null
 
     const merged: CharacterDraft = {
       ...existing,
@@ -87,6 +89,7 @@ export default function NewCharacterStep2Page() {
       backgroundKey,
       baseAbilities,
       proficiencyBonus,
+      subclassKey: safeSubclass,
     }
 
     setDraft(merged)
@@ -101,23 +104,13 @@ export default function NewCharacterStep2Page() {
         ({
           level: 1,
           classKey: 'fighter',
-          raceKey:
-            RACE_LIST.length > 0
-              ? (RACE_LIST[0].key as RaceKey)
-              : 'human',
-          backgroundKey:
-            BACKGROUND_LIST.length > 0
-              ? (BACKGROUND_LIST[0].key as BackgroundKey)
-              : 'soldier',
+          raceKey: RACE_LIST.length > 0 ? (RACE_LIST[0].key as RaceKey) : 'human',
+          backgroundKey: BACKGROUND_LIST.length > 0 ? (BACKGROUND_LIST[0].key as BackgroundKey) : 'soldier',
           baseAbilities: ensureAbilities(),
           proficiencyBonus: proficiencyForLevel(1),
         } as CharacterDraft)
 
-      const next: CharacterDraft = {
-        ...current,
-        ...update,
-      }
-
+      const next: CharacterDraft = { ...current, ...update }
       saveDraft(next)
       return next
     })
@@ -135,17 +128,14 @@ export default function NewCharacterStep2Page() {
       setError('Please give your character a name before continuing.')
       return
     }
-
     if (!draft.classKey) {
       setError('Please choose a class.')
       return
     }
-
     if (!draft.raceKey) {
       setError('Please choose a race.')
       return
     }
-
     if (!draft.backgroundKey) {
       setError('Please choose a background.')
       return
@@ -156,40 +146,36 @@ export default function NewCharacterStep2Page() {
     router.push('/characters/new/step3')
   }
 
+  // ✅ FIX: hooks must run every render → compute subclassOptions BEFORE early return
+  const subclassOptions = useMemo(() => {
+    const ck = (draft?.classKey ?? 'fighter') as any
+    return getSubclassOptions(ck)
+  }, [draft?.classKey])
+
   if (!ready || !draft) {
-    return (
-      <div className="text-sm text-slate-300">
-        Loading basics…
-      </div>
-    )
+    return <div className="text-sm text-slate-300">Loading basics…</div>
   }
 
   const selectedRace = RACE_LIST.find((r) => r.key === draft.raceKey)
-  const selectedBackground = BACKGROUND_LIST.find(
-    (b) => b.key === draft.backgroundKey
-  )
+  const selectedBackground = BACKGROUND_LIST.find((b) => b.key === draft.backgroundKey)
 
   return (
     <div className="space-y-6">
-      {/* Step header */}
       {error && (
         <div className="rounded-md border border-red-500/60 bg-red-900/40 px-3 py-2 text-xs text-red-100">
           {error}
         </div>
       )}
+
       <div className="space-y-1">
-        <h2 className="text-lg md:text-xl font-semibold text-white">
-          Step 2 — Character Basics
-        </h2>
+        <h2 className="text-lg md:text-xl font-semibold text-white">Step 2 — Character Basics</h2>
         <p className="text-xs md:text-sm text-slate-400">
-          Name, class, race, and background. We’ll bring the crunch (abilities,
-          spells, and equipment) in the next steps.
+          Name, class, race, and background. We’ll bring the crunch (abilities, spells, and equipment) in the next
+          steps.
         </p>
       </div>
 
-      {/* Top row: name + level + alignment */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Name */}
         <div className="space-y-1 text-xs">
           <label className="font-semibold text-slate-300">
             Character Name <span className="text-red-400">*</span>
@@ -199,22 +185,13 @@ export default function NewCharacterStep2Page() {
             className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
             placeholder="e.g. Nix Embercoil"
             value={draft.name ?? ''}
-            onChange={(e) =>
-              updateDraft({
-                name: e.target.value,
-              })
-            }
+            onChange={(e) => updateDraft({ name: e.target.value })}
           />
-          <p className="text-[11px] text-slate-500">
-            This will appear on your character sheet and at the virtual table.
-          </p>
+          <p className="text-[11px] text-slate-500">This will appear on your character sheet and at the virtual table.</p>
         </div>
 
-        {/* Level */}
         <div className="space-y-1 text-xs">
-          <label className="font-semibold text-slate-300">
-            Level
-          </label>
+          <label className="font-semibold text-slate-300">Level</label>
           <input
             type="number"
             min={1}
@@ -222,35 +199,19 @@ export default function NewCharacterStep2Page() {
             className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
             value={draft.level ?? 1}
             onChange={(e) => {
-              const nextLevel = Math.min(
-                20,
-                Math.max(1, Number(e.target.value) || 1)
-              )
-              updateDraft({
-                level: nextLevel,
-                proficiencyBonus: proficiencyForLevel(nextLevel),
-              })
+              const nextLevel = Math.min(20, Math.max(1, Number(e.target.value) || 1))
+              updateDraft({ level: nextLevel, proficiencyBonus: proficiencyForLevel(nextLevel) })
             }}
           />
-          <p className="text-[11px] text-slate-500">
-            We’ll auto-calc proficiency bonus and spell slots based on your
-            level.
-          </p>
+          <p className="text-[11px] text-slate-500">We’ll auto-calc proficiency bonus and spell slots based on your level.</p>
         </div>
 
-        {/* Alignment */}
         <div className="space-y-1 text-xs">
-          <label className="font-semibold text-slate-300">
-            Alignment
-          </label>
+          <label className="font-semibold text-slate-300">Alignment</label>
           <select
             className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
             value={draft.alignment ?? ''}
-            onChange={(e) =>
-              updateDraft({
-                alignment: e.target.value,
-              })
-            }
+            onChange={(e) => updateDraft({ alignment: e.target.value })}
           >
             {ALIGNMENT_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -258,16 +219,11 @@ export default function NewCharacterStep2Page() {
               </option>
             ))}
           </select>
-          <p className="text-[11px] text-slate-500">
-            Purely roleplay and flavor. DND721 doesn’t lock mechanics to
-            alignment.
-          </p>
+          <p className="text-[11px] text-slate-500">Purely roleplay and flavor. DND721 doesn’t lock mechanics to alignment.</p>
         </div>
       </div>
 
-      {/* Second row: class / subclass / proficiency preview */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Class */}
         <div className="space-y-1 text-xs">
           <label className="font-semibold text-slate-300">
             Class <span className="text-red-400">*</span>
@@ -275,11 +231,17 @@ export default function NewCharacterStep2Page() {
           <select
             className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
             value={draft.classKey ?? 'fighter'}
-            onChange={(e) =>
+            onChange={(e) => {
+              const nextClass = e.target.value as CharacterDraft['classKey']
+              const nextSubclassOptions = getSubclassOptions(String(nextClass))
+              const allowed = new Set(nextSubclassOptions.map((o) => String(o.key)))
+              const currentSubclass = String(draft.subclassKey ?? '')
+
               updateDraft({
-                classKey: e.target.value as CharacterDraft['classKey'],
+                classKey: nextClass,
+                subclassKey: currentSubclass && !allowed.has(currentSubclass) ? null : draft.subclassKey ?? null,
               })
-            }
+            }}
           >
             {CLASS_OPTIONS.map((opt) => (
               <option key={opt.key} value={opt.key}>
@@ -287,59 +249,39 @@ export default function NewCharacterStep2Page() {
               </option>
             ))}
           </select>
-          <p className="text-[11px] text-slate-500">
-            Determines your hit dice, primary abilities, and which spells
-            (if any) you’ll learn later.
-          </p>
+          <p className="text-[11px] text-slate-500">Determines your hit dice, primary abilities, and which spells you’ll learn later.</p>
         </div>
 
-        {/* Subclass */}
         <div className="space-y-1 text-xs">
-          <label className="font-semibold text-slate-300">
-            Subclass (optional)
-          </label>
+          <label className="font-semibold text-slate-300">Subclass (optional)</label>
           <select
             className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
             value={draft.subclassKey ?? ''}
-            onChange={(e) =>
-              updateDraft({
-                subclassKey: e.target.value || null,
-              })
-            }
+            onChange={(e) => {
+              const v = e.target.value
+              updateDraft({ subclassKey: v ? (v as SubclassKey) : null })
+            }}
           >
-            {SUBCLASS_OPTIONS.map((opt) => (
-              <option key={opt.key} value={opt.key}>
+            {subclassOptions.map((opt) => (
+              <option key={String(opt.key)} value={String(opt.key)}>
                 {opt.label}
+                {opt.source ? ` (${opt.source})` : ''}
               </option>
             ))}
           </select>
-          <p className="text-[11px] text-slate-500">
-            You can leave this blank at low levels and decide later.
-          </p>
+          <p className="text-[11px] text-slate-500">You can leave this blank at low levels and decide later.</p>
         </div>
 
-        {/* Proficiency summary */}
         <div className="space-y-1 text-xs">
-          <label className="font-semibold text-slate-300">
-            Proficiency Bonus
-          </label>
+          <label className="font-semibold text-slate-300">Proficiency Bonus</label>
           <div className="rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2">
-            <div className="text-lg font-bold text-white">
-              +
-              {draft.proficiencyBonus ??
-                proficiencyForLevel(draft.level ?? 1)}
-            </div>
-            <p className="text-[11px] text-slate-500">
-              Auto-calculated from level. This number is added to attack rolls,
-              trained skills, and saves where you’re proficient.
-            </p>
+            <div className="text-lg font-bold text-white">+{draft.proficiencyBonus ?? proficiencyForLevel(draft.level ?? 1)}</div>
+            <p className="text-[11px] text-slate-500">Auto-calculated from level.</p>
           </div>
         </div>
       </div>
 
-      {/* Race & background */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Race */}
         <div className="space-y-1 text-xs">
           <label className="font-semibold text-slate-300">
             Race <span className="text-red-400">*</span>
@@ -347,11 +289,7 @@ export default function NewCharacterStep2Page() {
           <select
             className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
             value={draft.raceKey ?? ''}
-            onChange={(e) =>
-              updateDraft({
-                raceKey: e.target.value as RaceKey,
-              })
-            }
+            onChange={(e) => updateDraft({ raceKey: e.target.value as RaceKey })}
           >
             {RACE_LIST.map((race) => (
               <option key={race.key} value={race.key}>
@@ -359,34 +297,20 @@ export default function NewCharacterStep2Page() {
               </option>
             ))}
           </select>
-          <p className="text-[11px] text-slate-500">
-            Your race provides ability bonuses, traits, languages, and more.
-          </p>
 
           {selectedRace && selectedRace.traits && selectedRace.traits.length > 0 && (
             <div className="mt-2 rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 space-y-1">
-              <div className="text-[11px] font-semibold text-slate-300">
-                {selectedRace.name}
-              </div>
+              <div className="text-[11px] font-semibold text-slate-300">{selectedRace.name}</div>
               <ul className="list-disc ml-4 space-y-1 text-[11px] text-slate-400">
                 {selectedRace.traits.map((trait: any, index: number) => {
-                  const label =
-                    trait?.name ??
-                    trait?.label ??
-                    trait?.description ??
-                    String(trait)
-                  return (
-                    <li key={index}>
-                      {label}
-                    </li>
-                  )
+                  const label = trait?.name ?? trait?.label ?? trait?.description ?? String(trait)
+                  return <li key={index}>{label}</li>
                 })}
               </ul>
             </div>
           )}
         </div>
 
-        {/* Background */}
         <div className="space-y-1 text-xs">
           <label className="font-semibold text-slate-300">
             Background <span className="text-red-400">*</span>
@@ -394,11 +318,7 @@ export default function NewCharacterStep2Page() {
           <select
             className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
             value={draft.backgroundKey ?? ''}
-            onChange={(e) =>
-              updateDraft({
-                backgroundKey: e.target.value as BackgroundKey,
-              })
-            }
+            onChange={(e) => updateDraft({ backgroundKey: e.target.value as BackgroundKey })}
           >
             {BACKGROUND_LIST.map((bg) => (
               <option key={bg.key} value={bg.key}>
@@ -406,16 +326,10 @@ export default function NewCharacterStep2Page() {
               </option>
             ))}
           </select>
-          <p className="text-[11px] text-slate-500">
-            Background gives you skills, tools, and a roleplay hook for your
-            backstory.
-          </p>
 
           {selectedBackground && (
             <div className="mt-2 rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 space-y-1">
-              <div className="text-[11px] font-semibold text-slate-300">
-                {selectedBackground.name}
-              </div>
+              <div className="text-[11px] font-semibold text-slate-300">{selectedBackground.name}</div>
               {selectedBackground.feature && (
                 <p className="text-[11px] text-slate-400">
                   {typeof selectedBackground.feature === 'string'
@@ -430,7 +344,6 @@ export default function NewCharacterStep2Page() {
         </div>
       </div>
 
-      {/* Footer nav */}
       <div className="flex justify-between items-center pt-4 border-t border-slate-800 mt-4">
         <button
           type="button"
@@ -445,8 +358,7 @@ export default function NewCharacterStep2Page() {
           onClick={handleNext}
           className="inline-flex items-center gap-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 px-4 py-2 text-xs md:text-sm font-semibold text-slate-950 shadow-[0_0_18px_rgba(34,211,238,0.55)] transition"
         >
-          Next: Abilities &amp; Skills
-          <span aria-hidden>→</span>
+          Next: Abilities &amp; Skills <span aria-hidden>→</span>
         </button>
       </div>
     </div>

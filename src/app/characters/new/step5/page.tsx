@@ -45,6 +45,95 @@ function normalizePackKey(raw: string | null | undefined): PackKey | null {
   return null
 }
 
+/**
+ * -----------------------------
+ * ✅ PROFICIENCY FILTER RULES
+ * -----------------------------
+ * We filter based on:
+ * - weapon.group (expects "simple" or "martial" in your data)
+ * - armor.category ("light" | "medium" | "heavy" | "shield")
+ *
+ * Rogues/Bards/etc have some special weapon exceptions in 5e.
+ * We include a few common SRD-friendly exceptions by weapon KEY.
+ */
+function norm(v: any) {
+  return String(v ?? '').trim().toLowerCase()
+}
+
+type WeaponObj = any
+type ArmorObj = any
+
+type ClassProfs = {
+  weaponGroups: Array<'simple' | 'martial' | 'all'>
+  extraWeaponKeys?: string[] // specific allowed weapons even if not in group
+  armor: Array<'light' | 'medium' | 'heavy' | 'shields' | 'all' | 'none'>
+}
+
+const CLASS_PROFS: Record<string, ClassProfs> = {
+  barbarian: { weaponGroups: ['simple', 'martial'], armor: ['light', 'medium', 'shields'] },
+  bard: {
+    weaponGroups: ['simple'],
+    // SRD-ish bard extras (commonly allowed)
+    extraWeaponKeys: ['rapier', 'longsword', 'shortsword', 'hand_crossbow'],
+    armor: ['light'],
+  },
+  cleric: { weaponGroups: ['simple'], armor: ['light', 'medium', 'shields'] },
+  druid: { weaponGroups: ['simple'], armor: ['light', 'medium', 'shields'] },
+  fighter: { weaponGroups: ['all'], armor: ['all'] },
+  monk: {
+    weaponGroups: ['simple'],
+    extraWeaponKeys: ['shortsword'],
+    armor: ['none'],
+  },
+  paladin: { weaponGroups: ['all'], armor: ['all'] },
+  ranger: { weaponGroups: ['simple', 'martial'], armor: ['light', 'medium', 'shields'] },
+  rogue: {
+    weaponGroups: ['simple'],
+    // Rogue martial exceptions (common SRD)
+    extraWeaponKeys: ['rapier', 'shortsword', 'longbow', 'hand_crossbow'],
+    armor: ['light'],
+  },
+  sorcerer: { weaponGroups: ['simple'], armor: ['none'] },
+  warlock: { weaponGroups: ['simple'], armor: ['light'] },
+  wizard: { weaponGroups: ['simple'], armor: ['none'] },
+}
+
+function classCanUseWeapon(classKeyRaw: any, weapon: WeaponObj): boolean {
+  const classKey = norm(classKeyRaw) || 'fighter'
+  const prof = CLASS_PROFS[classKey] ?? CLASS_PROFS.fighter
+
+  if (prof.weaponGroups.includes('all')) return true
+
+  const wKey = norm(weapon?.key)
+  if (prof.extraWeaponKeys?.some((k) => norm(k) === wKey)) return true
+
+  const group = norm(weapon?.group)
+  if (group.includes('simple')) return prof.weaponGroups.includes('simple')
+  if (group.includes('martial')) return prof.weaponGroups.includes('martial')
+
+  // If weapon data doesn't have a recognizable group, don't hide it (safe default)
+  return true
+}
+
+function classCanUseArmor(classKeyRaw: any, armor: ArmorObj): boolean {
+  const classKey = norm(classKeyRaw) || 'fighter'
+  const prof = CLASS_PROFS[classKey] ?? CLASS_PROFS.fighter
+
+  if (prof.armor.includes('all')) return true
+  if (prof.armor.includes('none')) return false
+
+  const cat = norm(armor?.category)
+
+  // we already exclude shields in armorOptions, but keep this safe anyway
+  if (cat.includes('shield')) return prof.armor.includes('shields')
+  if (cat.includes('light')) return prof.armor.includes('light')
+  if (cat.includes('medium')) return prof.armor.includes('medium')
+  if (cat.includes('heavy')) return prof.armor.includes('heavy')
+
+  // unknown category => don't hide
+  return true
+}
+
 function buildOwnedEquipmentKeys(args: {
   packKey: PackKey | null
   mainWeaponKey: string | null
@@ -62,13 +151,12 @@ function buildOwnedEquipmentKeys(args: {
         if ((it.quantity ?? 0) <= 0) continue
         const gear = getGear(it.item as any)
         if (!gear) continue
-        // If quantity>1, include duplicates for now; Step 6 will uniq anyway
         for (let i = 0; i < it.quantity; i++) out.push(gear.key)
       }
     }
   }
 
-  // Add chosen weapon/armor as owned keys too (so sheet dropdowns can show them immediately)
+  // Add chosen weapon/armor as owned keys too
   if (mainWeaponKey && (WEAPONS as any)[String(mainWeaponKey)]) out.push(String(mainWeaponKey))
   if (armorKey && (ARMORS as any)[String(armorKey)]) out.push(String(armorKey))
 
@@ -80,12 +168,13 @@ export default function NewCharacterStep5Page() {
   const [draft, setDraft] = useState<CharacterDraft | null>(null)
   const [ready, setReady] = useState(false)
 
-  const weaponOptions = useMemo(() => {
+  // ✅ Always keep base lists available
+  const allWeapons = useMemo(() => {
     return Object.values(WEAPONS).slice().sort((a, b) => a.name.localeCompare(b.name))
   }, [])
 
-  const armorOptions = useMemo(() => {
-    // If your ARMORS ever includes shield, exclude it here (we treat shield as gear)
+  const allArmors = useMemo(() => {
+    // If your ARMORS ever includes shield, exclude it here (we treat shield separately later)
     return Object.values(ARMORS)
       .filter((a: any) => a.category !== 'shield')
       .slice()
@@ -96,35 +185,57 @@ export default function NewCharacterStep5Page() {
     return PACK_LIST.slice().sort((a, b) => a.name.localeCompare(b.name))
   }, [])
 
+  // ✅ Filtered options based on class
+  const weaponOptions = useMemo(() => {
+    const classKey = draft?.classKey ?? 'fighter'
+    return allWeapons.filter((w) => classCanUseWeapon(classKey, w))
+  }, [allWeapons, draft?.classKey])
+
+  const armorOptions = useMemo(() => {
+    const classKey = draft?.classKey ?? 'fighter'
+    return allArmors.filter((a) => classCanUseArmor(classKey, a))
+  }, [allArmors, draft?.classKey])
+
   useEffect(() => {
     const existing = loadDraft()
 
     const level = existing.level ?? 1
     const proficiencyBonus = existing.proficiencyBonus ?? proficiencyForLevel(level)
 
-    const defaultWeaponKey = weaponOptions[0]?.key ?? 'club'
-    const defaultArmorKey = armorOptions[0]?.key ?? 'padded'
     const defaultPackKey = packOptions[0]?.key ?? 'dungeoneers'
-
     const packKey = normalizePackKey(existing.packKey ?? defaultPackKey) ?? defaultPackKey
 
-    const mainWeaponKey = existing.mainWeaponKey ?? defaultWeaponKey
-    const armorKey = existing.armorKey ?? defaultArmorKey
+    // ✅ class-aware defaults (use filtered options)
+    const classKey = existing.classKey ?? 'fighter'
+
+    const classWeaponOptions = allWeapons.filter((w) => classCanUseWeapon(classKey, w))
+    const classArmorOptions = allArmors.filter((a) => classCanUseArmor(classKey, a))
+
+    const defaultWeaponKey = classWeaponOptions[0]?.key ?? (allWeapons[0]?.key ?? 'club')
+    const defaultArmorKey = classArmorOptions[0]?.key ?? (allArmors[0]?.key ?? 'padded')
+
+    // Use saved keys if still valid; otherwise fall back to allowed defaults
+    const savedWeapon = existing.mainWeaponKey ?? defaultWeaponKey
+    const savedArmor = existing.armorKey ?? defaultArmorKey
+
+    const safeWeaponKey =
+      classWeaponOptions.some((w) => w.key === savedWeapon) ? savedWeapon : defaultWeaponKey
+    const safeArmorKey =
+      classArmorOptions.some((a) => a.key === savedArmor) ? savedArmor : defaultArmorKey
 
     const equipmentItems = buildOwnedEquipmentKeys({
       packKey: packKey as any,
-      mainWeaponKey,
-      armorKey,
+      mainWeaponKey: safeWeaponKey,
+      armorKey: safeArmorKey,
     })
 
     const merged: CharacterDraft = {
       ...existing,
       level,
       proficiencyBonus,
-      mainWeaponKey,
-      armorKey,
+      mainWeaponKey: safeWeaponKey,
+      armorKey: safeArmorKey,
       packKey,
-      // ✅ canonical owned list (keys)
       equipmentItems,
     }
 
@@ -132,12 +243,25 @@ export default function NewCharacterStep5Page() {
     saveDraft(merged)
     setReady(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [allWeapons, allArmors, packOptions])
 
   function updateDraft(update: Partial<CharacterDraft>) {
     setDraft((prev) => {
       const current: CharacterDraft = prev ?? { level: 1, proficiencyBonus: proficiencyForLevel(1) }
       const next: CharacterDraft = { ...current, ...update }
+
+      // ✅ If class changed earlier, force weapon/armor to remain valid in THIS step
+      const classKey = next.classKey ?? 'fighter'
+
+      const allowedWeapons = allWeapons.filter((w) => classCanUseWeapon(classKey, w))
+      const allowedArmors = allArmors.filter((a) => classCanUseArmor(classKey, a))
+
+      if (next.mainWeaponKey && !allowedWeapons.some((w) => w.key === next.mainWeaponKey)) {
+        next.mainWeaponKey = allowedWeapons[0]?.key ?? next.mainWeaponKey
+      }
+      if (next.armorKey && !allowedArmors.some((a) => a.key === next.armorKey)) {
+        next.armorKey = allowedArmors[0]?.key ?? next.armorKey
+      }
 
       // ✅ recompute owned items whenever weapon/armor/pack changes
       const packKey = normalizePackKey(next.packKey ?? null)
@@ -182,8 +306,7 @@ export default function NewCharacterStep5Page() {
       <div className="space-y-1">
         <h2 className="text-lg md:text-xl font-semibold text-white">Step 5 — Equipment</h2>
         <p className="text-xs md:text-sm text-slate-400">
-          Choose your main weapon, armor, and adventuring pack. This step also seeds your owned item
-          keys (used for equip enforcement on the character sheet).
+          Choose your main weapon, armor, and adventuring pack. These dropdowns only show gear your class can use.
         </p>
       </div>
 
@@ -207,8 +330,7 @@ export default function NewCharacterStep5Page() {
           {currentWeapon ? (
             <div className="rounded-lg border border-slate-800 bg-slate-900/80 px-3 py-2 text-xs space-y-1">
               <p className="text-slate-300">
-                <span className="font-semibold">Damage:</span> {currentWeapon.damageDice}{' '}
-                {currentWeapon.damageType}
+                <span className="font-semibold">Damage:</span> {currentWeapon.damageDice} {currentWeapon.damageType}
               </p>
               <p className="text-slate-300">
                 <span className="font-semibold">Group:</span> {currentWeapon.group}
@@ -218,8 +340,7 @@ export default function NewCharacterStep5Page() {
               </p>
               {currentWeapon.range ? (
                 <p className="text-slate-300">
-                  <span className="font-semibold">Range:</span> {currentWeapon.range.normal}/
-                  {currentWeapon.range.long}
+                  <span className="font-semibold">Range:</span> {currentWeapon.range.normal}/{currentWeapon.range.long}
                 </p>
               ) : null}
               {currentWeapon.properties?.length ? (
@@ -316,7 +437,7 @@ export default function NewCharacterStep5Page() {
           onClick={handleNext}
           className="inline-flex items-center gap-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 px-4 py-2 text-xs md:text-sm font-semibold text-slate-950 shadow-[0_0_18px_rgba(34,211,238,0.55)] transition"
         >
-          Next: Personality & Save <span aria-hidden>→</span>
+          Next: Personality &amp; Save <span aria-hidden>→</span>
         </button>
       </div>
     </div>
