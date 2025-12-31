@@ -16,7 +16,7 @@ export default function WalletJwtGate() {
           return
         }
 
-        // 1) Ensure we have a Supabase auth session (anonymous is fine)
+        // 1) Ensure Supabase auth session (anonymous is fine)
         setStatus('checking_supabase_session')
         const { data } = await supabase.auth.getSession()
 
@@ -26,32 +26,24 @@ export default function WalletJwtGate() {
           if (error) throw error
         }
 
-        // 2) Upsert profile mapping user_id -> wallet_address
-        setStatus('upserting_profile')
-        const { data: sessionData, error: sessionErr } = await supabase.auth.getSession()
-        if (sessionErr) throw sessionErr
-
-        const userId = sessionData.session?.user?.id
-        if (!userId) throw new Error('No supabase user id after sign-in')
-
+        // 2) Ensure profile via SERVER route (bypasses RLS safely)
+        setStatus('ensuring_profile')
         const walletLower = address.toLowerCase()
 
-        // ✅ IMPORTANT:
-        // Your profiles table has UNIQUE(wallet_address).
-        // So we must upsert using wallet_address as the conflict key,
-        // otherwise inserting a new user_id will collide with the existing wallet row.
-        const { error: upsertErr } = await supabase
-          .from('profiles')
-          .upsert(
-            { user_id: userId, wallet_address: walletLower },
-            { onConflict: 'wallet_address' }
-          )
+        const res = await fetch('/api/profile/ensure', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wallet_address: walletLower }),
+        })
 
-        if (upsertErr) throw upsertErr
+        if (!res.ok) {
+          const text = await res.text()
+          throw new Error(`Profile ensure failed: ${text}`)
+        }
 
         setStatus('ok')
       } catch (e: any) {
-        console.error(e)
+        console.error('WalletJwtGate error:', e)
         setStatus(`error: ${e?.message || 'unknown'}`)
       }
     })()
