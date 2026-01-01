@@ -6,7 +6,7 @@ import { skillDisplay } from './skills'
 import { computeArmorClass, computeMainAttack } from './equipment-calc'
 import { applySubclassToDerived } from '@/lib/applySubclassEffects'
 import type { DerivedResource } from '@/lib/applySubclassEffects'
-import { getClassResources } from '@/lib/classResources' // ✅ NEW
+import { getClassResources } from '@/lib/classResources'
 
 export type DerivedStats = {
   level: number
@@ -30,7 +30,6 @@ export type DerivedStats = {
   damageFormula: string
   damageType: string | null
 
-  // ✅ Subclass-aware fields
   critRange: number
   flags: Record<string, any>
   notes: string[]
@@ -50,23 +49,18 @@ export function deriveStats(c: CharacterSheetData, abilities: Abilities): Derive
     cha: abilityMod(abilities.cha),
   } satisfies Record<keyof Abilities, number>
 
-  // HP: prefer explicit max/current fields, otherwise fallback
-  let hpMax = c.hit_points_max ?? c.hp ?? 0
+  let hpMax = c.hit_points_max ?? (c as any).hp ?? 0
   const hpCurrent =
     c.hit_points_current ??
-    (c.hit_points_max != null ? c.hit_points_max : c.hp != null ? c.hp : 0)
+    (c.hit_points_max != null ? c.hit_points_max : (c as any).hp != null ? (c as any).hp : 0)
 
-  // Passive Perception: use stored, else compute from Perception skill
-  let passivePerception = c.passive_perception ?? 0
+  let passivePerception = (c as any).passive_perception ?? 0
   if (!passivePerception) {
     const perception = skillDisplay('perception', c, abilities, profBonus)
     passivePerception = 10 + perception.total
   }
 
-  // ✅ Equipment-driven AC (authoritative)
   const armorRes = computeArmorClass(c, abilities)
-
-  // ✅ Equipment-driven main attack (authoritative + proficiency-aware)
   const atk = computeMainAttack(c, abilities, profBonus)
 
   const initiative = mods.dex
@@ -97,16 +91,22 @@ export function deriveStats(c: CharacterSheetData, abilities: Abilities): Derive
     resources: [],
   }
 
-  // ✅ Add CORE CLASS resources (Rage, Ki, Bardic Inspiration, etc.)
-  // IMPORTANT: this assumes your column is `class_key` (string like "fighter", "barbarian").
-  // If yours is named differently, tell me and I’ll swap it.
-  const classKey = (c as any).class_key as any
-  d.resources = [...(d.resources ?? []), ...getClassResources(classKey, level)]
+  // ✅ FIX: use main_job as the default class key (fallback to class_key if it exists)
+  const classKeyRaw = (c as any).class_key ?? (c as any).main_job ?? null
+  const classKey = String(classKeyRaw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
 
-  // ✅ Apply subclass rules (SRD + DND721 custom)
+  if (classKey) {
+  d.resources = [
+    ...(d.resources ?? []),
+    ...getClassResources(classKey as any, level),
+  ]
+}
+  // ✅ Apply subclass rules (these can also add resources)
   applySubclassToDerived(c as any, abilities as any, d as any)
 
-  // clamp
   if (d.hpCurrent > d.hpMax) d.hpCurrent = d.hpMax
   hpMax = d.hpMax
 

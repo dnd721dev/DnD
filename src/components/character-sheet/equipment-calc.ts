@@ -11,25 +11,29 @@ export type ArmorResult = {
   shieldEquipped: boolean
 }
 
-function norm(raw: string) {
-  return (raw ?? '').trim().toLowerCase()
+// ✅ FIX: allow undefined/null so TypeScript is happy everywhere
+function norm(raw: string | undefined | null) {
+  return String(raw ?? '').trim().toLowerCase()
 }
 
 function parseInventory(raw: any): InventoryItem[] {
   if (!Array.isArray(raw)) return []
   return raw
     .map((it: any) => ({
-      key: norm(it?.key ?? ''),
+      // ✅ always a string (normalized)
+      key: norm(it?.key),
       name: String(it?.name ?? '').trim(),
-      qty: Number(it?.qty ?? 0),
+      // ✅ support qty or quantity
+      qty: Number(it?.qty ?? it?.quantity ?? 0),
       kind: it?.kind,
     }))
-    .filter((it: any) => it.key)
+    .filter((it: any) => Boolean(it.key))
 }
 
 function inventoryHas(inv: InventoryItem[], key: string) {
   const k = norm(key)
-  return inv.some((it) => norm(it.key) === k && (it.qty ?? 0) > 0)
+  // ✅ FIX: it.key might be undefined in the type, norm can handle it now
+  return inv.some((it) => norm(it.key) === k && Number((it as any).qty ?? (it as any).quantity ?? 0) > 0)
 }
 
 function shieldEquippedFlag(c: CharacterSheetData) {
@@ -40,11 +44,11 @@ function shieldEquippedFlag(c: CharacterSheetData) {
 export function computeArmorClass(c: CharacterSheetData, abilities: Abilities): ArmorResult {
   const dexMod = abilityMod(abilities.dex)
 
-  const inv = parseInventory(c.inventory_items)
+  const inv = parseInventory((c as any).inventory_items)
   const ownsShield = inventoryHas(inv, 'shield')
   const shieldEquipped = ownsShield && shieldEquippedFlag(c)
 
-  const armorKey = norm(c.armor_key ?? '')
+  const armorKey = norm((c as any).armor_key)
   const armor = (ARMORS as any)[armorKey]
 
   // No armor (or invalid armor)
@@ -86,7 +90,7 @@ export function computeMainAttack(
   abilities: Abilities,
   profBonus: number,
 ): AttackResult {
-  const key = norm(c.main_weapon_key ?? '')
+  const key = norm((c as any).main_weapon_key)
   const weapon = (WEAPONS as any)[key]
 
   // Unarmed fallback

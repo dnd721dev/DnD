@@ -22,6 +22,15 @@ function rowIdFor(it: InventoryItem) {
   return `${String(it.key ?? '')}::${String(it.name ?? '')}::${String(it.kind ?? '')}`
 }
 
+// ✅ FIX: safe string compare when name might be undefined
+function safeCompare(a: unknown, b: unknown) {
+  return String(a ?? '').localeCompare(String(b ?? ''))
+}
+
+function norm(raw: unknown) {
+  return String(raw ?? '').trim().toLowerCase()
+}
+
 export function InventoryPanel({
   c,
   onSaved,
@@ -34,23 +43,25 @@ export function InventoryPanel({
 
   const items = useMemo<InventoryItem[]>(
     () => (Array.isArray(c.inventory_items) ? (c.inventory_items as InventoryItem[]) : []),
-    [c.inventory_items]
+    [c.inventory_items],
   )
 
   const weaponOptions = useMemo(() => {
-    return Object.values(WEAPON_DB).slice().sort((a, b) => a.name.localeCompare(b.name))
+    return Object.values(WEAPON_DB)
+      .slice()
+      .sort((a, b) => safeCompare((a as any).name, (b as any).name))
   }, [])
 
   const armorOptions = useMemo(() => {
     return Object.values(ARMOR_DB)
-      .filter((a) => a.category !== 'shield')
+      .filter((a) => (a as any).category !== 'shield')
       .slice()
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .sort((a, b) => safeCompare((a as any).name, (b as any).name))
   }, [])
 
   const [mode, setMode] = useState<AddMode>('weapon')
-  const [weaponKey, setWeaponKey] = useState<string>(weaponOptions[0]?.key ?? '')
-  const [armorKey, setArmorKey] = useState<string>(armorOptions[0]?.key ?? '')
+  const [weaponKey, setWeaponKey] = useState<string>(String((weaponOptions[0] as any)?.key ?? ''))
+  const [armorKey, setArmorKey] = useState<string>(String((armorOptions[0] as any)?.key ?? ''))
   const [qty, setQty] = useState(1)
 
   // Custom
@@ -79,9 +90,11 @@ export function InventoryPanel({
     setTimeout(() => setStatus(''), 1200)
   }
 
-  function itemExistsByKey(k: string) {
-    const keyLower = (k ?? '').toLowerCase()
-    return items.some((it) => String(it.key ?? '').toLowerCase() === keyLower)
+  // ✅ FIX: accept possibly-undefined key (this was your TS error)
+  function itemExistsByKey(k?: string) {
+    const keyLower = norm(k)
+    if (!keyLower) return false
+    return items.some((it) => norm(it.key) === keyLower)
   }
 
   async function addFromLib() {
@@ -90,22 +103,22 @@ export function InventoryPanel({
     let newItem: InventoryItem | null = null
 
     if (mode === 'weapon') {
-      if (!weaponKey || !WEAPON_DB[weaponKey]) return
-      const w = WEAPON_DB[weaponKey]
+      if (!weaponKey || !(WEAPON_DB as any)[weaponKey]) return
+      const w = (WEAPON_DB as any)[weaponKey]
       newItem = {
-        key: w.key,
-        name: w.name,
+        key: String(w.key ?? weaponKey),
+        name: String(w.name ?? weaponKey),
         qty: q,
         kind: 'weapon',
       }
     }
 
     if (mode === 'armor') {
-      if (!armorKey || !ARMOR_DB[armorKey]) return
-      const a = ARMOR_DB[armorKey]
+      if (!armorKey || !(ARMOR_DB as any)[armorKey]) return
+      const a = (ARMOR_DB as any)[armorKey]
       newItem = {
-        key: a.key,
-        name: a.name,
+        key: String(a.key ?? armorKey),
+        name: String(a.name ?? armorKey),
         qty: q,
         kind: 'armor',
       }
@@ -124,9 +137,9 @@ export function InventoryPanel({
     if (!newItem) return
 
     // If same key already exists, just increase qty instead of duplicating
-    if (newItem.key && itemExistsByKey(newItem.key)) {
+    if (itemExistsByKey(newItem.key)) {
       const next = items.map((it) => {
-        if (String(it.key ?? '').toLowerCase() === String(newItem!.key).toLowerCase()) {
+        if (norm(it.key) === norm(newItem!.key)) {
           return { ...it, qty: (it.qty ?? 0) + q }
         }
         return it
@@ -149,7 +162,7 @@ export function InventoryPanel({
       return
     }
 
-    // Your InventoryItem.key is required string, so always produce one.
+    // Always produce a key
     const finalKey = key || name.toLowerCase().replace(/\s+/g, '_') || `item_${Date.now()}`
 
     const newItem: InventoryItem = {
@@ -162,7 +175,7 @@ export function InventoryPanel({
     // stack by key if it already exists
     if (itemExistsByKey(newItem.key)) {
       const next = items.map((it) => {
-        if (String(it.key ?? '').toLowerCase() === String(newItem.key).toLowerCase()) {
+        if (norm(it.key) === norm(newItem.key)) {
           return { ...it, qty: (it.qty ?? 0) + q }
         }
         return it
@@ -183,7 +196,7 @@ export function InventoryPanel({
 
   async function changeQty(rowId: string, nextQty: number) {
     const next = items.map((it) =>
-      rowIdFor(it) === rowId ? { ...it, qty: Math.max(0, nextQty) } : it
+      rowIdFor(it) === rowId ? { ...it, qty: Math.max(0, nextQty) } : it,
     )
     await saveInventory(next.filter((it) => (it.qty ?? 0) > 0))
   }
@@ -244,9 +257,9 @@ export function InventoryPanel({
             onChange={(e) => setWeaponKey(e.target.value)}
             className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-[12px] text-slate-100"
           >
-            {weaponOptions.map((w) => (
-              <option key={w.key} value={w.key}>
-                {w.name} ({w.damageDice})
+            {weaponOptions.map((w: any) => (
+              <option key={String(w.key)} value={String(w.key)}>
+                {String(w.name ?? w.key)} ({String(w.damageDice ?? '—')})
               </option>
             ))}
           </select>
@@ -258,9 +271,9 @@ export function InventoryPanel({
             onChange={(e) => setArmorKey(e.target.value)}
             className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-[12px] text-slate-100"
           >
-            {armorOptions.map((a) => (
-              <option key={a.key} value={a.key}>
-                {a.name} (AC {a.baseAc}
+            {armorOptions.map((a: any) => (
+              <option key={String(a.key)} value={String(a.key)}>
+                {String(a.name ?? a.key)} (AC {String(a.baseAc ?? '—')}
                 {a.dexCap === null ? ' + Dex' : a.dexCap === 0 ? '' : ` + Dex(max ${a.dexCap})`})
               </option>
             ))}
@@ -329,7 +342,7 @@ export function InventoryPanel({
             >
               <div className="min-w-0">
                 <div className="truncate text-[12px] font-semibold text-slate-100">
-                  {it.name}
+                  {String(it.name ?? it.key ?? 'Item')}
                   {it.kind ? (
                     <span className="ml-2 text-[10px] font-normal text-slate-400">
                       ({it.kind})
@@ -338,7 +351,7 @@ export function InventoryPanel({
                 </div>
                 {it.key ? (
                   <div className="text-[10px] text-slate-500">
-                    key: <span className="font-mono">{it.key}</span>
+                    key: <span className="font-mono">{String(it.key)}</span>
                   </div>
                 ) : null}
               </div>

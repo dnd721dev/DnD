@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
 type InitiativeEntry = {
@@ -27,6 +27,9 @@ export default function InitiativeTracker({ encounterId }: InitiativeTrackerProp
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // prevent duplicate reset calls for the same current entry
+  const lastResetEntryIdRef = useRef<string | null>(null);
+
   // Load entries + subscribe for this encounter
   useEffect(() => {
     if (!encounterId) {
@@ -34,6 +37,7 @@ export default function InitiativeTracker({ encounterId }: InitiativeTrackerProp
       setTurnIdx(0);
       setRound(1);
       setStarted(false);
+      lastResetEntryIdRef.current = null;
       return;
     }
 
@@ -97,6 +101,7 @@ export default function InitiativeTracker({ encounterId }: InitiativeTrackerProp
       setTurnIdx(0);
       setRound(1);
       setStarted(false);
+      lastResetEntryIdRef.current = null;
       return;
     }
     if (turnIdx >= sortedEntries.length) {
@@ -120,6 +125,51 @@ export default function InitiativeTracker({ encounterId }: InitiativeTrackerProp
       })
     );
   }, [current?.id, current?.name]);
+
+  // ✅ Reset per-turn flags automatically when it becomes someone's turn
+  async function resetPerTurnFlagsForCharacter(characterId: string) {
+    // read existing action_state
+    const { data: row, error: readErr } = await supabase
+      .from('characters')
+      .select('action_state')
+      .eq('id', characterId)
+      .maybeSingle();
+
+    if (readErr) {
+      console.error('resetPerTurnFlags read error', readErr);
+      return;
+    }
+
+    const currentState = (row?.action_state ?? {}) as Record<string, any>;
+
+    // per-turn flags we want reset when their turn starts
+    const nextState: Record<string, any> = {
+      ...currentState,
+      sneak_used_turn: false,
+    };
+
+    const { error: writeErr } = await supabase
+      .from('characters')
+      .update({ action_state: nextState })
+      .eq('id', characterId);
+
+    if (writeErr) console.error('resetPerTurnFlags write error', writeErr);
+  }
+
+  // ✅ Hook: whenever "current" changes, reset flags for that character (once per entry)
+  useEffect(() => {
+    if (!started) return;
+    if (!current) return;
+
+    // only reset if this initiative entry is linked to a character
+    if (!current.character_id) return;
+
+    // guard: don’t reset repeatedly for the same current entry
+    if (lastResetEntryIdRef.current === current.id) return;
+    lastResetEntryIdRef.current = current.id;
+
+    resetPerTurnFlagsForCharacter(current.character_id);
+  }, [started, current?.id, current?.character_id]);
 
   async function addEntry(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -191,6 +241,8 @@ export default function InitiativeTracker({ encounterId }: InitiativeTrackerProp
     setStarted(true);
     setTurnIdx(0);
     setRound(1);
+    // allow reset for the first active entry
+    lastResetEntryIdRef.current = null;
   }
 
   function nextTurn() {
@@ -220,6 +272,7 @@ export default function InitiativeTracker({ encounterId }: InitiativeTrackerProp
     setTurnIdx(0);
     setRound(1);
     setStarted(false);
+    lastResetEntryIdRef.current = null;
   }
 
   return (
@@ -249,14 +302,17 @@ export default function InitiativeTracker({ encounterId }: InitiativeTrackerProp
             >
               ◀
             </button>
+
+            {/* ✅ FIXED: Start should call startCombat, Next should call nextTurn */}
             <button
               type="button"
-              onClick={nextTurn}
+              onClick={() => (started ? nextTurn() : startCombat())}
               disabled={sortedEntries.length === 0}
               className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-semibold text-emerald-50 hover:bg-emerald-500 disabled:opacity-40"
             >
               {started ? 'Next' : 'Start'}
             </button>
+
             <button
               type="button"
               onClick={resetCombat}

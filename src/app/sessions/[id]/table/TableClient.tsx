@@ -419,6 +419,9 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
   async function handleInitiative() {
     if (!selectedCharacter) return
+    if (!encounterId) return
+    if (!address) return
+
     const dexScore = getAbilityScore(selectedCharacter, 'dex')
     const mod = abilityMod(dexScore)
     const d20 = Math.floor(Math.random() * 20) + 1
@@ -437,26 +440,24 @@ export default function TableClient({ sessionId }: TableClientProps) {
       rollerName,
     })
 
-    // Upsert initiative for this encounter
-    if (encounterId && address) {
-      const { error } = await supabase
-        .from('initiative_entries')
-        .upsert(
-          {
-            encounter_id: encounterId,
-            character_id: selectedCharacter?.id ?? null,
-            token_id: null,
-            wallet_address: address,
-            name: selectedCharacter?.name ?? rollerName,
-            init: total,
-            hp: getCharacterMaxHP(selectedCharacter),
-            is_pc: true,
-          },
-          { onConflict: 'encounter_id,wallet_address' }
-        )
+    // ✅ FIX: Upsert initiative for this encounter (force character_id to never be null)
+    const { error } = await supabase
+      .from('initiative_entries')
+      .upsert(
+        {
+          encounter_id: encounterId,
+          character_id: selectedCharacter.id, // ✅ enforce not-null
+          token_id: null,
+          wallet_address: address,
+          name: selectedCharacter.name ?? rollerName,
+          init: total,
+          hp: getCharacterMaxHP(selectedCharacter),
+          is_pc: true,
+        },
+        { onConflict: 'encounter_id,wallet_address' }
+      )
 
-      if (error) console.error('initiative_entries upsert error', error)
-    }
+    if (error) console.error('initiative_entries upsert error', error)
 
     const entry: DiceEntry = {
       id: persisted?.id ?? fallbackId,
