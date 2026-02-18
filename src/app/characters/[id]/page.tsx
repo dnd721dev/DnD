@@ -189,20 +189,24 @@ export default function CharacterSheetPage() {
     setRollLog((prev) => [{ label, formula: formula.trim(), result }, ...prev.slice(0, 14)])
   }
 
-  function rollAbilityCheck(abilityKey: keyof Abilities) {
+  function rollAbilityCheck(abilityKey: string | number | symbol) {
     if (!c) return
-    const mod = abilityMod(abilities[abilityKey])
+    const k = String(abilityKey).toLowerCase() as keyof Abilities
+    if (!(k in abilities)) return
+    const mod = abilityMod(abilities[k])
     const r = roll(`1d20+${mod}`)
-    showRoll(`${abilityKey.toUpperCase()} check`, `1d20+${mod}`, r.total)
+    showRoll(`${String(k).toUpperCase()} check`, `1d20+${mod}`, r.total)
   }
 
-  function rollSavingThrow(abilityKey: keyof Abilities) {
+  function rollSavingThrow(abilityKey: string | number | symbol) {
     if (!c || !d) return
-    const base = abilityMod(abilities[abilityKey])
-    const hasProf = savingThrowSet.has(String(abilityKey).toLowerCase())
+    const k = String(abilityKey).toLowerCase() as keyof Abilities
+    if (!(k in abilities)) return
+    const base = abilityMod(abilities[k])
+    const hasProf = savingThrowSet.has(String(k).toLowerCase())
     const mod = base + (hasProf ? d.profBonus : 0)
     const r = roll(`1d20+${mod}`)
-    showRoll(`${abilityKey.toUpperCase()} save`, `1d20+${mod}`, r.total)
+    showRoll(`${String(k).toUpperCase()} save`, `1d20+${mod}`, r.total)
   }
 
   function rollMainAttack() {
