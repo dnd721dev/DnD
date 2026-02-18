@@ -93,6 +93,36 @@ export default function SessionsClient({ campaignId }: Props) {
     e.preventDefault()
     if (!campaign || !isGm) return
 
+    // Always store wallet values in lowercase to avoid FK mismatches.
+    // sessions.gm_wallet has a FK to the profiles table, which we store lowercase in this app.
+    const gmWallet = myAddress
+    if (!gmWallet) {
+      setError('Connect your wallet to create a session.')
+      return
+    }
+
+    // Guard: FK on sessions.gm_wallet requires a matching profiles row.
+    // If the GM hasn't created a profile yet, show a clear error instead of a FK failure.
+    const { data: gmProfile, error: gmProfileErr } = await supabase
+      .from('profiles')
+      .select('wallet_address')
+      .eq('wallet_address', gmWallet)
+      .limit(1)
+      .maybeSingle()
+
+    if (gmProfileErr) {
+      console.error(gmProfileErr)
+      setError(gmProfileErr.message)
+      setCreating(false)
+      return
+    }
+
+    if (!gmProfile) {
+      setError('Create your profile first (wallet not linked yet), then try again.')
+      setCreating(false)
+      return
+    }
+
     if (!title.trim()) {
       setError('Title is required.')
       return
@@ -120,7 +150,8 @@ export default function SessionsClient({ campaignId }: Props) {
         scheduled_start,
         duration_minutes: parsedDuration,
         status: 'planned',
-        gm_wallet: campaign.gm_wallet,
+        // Use the connected GM wallet (lowercased) to satisfy the FK constraint.
+        gm_wallet: gmWallet,
       })
       .select(
         'id, title, description, scheduled_start, duration_minutes, status'

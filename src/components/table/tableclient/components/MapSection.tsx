@@ -5,7 +5,7 @@ import { useMemo } from 'react'
 import MapBoard from '@/components/table/MapBoard'
 import MapBoardView from '@/components/table/MapBoardView'
 import { DiceLogOverlay } from './DiceLogOverlay'
-import DiceRollOverlay from './DiceRollOverlay'
+import { DiceRollOverlay } from './DiceRollOverlay'
 import type { DiceEntry } from '../types'
 
 export function MapSection(props: {

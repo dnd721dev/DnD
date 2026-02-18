@@ -7,63 +7,63 @@ export type RollOverlayPayload = {
   label: string
   formula: string
   result: number
-  detail?: string
-  outcome?: string
+  outcomeText?: string | null
 }
 
-type Props =
-  | { roll: RollOverlayPayload | null }
-  | { show: boolean; payload: RollOverlayPayload | null }
-
-function pickDie(formula: string) {
-  const s = String(formula || '').toLowerCase()
-  const matches = [...s.matchAll(/d(\d+)/g)].map((m) => Number(m[1] || 0)).filter(Boolean)
-  const max = matches.length ? Math.max(...matches) : 20
-  return `d${max}`
+function pickDie(formula: string): string {
+  // choose the largest die mentioned in the formula (d20, d12, d10, d8, d6, d4, etc.)
+  const matches = String(formula ?? '').match(/d(\d+)/gi) || []
+  let best = 0
+  for (const m of matches) {
+    const n = parseInt(m.slice(1), 10)
+    if (Number.isFinite(n) && n > best) best = n
+  }
+  return best > 0 ? `d${best}` : 'd20'
 }
 
-export default function DiceRollOverlay(props: Props) {
-  const roll = 'roll' in props ? props.roll : props.payload
-  const show = 'roll' in props ? Boolean(props.roll) : props.show
-
+export function DiceRollOverlay(props: { roll?: RollOverlayPayload | null; show?: boolean; payload?: RollOverlayPayload | null }) {
+  const enabled = props.show ?? true
+  const roll = enabled ? (props.roll ?? props.payload ?? null) : null
   const [visible, setVisible] = useState(false)
 
+  const die = useMemo(() => (roll ? pickDie(roll.formula) : 'd20'), [roll])
+
   useEffect(() => {
-    if (!show || !roll) {
+    if (!roll) {
       setVisible(false)
       return
     }
     setVisible(true)
-    const t = setTimeout(() => setVisible(false), 1600)
-    return () => clearTimeout(t)
-  }, [show, roll?.result, roll?.formula, roll?.label])
-
-  const die = useMemo(() => pickDie(roll?.formula ?? ''), [roll?.formula])
+    const t = window.setTimeout(() => setVisible(false), 1400)
+    return () => window.clearTimeout(t)
+  }, [roll])
 
   if (!roll || !visible) return null
 
   return (
-    <div className="pointer-events-none fixed inset-0 z-[60] flex items-center justify-center">
-      <div className="rounded-2xl bg-black/80 px-5 py-4 shadow-xl ring-1 ring-white/10">
+    <div className="pointer-events-none fixed inset-0 z-[80] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/55 backdrop-blur-[1px]" />
+
+      <div className="relative mx-4 w-full max-w-md rounded-2xl border border-white/10 bg-[#0b1020]/90 p-5 shadow-2xl">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 animate-spin rounded-xl bg-white/10 flex items-center justify-center font-bold">
-            {die}
+          <div className="h-12 w-12 rounded-xl border border-white/10 bg-white/5 flex items-center justify-center">
+            <div className="text-lg font-semibold animate-spin">{die}</div>
           </div>
-          <div className="min-w-[220px]">
-            <div className="text-sm text-white/80">{roll.roller}</div>
-            <div className="text-base font-semibold text-white">{roll.label}</div>
-            <div className="text-xs text-white/70">{roll.formula}</div>
+          <div className="min-w-0">
+            <div className="text-sm text-white/70 truncate">{roll.roller}</div>
+            <div className="text-base font-semibold truncate">{roll.label}</div>
+            <div className="text-xs text-white/60 truncate">{roll.formula}</div>
           </div>
-          <div className="text-3xl font-extrabold text-white">{roll.result}</div>
         </div>
 
-        {(roll.outcome || roll.detail) && (
-          <div className="mt-2 text-sm text-white/85">
-            {roll.outcome ? <span className="font-semibold">{roll.outcome}</span> : null}
-            {roll.outcome && roll.detail ? <span className="mx-2 text-white/40">•</span> : null}
-            {roll.detail ? <span>{roll.detail}</span> : null}
-          </div>
-        )}
+        <div className="mt-4 flex items-end justify-between">
+          <div className="text-4xl font-extrabold tracking-tight animate-bounce">{roll.result}</div>
+          {roll.outcomeText ? (
+            <div className="text-sm font-semibold rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-white/90">
+              {roll.outcomeText}
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   )
