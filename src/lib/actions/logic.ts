@@ -4,7 +4,8 @@ function evalGate(g: ActionGate, ctx: { classKey?: string | null; subclassKey?: 
   if (g.kind === 'always') return true
   if (g.kind === 'class') return (ctx.classKey ?? '').toLowerCase() === g.classKey.toLowerCase()
   if (g.kind === 'subclass') return (ctx.subclassKey ?? '').toLowerCase() === g.subclassKey.toLowerCase()
-  if (g.kind === 'anyOf') return g.gates.some((x) => evalGate(x, ctx))
+    if (g.kind === 'and') return g.all.every((x) => evalGate(x, ctx))
+  if (g.kind === 'or') return g.any.some((x) => evalGate(x, ctx))
   return false
 }
 

@@ -10,6 +10,11 @@ export function CombatStatsPanel({
   onAttack: () => void
   onDamage: () => void
 }) {
+  const visionLine =
+    d.darkvisionFt > 0
+      ? `Normal ${d.visionFt} ft • Darkvision ${d.darkvisionFt} ft`
+      : `Normal ${d.visionFt} ft`
+
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
       <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -42,6 +47,20 @@ export function CombatStatsPanel({
           <div className="text-[10px] uppercase text-slate-400">Prof Bonus</div>
           <div className="text-xl font-bold text-slate-50">{formatMod(d.profBonus)}</div>
         </div>
+
+        {/* ✅ NEW */}
+        <div className="rounded-lg bg-slate-900/80 p-2">
+          <div className="text-[10px] uppercase text-slate-400">Speed</div>
+          <div className="text-xl font-bold text-slate-50">{d.speedFt} ft</div>
+          <div className="text-[10px] text-slate-500">Walking speed</div>
+        </div>
+
+        {/* ✅ NEW */}
+        <div className="rounded-lg bg-slate-900/80 p-2">
+          <div className="text-[10px] uppercase text-slate-400">Vision</div>
+          <div className="text-sm font-semibold text-slate-50">{visionLine}</div>
+          <div className="text-[10px] text-slate-500">Fog-of-war reveal later</div>
+        </div>
       </div>
 
       <div className="mt-3 rounded-lg bg-slate-900/80 p-2 text-xs">
@@ -50,9 +69,7 @@ export function CombatStatsPanel({
             <div className="text-[10px] uppercase text-slate-400">Main Weapon</div>
             <div className="font-semibold text-slate-100">
               {d.weaponName ?? 'Unarmed'}
-              <span className="ml-2 font-mono text-slate-300">
-                ({d.attackFormula})
-              </span>
+              <span className="ml-2 font-mono text-slate-300">({d.attackFormula})</span>
             </div>
             <div className="text-[10px] text-slate-500">
               Damage: <span className="font-mono">{d.damageFormula}</span>

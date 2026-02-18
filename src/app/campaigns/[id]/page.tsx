@@ -125,13 +125,13 @@ export default function CampaignPage() {
         supabase
           .from('characters')
           .select('id, name, level, class_key, race_key')
-          .eq('wallet_address', address)
+          .eq('wallet_address', (myAddress ?? '').toLowerCase())
           .order('created_at', { ascending: true }),
         supabase
           .from('campaign_character_selections')
           .select('character_id')
           .eq('campaign_id', campaign.id)
-          .eq('wallet_address', address)
+          .eq('wallet_address', (myAddress ?? '').toLowerCase())
           .limit(1)
           .maybeSingle(),
       ])
@@ -194,7 +194,7 @@ export default function CampaignPage() {
     const { error: upsertError } = await supabase.from('campaign_participants').upsert(
       {
         campaign_id: campaign.id,
-        wallet_address: address,
+        wallet_address: myAddress,
         role,
       },
       { onConflict: 'campaign_id,wallet_address' }
@@ -208,10 +208,10 @@ export default function CampaignPage() {
     }
 
     setParticipants(prev => {
-      const existingIndex = prev.findIndex(p => p.wallet_address.toLowerCase() === address.toLowerCase())
+      const existingIndex = prev.findIndex(p => p.wallet_address.toLowerCase() === (myAddress ?? ''))
       const updated = [...prev]
-      if (existingIndex >= 0) updated[existingIndex] = { wallet_address: address, role }
-      else updated.push({ wallet_address: address, role })
+      if (existingIndex >= 0) updated[existingIndex] = { wallet_address: myAddress ?? '', role }
+      else updated.push({ wallet_address: myAddress ?? '', role })
       return updated
     })
 
@@ -225,7 +225,7 @@ export default function CampaignPage() {
 
   // ---------- save campaign default character ----------
   const handleSaveCampaignCharacter = async () => {
-    if (!campaign || !address) return
+    if (!campaign || !myAddress) return
 
     // GM can skip
     if (!isGm && !selectedCharacterId) {
@@ -248,7 +248,7 @@ export default function CampaignPage() {
       .upsert(
         {
           campaign_id: campaign.id,
-          wallet_address: address,
+          wallet_address: myAddress,
           character_id: selectedCharacterId,
         },
         { onConflict: 'campaign_id,wallet_address' }
@@ -271,7 +271,7 @@ export default function CampaignPage() {
   }
 
   const handleLeave = async () => {
-    if (!isConnected || !address || !campaign) return
+    if (!isConnected || !myAddress || !campaign) return
 
     setLeaving(true)
     setError(null)
@@ -280,7 +280,7 @@ export default function CampaignPage() {
       .from('campaign_participants')
       .delete()
       .eq('campaign_id', campaign.id)
-      .eq('wallet_address', address)
+      .eq('wallet_address', myAddress)
 
     if (leaveError) {
       console.error(leaveError)
@@ -294,9 +294,9 @@ export default function CampaignPage() {
       .from('campaign_character_selections')
       .delete()
       .eq('campaign_id', campaign.id)
-      .eq('wallet_address', address)
+      .eq('wallet_address', myAddress)
 
-    setParticipants(prev => prev.filter(p => p.wallet_address.toLowerCase() !== address.toLowerCase()))
+    setParticipants(prev => prev.filter(p => p.wallet_address.toLowerCase() !== (myAddress ?? '')))
     setCampaignCharacterId(null)
     setSelectedCharacterId(null)
     setShowCharacterModal(false)

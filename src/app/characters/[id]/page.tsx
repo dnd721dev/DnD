@@ -26,6 +26,7 @@ import { deriveStats } from '@/components/character-sheet/calc'
 import { roll, rollD20WithCrit, rollDamageWithCrit } from '@/lib/dice'
 
 import { canUseAction, type SheetAction } from '@/lib/actions'
+import { ALL_ACTIONS } from '@/lib/actions/registry'
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
@@ -38,9 +39,43 @@ function normKey(v: any) {
     .replace(/\s+/g, '_')
 }
 
+// ✅ FIX: supports both `subclass` (new) and `subclass_key` (old/legacy)
+function getSubclassKey(c: any) {
+  return normKey(c?.subclass ?? c?.subclass_key)
+}
+
 function sneakDiceCount(level: number) {
   // 1d6 at 1, +1d6 every 2 levels
   return Math.floor((level + 1) / 2)
+}
+
+/**
+ * ✅ Clears any "perRestFlag" locks (Action Surge, Second Wind, etc)
+ * - Short rest clears only short-rest flags
+ * - Long rest clears both short + long flags
+ */
+function clearPerRestFlags(prev: Record<string, any>, rest: 'short' | 'long') {
+  const next: Record<string, any> = { ...(prev ?? {}) }
+
+  for (const a of ALL_ACTIONS) {
+    const cost: any = (a as any).cost
+    if (!cost || cost.type !== 'perRestFlag') continue
+
+    const flag = String(cost.flag ?? '').trim()
+    const flagRest = cost.rest as 'short' | 'long' | undefined
+
+    if (!flag || !flagRest) continue
+
+    if (rest === 'short' && flagRest === 'short') {
+      delete next[flag]
+    }
+
+    if (rest === 'long' && (flagRest === 'short' || flagRest === 'long')) {
+      delete next[flag]
+    }
+  }
+
+  return next
 }
 
 export default function CharacterSheetPage() {
@@ -62,7 +97,12 @@ export default function CharacterSheetPage() {
 
   useEffect(() => {
     ;(async () => {
-      const { data, error } = await supabase.from('characters').select('*').eq('id', id).limit(1).maybeSingle()
+      const { data, error } = await supabase
+        .from('characters')
+        .select('*')
+        .eq('id', id)
+        .limit(1)
+        .maybeSingle()
 
       if (error) console.error(error)
       setC(data as any)
@@ -141,7 +181,9 @@ export default function CharacterSheetPage() {
 
   const [rollLog, setRollLog] = useState<RollEntry[]>([])
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'skills_traits' | 'gear' | 'magic' | 'notes'>('overview')
+  const [activeTab, setActiveTab] = useState<
+    'overview' | 'skills_traits' | 'gear' | 'magic' | 'notes'
+  >('overview')
 
   function showRoll(label: string, formula: string, result: number) {
     setRollLog((prev) => [{ label, formula: formula.trim(), result }, ...prev.slice(0, 14)])
@@ -170,7 +212,9 @@ export default function CharacterSheetPage() {
     const r = rollD20WithCrit(d.attackFormula, critRange)
     setLastAttackWasCrit(Boolean(r.isCrit))
 
-    const label = r.isCrit ? `CRIT Attack — ${d.weaponName ?? 'Unarmed'}` : `Attack — ${d.weaponName ?? 'Unarmed'}`
+    const label = r.isCrit
+      ? `CRIT Attack — ${d.weaponName ?? 'Unarmed'}`
+      : `Attack — ${d.weaponName ?? 'Unarmed'}`
     showRoll(label, d.attackFormula, r.total)
   }
 
@@ -200,7 +244,9 @@ export default function CharacterSheetPage() {
       showRoll(lastAttackWasCrit ? 'CRIT Sneak Attack' : 'Sneak Attack', sneak.formula, sneak.total)
     }
 
-    const label = lastAttackWasCrit ? `CRIT Damage — ${d.weaponName ?? 'Unarmed'}` : `Damage — ${d.weaponName ?? 'Unarmed'}`
+    const label = lastAttackWasCrit
+      ? `CRIT Damage — ${d.weaponName ?? 'Unarmed'}`
+      : `Damage — ${d.weaponName ?? 'Unarmed'}`
     showRoll(label, formula, total)
 
     // reset crit once spent
@@ -216,6 +262,8 @@ export default function CharacterSheetPage() {
 
   function onShortRest() {
     if (!d) return
+
+    // refill resources that recharge on short rest
     setResourceValues((prev) => {
       const next = { ...prev }
       for (const r of d.resources ?? []) {
@@ -223,10 +271,15 @@ export default function CharacterSheetPage() {
       }
       return next
     })
+
+    // ✅ clear "once per short rest" locks (Action Surge, Second Wind, etc)
+    setActionState((prev) => clearPerRestFlags(prev, 'short'))
   }
 
   function onLongRest() {
     if (!d) return
+
+    // refill resources that recharge on short or long rest
     setResourceValues((prev) => {
       const next = { ...prev }
       for (const r of d.resources ?? []) {
@@ -235,8 +288,14 @@ export default function CharacterSheetPage() {
       return next
     })
 
-    // also reset per-turn action flags on long rest
-    setActionState((prev) => ({ ...prev, sneak_used_turn: false }))
+    // ✅ clear per-rest locks (short + long) on long rest
+    setActionState((prev) => {
+      const cleared = clearPerRestFlags(prev, 'long')
+      // also reset per-turn action flags on long rest
+      delete cleared.sneak_used_turn
+      return cleared
+    })
+
     setSneakArmed(false)
   }
 
@@ -245,7 +304,7 @@ export default function CharacterSheetPage() {
     if (!c?.id) return
 
     const classKey = normKey(c.main_job)
-    const subclassKey = normKey((c as any)?.subclass_key)
+    const subclassKey = getSubclassKey(c as any)
 
     const status = canUseAction({
       action,
@@ -304,10 +363,18 @@ export default function CharacterSheetPage() {
             key={t}
             onClick={() => setActiveTab(t)}
             className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-              activeTab === t ? 'bg-slate-800 text-slate-100' : 'bg-slate-900/40 text-slate-300 hover:bg-slate-900'
+              activeTab === t
+                ? 'bg-slate-800 text-slate-100'
+                : 'bg-slate-900/40 text-slate-300 hover:bg-slate-900'
             }`}
           >
-            {t === 'overview' ? 'Overview' : t === 'skills_traits' ? 'Skills & Traits' : t === 'gear' ? 'Gear' : 'Notes'}
+            {t === 'overview'
+              ? 'Overview'
+              : t === 'skills_traits'
+                ? 'Skills & Traits'
+                : t === 'gear'
+                  ? 'Gear'
+                  : 'Notes'}
           </button>
         ))}
 
@@ -315,7 +382,9 @@ export default function CharacterSheetPage() {
           <button
             onClick={() => setActiveTab('magic')}
             className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-              activeTab === 'magic' ? 'bg-slate-800 text-slate-100' : 'bg-slate-900/40 text-slate-300 hover:bg-slate-900'
+              activeTab === 'magic'
+                ? 'bg-slate-800 text-slate-100'
+                : 'bg-slate-900/40 text-slate-300 hover:bg-slate-900'
             }`}
           >
             Spellbook
@@ -323,7 +392,9 @@ export default function CharacterSheetPage() {
         )}
 
         {!isMageUser && (
-          <div className="ml-auto flex items-center text-[10px] text-slate-500">Spellbook hidden (non-mage)</div>
+          <div className="ml-auto flex items-center text-[10px] text-slate-500">
+            Spellbook hidden (non-mage)
+          </div>
         )}
       </div>
 
@@ -333,10 +404,10 @@ export default function CharacterSheetPage() {
             <>
               <AbilitiesPanel abilities={abilities} onRollAbilityCheck={rollAbilityCheck} />
 
-              {/* ✅ NEW Actions Panel */}
+              {/* ✅ Actions Panel */}
               <ActionsPanel
                 classKey={normKey(c.main_job)}
-                subclassKey={normKey((c as any)?.subclass_key)}
+                subclassKey={getSubclassKey(c as any)}
                 actionState={actionState}
                 resourceState={resourceValues}
                 onUseAction={handleUseAction}
@@ -365,14 +436,25 @@ export default function CharacterSheetPage() {
         <div className="space-y-3">
           {activeTab === 'gear' && (
             <>
-              <EquipmentPanel c={c} onSaved={(patch) => setC((prev) => (prev ? ({ ...prev, ...patch } as any) : prev))} />
-              <InventoryPanel c={c} onSaved={(patch) => setC((prev) => (prev ? ({ ...prev, ...patch } as any) : prev))} />
+              <EquipmentPanel
+                c={c}
+                onSaved={(patch) => setC((prev) => (prev ? ({ ...prev, ...patch } as any) : prev))}
+              />
+              <InventoryPanel
+                c={c}
+                onSaved={(patch) => setC((prev) => (prev ? ({ ...prev, ...patch } as any) : prev))}
+              />
             </>
           )}
 
           {activeTab === 'skills_traits' && (
             <>
-              <SkillsPanel c={c} abilities={abilities} profBonus={d.profBonus} passivePerception={d.passivePerception} />
+              <SkillsPanel
+                c={c}
+                abilities={abilities}
+                profBonus={d.profBonus}
+                passivePerception={d.passivePerception}
+              />
               <TraitsFeaturesPanel c={c} />
             </>
           )}

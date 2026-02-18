@@ -3,6 +3,7 @@ export type RollEntry = {
   formula: string
   result: number
 }
+
 export type InventoryItem = {
   id?: string
   key?: string
@@ -44,6 +45,11 @@ export type CharacterSheetData = {
   hit_points_current?: number | null
   armor_class?: number | null
 
+  // ✅ NEW: movement + vision authority for VTT rules
+  speed_ft?: number | null
+  vision_ft?: number | null
+  darkvision_ft?: number | null
+
   saving_throw_profs?: string[] | null
 
   spellcasting_ability?: string | null
@@ -53,10 +59,9 @@ export type CharacterSheetData = {
   spells_known?: string[] | null
   spells_prepared?: string[] | null
 
-  // ✅ NEW: persistent sheet state
+  // ✅ persistent sheet state
   resource_state?: Record<string, number> | null
   action_state?: Record<string, any> | null
 
-  // Any other fields your sheet uses
   [key: string]: any
 }

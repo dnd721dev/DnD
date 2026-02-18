@@ -7,6 +7,7 @@ import { computeArmorClass, computeMainAttack } from './equipment-calc'
 import { applySubclassToDerived } from '@/lib/applySubclassEffects'
 import type { DerivedResource } from '@/lib/applySubclassEffects'
 import { getClassResources } from '@/lib/classResources'
+import { getRace, type RaceKey } from '@/lib/races'
 
 export type DerivedStats = {
   level: number
@@ -19,6 +20,11 @@ export type DerivedStats = {
   hpCurrent: number
   hpMax: number
   passivePerception: number
+
+  // ✅ NEW: movement + vision (what the table will enforce later)
+  speedFt: number
+  visionFt: number
+  darkvisionFt: number
 
   armorName: string | null
   shieldEquipped: boolean
@@ -65,6 +71,27 @@ export function deriveStats(c: CharacterSheetData, abilities: Abilities): Derive
 
   const initiative = mods.dex
 
+  // ✅ Race defaults (used if DB fields are missing)
+  const raceKey = String((c as any)?.race ?? '').trim().toLowerCase() as RaceKey
+  const race = raceKey ? getRace(raceKey as any) : undefined
+
+  // ✅ Speed: prefer DB value → fallback to race → fallback 30
+  const speedFt =
+    Number((c as any)?.speed_ft ?? (c as any)?.speed ?? 0) ||
+    Number(race?.speed ?? 0) ||
+    30
+
+  // ✅ Vision used for fog-of-war later:
+  // - visionFt: default 60 (VTT-friendly)
+  // - darkvisionFt: race darkvision defaults to 60
+  const visionFt = Number((c as any)?.vision_ft ?? 0) || 60
+
+  const dvRaw = (c as any)?.darkvision_ft
+  const darkvisionFt =
+    (typeof dvRaw === 'number' && dvRaw > 0)
+      ? dvRaw
+      : (race?.vision === 'darkvision' ? 60 : 0)
+
   const d: DerivedStats = {
     level,
     profBonus,
@@ -74,6 +101,10 @@ export function deriveStats(c: CharacterSheetData, abilities: Abilities): Derive
     hpCurrent,
     hpMax,
     passivePerception,
+
+    speedFt,
+    visionFt,
+    darkvisionFt,
 
     armorName: armorRes.armorName,
     shieldEquipped: armorRes.shieldEquipped,
@@ -99,11 +130,9 @@ export function deriveStats(c: CharacterSheetData, abilities: Abilities): Derive
     .replace(/\s+/g, '_')
 
   if (classKey) {
-  d.resources = [
-    ...(d.resources ?? []),
-    ...getClassResources(classKey as any, level),
-  ]
-}
+    d.resources = [...(d.resources ?? []), ...getClassResources(classKey as any, level)]
+  }
+
   // ✅ Apply subclass rules (these can also add resources)
   applySubclassToDerived(c as any, abilities as any, d as any)
 

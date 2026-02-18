@@ -319,13 +319,21 @@ export default function NewCharacterStep6Page() {
 
       const level = draft.level ?? 1
       const proficiencyBonus = draft.proficiencyBonus ?? proficiencyForLevel(level)
+
+      // ✅ Race info
       const raceKey = (draft.raceKey as RaceKey) ?? (RACE_LIST[0]?.key as RaceKey)
+      const race = getRace(raceKey)
+
+      // ✅ Movement + vision authority for VTT rules
+      const speed_ft = Number((race as any)?.speed ?? 30) || 30
+      const vision_ft = 60
+      const darkvision_ft = (race as any)?.vision === 'darkvision' ? 60 : 0
 
       const abilitiesPayload: Abilities =
         finalAbilities ?? (draft.baseAbilities as Abilities | null) ?? DEFAULT_ABILITIES
 
       // ✅ NEW: compute HP from class + level + CON
-      const classKey = (String(draft.classKey ?? 'fighter').toLowerCase() as ClassKey)
+      const classKey = String(draft.classKey ?? 'fighter').toLowerCase() as ClassKey
       const computedMaxHp = calcMaxHp({
         classKey,
         level,
@@ -369,6 +377,11 @@ export default function NewCharacterStep6Page() {
         hit_points_current: computedCurrentHp,
         hit_points_max: computedMaxHp,
         ac: draft.armorClass ?? 10,
+
+        // ✅ NEW: movement + vision authority
+        speed_ft,
+        vision_ft,
+        darkvision_ft,
 
         // equipment keys
         main_weapon_key: draft.mainWeaponKey ?? null,

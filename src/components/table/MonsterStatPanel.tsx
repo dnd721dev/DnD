@@ -1,6 +1,6 @@
 'use client'
 
-import React from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 
 type MonsterStatPanelProps = {
   token: any
@@ -23,6 +23,25 @@ export function MonsterStatPanel({
 
   const m = monster || {}
   const name = m.name || token.label || 'Unknown Monster'
+
+
+  // 🎯 Target selection (click a token on the map)
+  const [target, setTarget] = useState<any | null>(null)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const handler = (ev: any) => {
+      const t = (ev?.detail ?? {})?.token ?? null
+      setTarget(t)
+    }
+    window.addEventListener('dnd721-target-selected', handler)
+    return () => window.removeEventListener('dnd721-target-selected', handler)
+  }, [])
+
+  const targetAC = useMemo(() => {
+    const n = Number((target as any)?.ac)
+    return Number.isFinite(n) && n > 0 ? n : null
+  }, [target])
 
   // ---- Core stats (CR, AC, HP, Speed) ----
   const crValue =
@@ -95,6 +114,17 @@ export function MonsterStatPanel({
     if (score == null) return '—'
     const mod = Math.floor((score - 10) / 2)
     return mod >= 0 ? `+${mod}` : `${mod}`
+  }
+
+  function rollD20(label: string, mod: number) {
+    const d20 = Math.floor(Math.random() * 20) + 1
+    const total = d20 + mod
+    const sign = mod >= 0 ? '+' : ''
+    onRoll({
+      label,
+      formula: `1d20${sign}${mod}`,
+      result: total,
+    })
   }
 
   const str = getAbility('str')
@@ -197,15 +227,29 @@ export function MonsterStatPanel({
   }
 
   function handleAttackRoll(action: any) {
-    const toHit = action.to_hit ?? action.toHit ?? action.attack_bonus ?? 0
+    const toHitRaw = action.to_hit ?? action.toHit ?? action.attack_bonus ?? 0
+    const toHit = Number(toHitRaw)
+    const bonus = Number.isFinite(toHit) ? toHit : 0
+
     const d20 = Math.floor(Math.random() * 20) + 1
-    const total = d20 + (Number.isFinite(toHit) ? toHit : 0)
+    const total = d20 + bonus
+
+    // ✅ hit logic (AC)
+    let outcome: string | null = null
+    if (targetAC != null) {
+      if (d20 === 1) outcome = `MISS (nat 1) vs AC ${targetAC}`
+      else if (d20 === 20) outcome = `HIT (nat 20) vs AC ${targetAC}`
+      else outcome = total >= targetAC ? `HIT vs AC ${targetAC}` : `MISS vs AC ${targetAC}`
+    }
+
+    const sign = bonus >= 0 ? '+' : ''
 
     onRoll({
-      label: `${name}: ${action.name || 'Attack'}`,
-      formula: `1d20+${toHit}`,
+      label: `${name}: ${action.name || 'Attack'}${target?.label ? ` → ${target.label}` : ''}`,
+      formula: `1d20${sign}${bonus}`,
       result: total,
-    })
+      outcome,
+    } as any)
   }
 
   function handleDamageRoll(action: any) {
@@ -346,7 +390,22 @@ export function MonsterStatPanel({
           ].map(([label, score]) => (
             <div
               key={label}
-              className="rounded-md border border-slate-700 bg-slate-950/70 p-1.5 text-center"
+              role={score != null ? 'button' : undefined}
+              tabIndex={score != null ? 0 : -1}
+              onClick={() => {
+                if (score == null) return
+                const mod = Math.floor(((score as number) - 10) / 2)
+                rollD20(`${name} · ${label} Check`, mod)
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return
+                if (score == null) return
+                const mod = Math.floor(((score as number) - 10) / 2)
+                rollD20(`${name} · ${label} Check`, mod)
+              }}
+              className={`rounded-md border border-slate-700 bg-slate-950/70 p-1.5 text-center ${
+                score != null ? 'cursor-pointer hover:border-sky-500 hover:bg-slate-950/90' : ''
+              }`}
             >
               <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">
                 {label}

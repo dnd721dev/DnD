@@ -1,9 +1,11 @@
 'use client'
 
 import type { ChangeEvent } from 'react'
+import { useMemo } from 'react'
 import MapBoard from '@/components/table/MapBoard'
 import MapBoardView from '@/components/table/MapBoardView'
 import { DiceLogOverlay } from './DiceLogOverlay'
+import { DiceRollOverlay } from './DiceRollOverlay'
 import type { DiceEntry } from '../types'
 
 export function MapSection(props: {
@@ -18,6 +20,19 @@ export function MapSection(props: {
   diceLog: DiceEntry[]
   onTestRoll: () => void
   onCloseDiceLog: () => void
+
+  // 🎲 quick roll animation overlay
+  rollOverlay?: null | { roller: string; label: string; formula: string; result: number }
+
+  // ✅ keep these if you’re passing them
+  speedFeet?: number
+  visionFeet?: number
+
+  // ✅ player character id (for movement/action tracking)
+  characterId?: string | null
+
+  // ✅ if your dropdown already sets this, pass it in (or ignore if you don’t use it here)
+  viewAsWallet?: string | null
 }) {
   const {
     mapUrl,
@@ -31,7 +46,20 @@ export function MapSection(props: {
     diceLog,
     onTestRoll,
     onCloseDiceLog,
+    rollOverlay,
+    speedFeet,
+    visionFeet,
+    characterId,
+    viewAsWallet,
   } = props
+
+  // ✅ Player POV wallet:
+  // - Player: always themselves
+  // - GM: only when explicitly viewing a player
+  const povWallet = useMemo(() => {
+    if (isGm) return (viewAsWallet ?? null)
+    return address ?? null
+  }, [isGm, viewAsWallet, address])
 
   return (
     <section className="relative h-full overflow-hidden rounded-xl border border-slate-800 bg-slate-950/80">
@@ -45,13 +73,32 @@ export function MapSection(props: {
               </div>
             </div>
           ) : isGm ? (
-            <MapBoard encounterId={encounterId} mapImageUrl={mapUrl} gridSize={50} />
+            // ✅ GM MODE:
+            // - If NO player selected (GM Free View) => MapBoard (NO FOG)
+            // - If player selected => MapBoardView (FOG POV)
+            povWallet ? (
+              <MapBoardView
+                encounterId={encounterId}
+                mapImageUrl={mapUrl}
+                ownerWallet={povWallet}
+                characterId={characterId ?? null}
+                gridSize={50}
+                speedFeet={speedFeet}
+                visionFeet={visionFeet}
+              />
+            ) : (
+              <MapBoard encounterId={encounterId} mapImageUrl={mapUrl} gridSize={50} />
+            )
           ) : (
+            // ✅ PLAYER MODE (always fog POV)
             <MapBoardView
               encounterId={encounterId}
               mapImageUrl={mapUrl}
-              ownerWallet={address ?? null}
+              ownerWallet={povWallet}
+              characterId={characterId ?? null}
               gridSize={50}
+              speedFeet={speedFeet}
+              visionFeet={visionFeet}
             />
           )
         ) : (
@@ -76,6 +123,7 @@ export function MapSection(props: {
           </div>
         )}
 
+        <DiceRollOverlay show={Boolean(rollOverlay)} payload={rollOverlay ?? null} />
         <DiceLogOverlay show={showDiceLog} diceLog={diceLog} onTestRoll={onTestRoll} onClose={onCloseDiceLog} />
       </div>
     </section>

@@ -12,4 +12,19 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
     autoRefreshToken: true,
     detectSessionInUrl: false,
   },
+  // ✅ Inject the connected wallet into every PostgREST request.
+  // RLS should read it from request headers (NOT JWT):
+  // lower(nullif(current_setting('request.headers', true)::json->>'x-wallet-address',''))
+  global: {
+    fetch: async (url, options: any = {}) => {
+      const headers = new Headers(options?.headers || {})
+      try {
+        const w = typeof window !== 'undefined' ? window.localStorage.getItem('dnd721_wallet') : null
+        if (w) headers.set('x-wallet-address', w)
+      } catch {
+        // ignore
+      }
+      return fetch(url, { ...options, headers })
+    },
+  },
 })

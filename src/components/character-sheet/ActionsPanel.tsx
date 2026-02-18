@@ -1,8 +1,7 @@
 'use client'
 
-import type { SheetAction } from '@/lib/actions/types'
-import { ALL_ACTIONS } from '@/lib/actions/registry'
-import { canUseAction } from '@/lib/actions'
+import { ALL_ACTIONS, canUseAction, type SheetAction } from '@/lib/actions'
+import type { ActionGate } from '@/lib/actions/types'
 
 type Props = {
   classKey: string
@@ -12,23 +11,47 @@ type Props = {
   onUseAction: (action: SheetAction) => void
 }
 
+function normKey(v: unknown) {
+  return String(v ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+}
+
+function gateVisible(g: ActionGate, classKey: string, subclassKey: string): boolean {
+  switch (g.kind) {
+    case 'always':
+      return true
+    case 'class':
+      return normKey(g.classKey) === normKey(classKey)
+    case 'subclass':
+      return Boolean(normKey(subclassKey)) && normKey(g.subclassKey) === normKey(subclassKey)
+    case 'and':
+      return g.all.every((x) => gateVisible(x, classKey, subclassKey))
+    case 'or':
+      return g.any.some((x) => gateVisible(x, classKey, subclassKey))
+    default:
+      return false
+  }
+}
+
 function groupTitle(kind: 'always' | 'class' | 'subclass') {
   if (kind === 'always') return 'Core'
   if (kind === 'class') return 'Class'
   return 'Subclass'
 }
 
-export function ActionsPanel({ classKey, subclassKey, actionState, resourceState, onUseAction }: Props) {
-  const normalizedClass = String(classKey || '').trim().toLowerCase()
-  const normalizedSubclass = String(subclassKey || '').trim().toLowerCase()
+export function ActionsPanel({
+  classKey,
+  subclassKey,
+  actionState,
+  resourceState,
+  onUseAction,
+}: Props) {
+  const normalizedClass = normKey(classKey)
+  const normalizedSubclass = normKey(subclassKey)
 
-  const visible = ALL_ACTIONS.filter((a) => {
-    const g = a.gates
-    if (g.kind === 'always') return true
-    if (g.kind === 'class') return String(g.classKey).toLowerCase() === normalizedClass
-    if (g.kind === 'subclass') return Boolean(normalizedSubclass) && String(g.subclassKey).toLowerCase() === normalizedSubclass
-    return false
-  })
+  const visible = ALL_ACTIONS.filter((a) => gateVisible(a.gates as ActionGate, normalizedClass, normalizedSubclass))
 
   const groups: Array<{ kind: 'always' | 'class' | 'subclass'; items: SheetAction[] }> = [
     { kind: 'always', items: [] },
@@ -37,9 +60,10 @@ export function ActionsPanel({ classKey, subclassKey, actionState, resourceState
   ]
 
   for (const a of visible) {
-    if (a.gates.kind === 'always') groups[0].items.push(a)
-    else if (a.gates.kind === 'class') groups[1].items.push(a)
-    else if (a.gates.kind === 'subclass') groups[2].items.push(a)
+    const g = a.gates as ActionGate
+    if (g.kind === 'always') groups[0].items.push(a)
+    else if (g.kind === 'class') groups[1].items.push(a)
+    else groups[2].items.push(a) // subclass and any composite gates default here
   }
 
   return (
@@ -77,6 +101,7 @@ export function ActionsPanel({ classKey, subclassKey, actionState, resourceState
                         ? 'cursor-not-allowed border-slate-800 bg-slate-900/30 text-slate-500'
                         : 'border-slate-700 bg-slate-900 text-slate-200 hover:border-sky-500'
                     }`}
+                    title={disabled ? (status.reason ?? 'Unavailable') : action.description ?? action.name}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="font-semibold">{action.name}</div>

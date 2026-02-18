@@ -21,24 +21,27 @@ function verifyEvmSignature(params: { wallet: string; message: string; signature
 }
 
 /**
- * We create (or fetch) a Supabase Auth user per wallet.
- * This gives you a guaranteed UUID `user_id` to store in `profiles.user_id`.
+ * HARD RULE:
+ * 1 wallet = 1 auth user
+ * 1 auth user = 1 wallet
+ *
+ * This function ENFORCES that rule.
  */
 async function getOrCreateAuthUserIdForWallet(wallet: string) {
   const w = normalizeAddr(wallet)
-
-  // Use a deterministic email so each wallet maps to 1 auth user.
-  // Domain can be anything; it won't email unless you build email flows.
   const email = `${w}@wallet.local`
 
-  // 1) Try to find an existing user by email
-  const list = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 })
+  // Look up existing auth user
+  const list = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 })
   if (list.error) throw new Error(list.error.message)
 
-  const existing = list.data?.users?.find((u) => (u.email || '').toLowerCase() === email.toLowerCase())
+  const existing = list.data.users.find(
+    (u) => (u.email || '').toLowerCase() === email
+  )
+
   if (existing?.id) return existing.id
 
-  // 2) Create user if not found
+  // Create auth user if missing
   const created = await supabaseAdmin.auth.admin.createUser({
     email,
     email_confirm: true,
@@ -46,7 +49,7 @@ async function getOrCreateAuthUserIdForWallet(wallet: string) {
   })
 
   if (created.error) throw new Error(created.error.message)
-  if (!created.data?.user?.id) throw new Error('Failed to create auth user id')
+  if (!created.data?.user?.id) throw new Error('Failed to create auth user')
 
   return created.data.user.id
 }
@@ -66,22 +69,39 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: 'Missing fields' }, { status: 400 })
     }
 
-    // Verify signature
-    const ok = verifyEvmSignature({ wallet: wallet_address, message, signature })
-    if (!ok) {
+    // Verify wallet signature
+    const valid = verifyEvmSignature({ wallet: wallet_address, message, signature })
+    if (!valid) {
       return NextResponse.json({ ok: false, error: 'Invalid signature' }, { status: 401 })
     }
 
-    // ✅ Guarantee a UUID user_id for this wallet
-    const user_id = await getOrCreateAuthUserIdForWallet(wallet_address)
+    const wallet = normalizeAddr(wallet_address)
 
-    // ✅ Upsert profile (NO updated_at field here to avoid schema cache error)
+    // Get or create auth user
+    const user_id = await getOrCreateAuthUserIdForWallet(wallet)
+
+    /**
+     * 🔥 CRITICAL FIX 🔥
+     * If this user_id was previously linked to ANOTHER wallet,
+     * we NULL it out first so UNIQUE(user_id) never explodes.
+     */
+    const clear = await supabaseAdmin
+      .from('profiles')
+      .update({ user_id: null })
+      .eq('user_id', user_id)
+      .neq('wallet_address', wallet)
+
+    if (clear.error) {
+      return NextResponse.json({ ok: false, error: clear.error.message }, { status: 400 })
+    }
+
+    // Final authoritative upsert
     const { data, error } = await supabaseAdmin
       .from('profiles')
       .upsert(
         {
           user_id,
-          wallet_address: normalizeAddr(wallet_address),
+          wallet_address: wallet,
           username,
           bio: bio ?? null,
         },
@@ -96,6 +116,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true, profile: data })
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? 'Server error' }, { status: 500 })
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? 'Server error' },
+      { status: 500 }
+    )
   }
 }

@@ -44,6 +44,8 @@ const MapBoard: React.FC<MapBoardProps> = ({
   const [activeInitiativeName, setActiveInitiativeName] = useState<string | null>(null);
 
   const [dragTokenId, setDragTokenId] = useState<string | null>(null);
+  const downTokenIdRef = useRef<string | null>(null);
+  const downTokenPosRef = useRef<{ x: number; y: number } | null>(null);
 
   const [hudTokenId, setHudTokenId] = useState<string | null>(null);
   const [hudPos, setHudPos] = useState<Point | null>(null);
@@ -202,6 +204,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(t.label || 'T', t.x, t.y);
+
     });
   }, [tokens, img, gridSize, highlightTokenId, activeInitiativeName]);
 
@@ -245,11 +248,15 @@ const MapBoard: React.FC<MapBoardProps> = ({
 
     if (hit) {
       setDragTokenId(hit.id);
+      downTokenIdRef.current = hit.id;
+      downTokenPosRef.current = { x: hit.x, y: hit.y };
       setIsPanning(false);
     } else {
       const screen = getScreenPoint(e);
       panStartRef.current = screen;
       panTranslateStartRef.current = { ...translate };
+      downTokenIdRef.current = null;
+      downTokenPosRef.current = null;
       setIsPanning(true);
     }
   };
@@ -278,6 +285,19 @@ const MapBoard: React.FC<MapBoardProps> = ({
 
     const t = tokens.find((tok) => tok.id === dragTokenId);
     setDragTokenId(null);
+
+    // ✅ if this was a click (no movement), treat it as target selection
+    const downId = downTokenIdRef.current;
+    const downPos = downTokenPosRef.current;
+    downTokenIdRef.current = null;
+    downTokenPosRef.current = null;
+
+    if (t && downId && t.id === downId && downPos && t.x === downPos.x && t.y === downPos.y) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('dnd721-target-selected', { detail: { token: t } }));
+      }
+    }
+
     if (!t) return;
 
     await supabase.from('tokens').update({ x: t.x, y: t.y }).eq('id', t.id);

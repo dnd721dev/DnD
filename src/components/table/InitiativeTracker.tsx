@@ -209,6 +209,56 @@ export default function InitiativeTracker({ encounterId }: InitiativeTrackerProp
     isPcInput.checked = false;
   }
 
+  // ✅ Add any existing monster tokens on the map into initiative (one-click sync)
+  async function syncMonsterTokens() {
+    if (!encounterId) return
+    setLoading(true)
+    try {
+      // load monster tokens for this encounter
+      const { data: tokens, error: tokErr } = await supabase
+        .from('tokens')
+        .select('id, name, current_hp, hp')
+        .eq('encounter_id', encounterId)
+        .eq('type', 'monster')
+
+      if (tokErr) {
+        console.error('syncMonsterTokens token load error', tokErr)
+        return
+      }
+
+      const monsterTokens = (tokens || []) as any[]
+      if (monsterTokens.length === 0) return
+
+      // existing initiative entries already linked to tokens
+      const existingTokenIds = new Set(
+        (entries || [])
+          .map((e) => e.token_id)
+          .filter(Boolean)
+          .map((v) => String(v))
+      )
+
+      const inserts = monsterTokens
+        .filter((t) => t?.id && !existingTokenIds.has(String(t.id)))
+        .map((t) => ({
+          encounter_id: encounterId,
+          name: t.name ?? 'Monster',
+          init: 0,
+          hp: (t.current_hp ?? t.hp) ?? null,
+          is_pc: false,
+          character_id: null,
+          token_id: t.id,
+          wallet_address: null,
+        }))
+
+      if (inserts.length === 0) return
+
+      const { error: insErr } = await supabase.from('initiative_entries').insert(inserts)
+      if (insErr) console.error('syncMonsterTokens insert error', insErr)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   async function removeEntry(id: string) {
     const { error } = await supabase
       .from('initiative_entries')
@@ -411,6 +461,18 @@ export default function InitiativeTracker({ encounterId }: InitiativeTrackerProp
 
       {/* Controls + form */}
       <div className="flex flex-col gap-2 border-t border-slate-800 pt-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] text-slate-400">Quick add</span>
+          <button
+            type="button"
+            onClick={syncMonsterTokens}
+            disabled={!encounterId}
+            className="rounded bg-slate-900 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
+            title="Add any monster tokens already on the map into initiative"
+          >
+            + Monsters from map
+          </button>
+        </div>
         <form onSubmit={addEntry} className="flex flex-col gap-1.5">
           <div className="flex gap-1.5">
             <input

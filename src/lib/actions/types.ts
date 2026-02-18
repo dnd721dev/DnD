@@ -1,30 +1,34 @@
-export type AbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
+export type RestKind = 'short' | 'long'
 
 export type ActionGate =
   | { kind: 'always' }
   | { kind: 'class'; classKey: string }
   | { kind: 'subclass'; subclassKey: string }
-  | { kind: 'anyOf'; gates: ActionGate[] }
+  | { kind: 'and'; all: ActionGate[] }
+  | { kind: 'or'; any: ActionGate[] }
 
 export type ActionCost =
   | { type: 'none' }
+  | { type: 'resource'; key: string; amount: number }
   | { type: 'perTurnFlag'; flag: string }
-  | { type: 'perRestFlag'; flag: string; rest: 'short' | 'long' | 'any' }
-  | { type: 'resource'; key: string; amount: number } // resource_state[key] -= amount
+  | { type: 'perRestFlag'; flag: string; rest: RestKind }
 
 export type ActionEffect =
-  | { type: 'none' }
   | { type: 'setFlag'; flag: string; value: boolean }
-  | { type: 'spendResource'; key: string; amount: number }
-  | { type: 'healSelf'; dice: string; bonusAbility?: AbilityKey } // optional future hook
-  | { type: 'note'; text: string } // just logs a note to dice log later
+  | { type: 'rollAttack' }
+  | { type: 'rollDamage' }
+  | { type: 'rollFormula'; label: string; formula: string }
+  | { type: 'logNote'; text: string }
 
 export type SheetAction = {
   id: string
   name: string
   category: 'Core' | 'Class' | 'Subclass' | 'DND721'
+  description?: string
+
   gates: ActionGate
   cost: ActionCost
+
+  // optional: if present, clicking also performs these
   effects?: ActionEffect[]
-  description?: string
 }

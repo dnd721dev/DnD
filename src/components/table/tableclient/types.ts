@@ -24,12 +24,14 @@ export type DiceEntry = {
   result: number
   formula: string
   timestamp: string
+  outcome?: string | null
 }
 
 export type ExternalRoll = {
   label: string
   formula: string
   result: number
+  outcome?: string | null
 }
 
 // Loose character summary – we only care about a few fields
