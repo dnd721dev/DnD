@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ethers } from 'ethers'
 import jwt from 'jsonwebtoken'
+import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 
 type Body = {
   walletAddress: string
@@ -14,6 +15,15 @@ function lower(s: string) {
 }
 
 export async function POST(req: NextRequest) {
+  // 10 login attempts per wallet per 5 minutes
+  const rl = checkRateLimit(rateLimitKey(req, 'auth:login'), { limit: 10, windowMs: 5 * 60 * 1000 })
+  if (!rl.ok) {
+    return NextResponse.json({ error: 'Too many login attempts. Try again later.' }, {
+      status: 429,
+      headers: { 'Retry-After': String(rl.retryAfter) },
+    })
+  }
+
   const secret = process.env.SUPABASE_JWT_SECRET
   if (!secret) {
     return NextResponse.json(

@@ -114,17 +114,34 @@ export default function InitiativeTracker({ encounterId }: InitiativeTrackerProp
       ? sortedEntries[turnIdx % sortedEntries.length]
       : null;
 
-  // Broadcast the active creature name so MapBoard can highlight tokens
+  // Broadcast active creature to same-tab components (MapBoard, GMSidebar, PlayerSidebar)
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const name = current?.name ?? null;
     window.dispatchEvent(
       new CustomEvent('dnd721-active-initiative', {
-        detail: { name },
+        detail: {
+          name: current?.name ?? null,
+          wallet: current?.wallet_address ?? null,
+        },
       })
     );
-  }, [current?.id, current?.name]);
+  }, [current?.id, current?.name, current?.wallet_address]);
+
+  // Persist active turn to DB so players on other devices sync via realtime
+  useEffect(() => {
+    if (!encounterId) return;
+
+    const entryId = started && current ? current.id : null;
+
+    supabase
+      .from('encounters')
+      .update({ active_entry_id: entryId })
+      .eq('id', encounterId)
+      .then(({ error }) => {
+        if (error) console.error('Failed to persist active_entry_id:', error);
+      });
+  }, [encounterId, started, current?.id]);
 
   // ✅ Reset per-turn flags automatically when it becomes someone's turn
   async function resetPerTurnFlagsForCharacter(characterId: string) {

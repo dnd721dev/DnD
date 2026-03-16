@@ -1,16 +1,21 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import MonsterLibrary from '@/components/table/MonsterLibrary';
 import InitiativeTracker from '@/components/table/InitiativeTracker';
 import DMPanel from '@/components/table/DMPanel';
+import { HandoutsPanel } from '@/components/table/HandoutsPanel';
+import TableChat from '@/components/table/TableChat';
+import SponsorsPanel from '@/components/table/SponsorsPanel';
+import { TriggersPanel } from '@/components/table/TriggersPanel';
 
 type GMSidebarProps = {
+  sessionId?: string | null;
   encounterId?: string | null;
   address?: string | null;
+  activeMapId?: string | null;
   onRoll: (entry: any) => void;
-  // FIX: match MonsterLibrary + TableClient spawnMonsterToken signature
   spawnMonsterToken: (monster: { id: string; name: string }) => void | Promise<void>;
 };
 
@@ -25,15 +30,18 @@ type InitiativeEntry = {
   created_at: string;
 };
 
-type TabKey = 'monsters' | 'initiative' | 'tools' | 'notes' | 'chat';
+type TabKey = 'combat' | 'tools' | 'session' | 'admin';
 
 export default function GMSidebar({
+  sessionId,
   encounterId,
   address,
+  activeMapId,
   onRoll,
   spawnMonsterToken,
 }: GMSidebarProps) {
-  const [activeTab, setActiveTab] = useState<TabKey>('monsters');
+  const [activeTab, setActiveTab] = useState<TabKey>('combat');
+  const [collapsed, setCollapsed] = useState(false);
 
   // Footer: initiative strip
   const [entries, setEntries] = useState<InitiativeEntry[]>([]);
@@ -113,41 +121,56 @@ export default function GMSidebar({
     return arr;
   }, [entries]);
 
-  // Simple local GM notes (for now, not persisted)
+  // GM notes — persisted to sessions.gm_notes
   const [gmNotes, setGmNotes] = useState('');
+  const [notesSaving, setNotesSaving] = useState(false);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const tabs: { key: TabKey; label: string; hint: string }[] = [
-    { key: 'monsters', label: 'Monsters', hint: 'Bestiary & spawns' },
-    { key: 'initiative', label: 'Initiative', hint: 'Turn order & rounds' },
-    { key: 'tools', label: 'GM Tools', hint: 'Rolls & utilities' },
-    { key: 'notes', label: 'Notes', hint: 'Session notes' },
-    { key: 'chat', label: 'Chat', hint: 'Table chat (coming soon)' },
+  // Load notes when session changes
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+
+    supabase
+      .from('sessions')
+      .select('gm_notes')
+      .eq('id', sessionId)
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setGmNotes((data as any)?.gm_notes ?? '');
+      });
+
+    return () => { cancelled = true; };
+  }, [sessionId]);
+
+  function handleNotesChange(value: string) {
+    setGmNotes(value);
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      if (!sessionId) return;
+      setNotesSaving(true);
+      await supabase.from('sessions').update({ gm_notes: value }).eq('id', sessionId);
+      setNotesSaving(false);
+    }, 1000);
+  }
+
+  const tabs: { key: TabKey; label: string }[] = [
+    { key: 'combat', label: '⚔ Combat' },
+    { key: 'tools', label: '🎲 Tools' },
+    { key: 'session', label: '📜 Session' },
+    { key: 'admin', label: '⭐ Admin' },
   ];
 
   return (
-    <div className="flex h-full flex-col rounded-xl border border-yellow-700/40 bg-gradient-to-b from-slate-950 via-slate-950/95 to-slate-950/90 shadow-[0_0_20px_rgba(0,0,0,0.6)]">
+    <div className="pointer-events-auto flex flex-col rounded-t-xl border border-b-0 border-yellow-700/40 bg-slate-950/90 backdrop-blur-md shadow-[0_-4px_24px_rgba(0,0,0,0.7)]">
       {/* Header + Tabs */}
-      <div className="border-b border-yellow-800/50 bg-gradient-to-r from-slate-950 via-slate-900/95 to-slate-950 px-2.5 py-2">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <div className="h-6 w-6 rounded-full border border-yellow-600/70 bg-slate-950/80 text-[11px] font-bold uppercase tracking-[0.2em] text-yellow-300 flex items-center justify-center">
-              GM
-            </div>
-            <div className="flex flex-col">
-              <span className="text-xs font-semibold text-slate-100">
-                GM Control Panel
-              </span>
-              <span className="text-[10px] text-yellow-300/80">
-                {encounterId ? 'Encounter live' : 'No encounter selected'}
-              </span>
-            </div>
-          </div>
-          <div className="rounded-md border border-yellow-800/60 bg-slate-950/80 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide text-yellow-300">
-            DND721
-          </div>
+      {/* Single-row header: badge + tabs + DND721 */}
+      <div className="flex shrink-0 items-center gap-2 border-b border-yellow-800/50 bg-gradient-to-r from-slate-950 via-slate-900/95 to-slate-950 px-3 py-2">
+        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-yellow-600/70 bg-slate-950/80 text-[11px] font-bold uppercase tracking-[0.2em] text-yellow-300">
+          GM
         </div>
-
-        <div className="flex gap-1 rounded-lg bg-slate-900/80 p-0.5">
+        <div className="flex flex-1 gap-1 rounded-lg bg-slate-900/80 p-0.5">
           {tabs.map((tab) => {
             const isActive = tab.key === activeTab;
             return (
@@ -166,85 +189,108 @@ export default function GMSidebar({
             );
           })}
         </div>
-      </div>
-
-      {/* Body */}
-      <div className="flex-1 overflow-hidden">
-        <div className="h-full overflow-y-auto px-2.5 py-2 space-y-2 text-xs">
-          {activeTab === 'monsters' && (
-            <div className="rounded-lg border border-slate-800/80 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
-              {encounterId ? (
-                <MonsterLibrary
-                  ownerWallet={address ?? null}
-                  onSpawnMonster={spawnMonsterToken}
-                />
-              ) : (
-                <p className="text-[11px] text-slate-400">
-                  Start an encounter to use the Monster Library.
-                </p>
-              )}
-            </div>
-          )}
-
-          {activeTab === 'initiative' && (
-            <div className="rounded-lg border border-slate-800/80 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
-              <InitiativeTracker encounterId={encounterId ?? null} />
-            </div>
-          )}
-
-          {activeTab === 'tools' && (
-            <div className="rounded-lg border border-slate-800/80 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
-              {encounterId ? (
-                <DMPanel encounterId={encounterId} onRoll={onRoll} />
-              ) : (
-                <p className="text-[11px] text-slate-400">
-                  Create or join an encounter to use GM tools.
-                </p>
-              )}
-            </div>
-          )}
-
-          {activeTab === 'notes' && (
-            <div className="flex flex-col gap-1.5 rounded-lg border border-slate-800/80 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold text-slate-100">
-                  Session Notes
-                </span>
-                <span className="text-[10px] text-slate-500">
-                  (Local only for now)
-                </span>
-              </div>
-              <textarea
-                value={gmNotes}
-                onChange={(e) => setGmNotes(e.target.value)}
-                rows={6}
-                className="w-full resize-none rounded-md border border-slate-800 bg-slate-950/90 px-2 py-1 text-[11px] text-slate-100 placeholder:text-slate-500 focus:border-yellow-500 focus:outline-none"
-                placeholder="Write NPC names, plot twists, secret DCs…"
-              />
-            </div>
-          )}
-
-          {activeTab === 'chat' && (
-            <div className="flex flex-col gap-1.5 rounded-lg border border-slate-800/80 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold text-slate-100">
-                  Table Chat
-                </span>
-                <span className="rounded border border-yellow-500/60 bg-yellow-500/10 px-1.5 py-0.5 text-[10px] text-yellow-300">
-                  Coming soon
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400">
-                A real-time chat panel will live here, showing rolls, whispers,
-                and table chatter. For now, use voice + dice log.
-              </p>
-            </div>
-          )}
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="shrink-0 rounded-md border border-yellow-800/60 bg-slate-950/80 px-2 py-0.5 text-[11px] text-yellow-300/80 hover:border-yellow-500/60"
+          title={collapsed ? 'Expand panel' : 'Collapse panel'}
+        >
+          {collapsed ? '▲' : '▼'}
+        </button>
+        <div className="shrink-0 rounded-md border border-yellow-800/60 bg-slate-950/80 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide text-yellow-300">
+          DND721
         </div>
       </div>
 
+      {/* Body — 2-column grid per tab */}
+      {!collapsed && <div className="h-48 overflow-hidden p-2 text-xs">
+
+        {/* ⚔ Combat: InitiativeTracker (left) + MonsterLibrary (right) */}
+        {activeTab === 'combat' && (
+          <div className="grid h-full grid-cols-2 gap-2">
+            <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
+              <InitiativeTracker encounterId={encounterId ?? null} />
+            </div>
+            <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
+              {encounterId ? (
+                <MonsterLibrary ownerWallet={address ?? null} onSpawnMonster={spawnMonsterToken} />
+              ) : (
+                <p className="text-[11px] text-slate-400">Start an encounter to spawn monsters from the library.</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 🎲 Tools: DMPanel (left) + TriggersPanel (right) */}
+        {activeTab === 'tools' && (
+          <div className="grid h-full grid-cols-2 gap-2">
+            <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
+              {encounterId ? (
+                <DMPanel encounterId={encounterId} onRoll={onRoll} />
+              ) : (
+                <p className="text-[11px] text-slate-400">Create or join an encounter to use GM tools.</p>
+              )}
+            </div>
+            <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
+              {sessionId && address ? (
+                <TriggersPanel sessionId={sessionId} gmWallet={address} mapId={activeMapId ?? null} />
+              ) : (
+                <p className="text-[11px] text-slate-400">Session not loaded.</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 📜 Session: Handouts+Notes (left) + Chat (right) */}
+        {activeTab === 'session' && (
+          <div className="grid h-full grid-cols-2 gap-2">
+            <div className="flex flex-col gap-2 overflow-y-auto">
+              <div className="rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
+                {sessionId ? (
+                  <HandoutsPanel sessionId={sessionId} isGm={true} gmWallet={address ?? null} />
+                ) : (
+                  <p className="text-[11px] text-slate-400">Session not loaded.</p>
+                )}
+              </div>
+              <div className="flex flex-col gap-1.5 rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-yellow-300/70">Session Notes</span>
+                  <span className="text-[10px] text-slate-500">{notesSaving ? 'Saving…' : 'Auto-saved'}</span>
+                </div>
+                <textarea
+                  value={gmNotes}
+                  onChange={(e) => handleNotesChange(e.target.value)}
+                  rows={3}
+                  className="w-full resize-none rounded-md border border-yellow-900/30 bg-slate-950/90 px-2 py-1 text-[11px] text-slate-100 placeholder:text-slate-500 focus:border-yellow-500 focus:outline-none"
+                  placeholder="Write NPC names, plot twists, secret DCs…"
+                />
+              </div>
+            </div>
+            <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
+              {sessionId ? (
+                <TableChat sessionId={sessionId} senderWallet={address ?? null} senderName="GM" />
+              ) : (
+                <p className="text-[11px] text-slate-400">Session not loaded.</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ⭐ Admin: SponsorsPanel full width */}
+        {activeTab === 'admin' && (
+          <div className="h-full overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
+            {sessionId ? (
+              <SponsorsPanel sessionId={sessionId} />
+            ) : (
+              <p className="text-[11px] text-slate-400">Session not loaded.</p>
+            )}
+          </div>
+        )}
+
+      </div>}
+
       {/* Footer: initiative strip */}
-      <div className="border-t border-yellow-800/60 bg-slate-950/95 px-2.5 py-1.5">
+      {!collapsed && <div className="border-t border-yellow-800/60 bg-slate-950/95 px-2.5 py-1.5">
         <div className="mb-1 flex items-center justify-between text-[10px] text-slate-400">
           <span className="font-semibold uppercase tracking-wide text-yellow-300/90">
             Turn Order
@@ -302,7 +348,7 @@ export default function GMSidebar({
             </span>
           )}
         </div>
-      </div>
+      </div>}
     </div>
   );
 }

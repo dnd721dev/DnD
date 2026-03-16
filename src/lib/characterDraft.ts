@@ -29,7 +29,14 @@ export function saveDraft(update: Partial<CharacterDraft>) {
   localStorage.setItem(DRAFT_KEY, JSON.stringify(merged))
 }
 
-export function clearDraft() {
+export function clearDraft(walletAddress?: string) {
   if (typeof window === 'undefined') return
   localStorage.removeItem(DRAFT_KEY)
+
+  // Also clear from Supabase if wallet is provided (fire-and-forget)
+  if (walletAddress) {
+    void fetch(`/api/character-draft?wallet=${encodeURIComponent(walletAddress.toLowerCase())}`, {
+      method: 'DELETE',
+    }).catch(() => {})
+  }
 }

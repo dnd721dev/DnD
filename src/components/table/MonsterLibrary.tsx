@@ -33,7 +33,7 @@ type DbMonsterRow = {
 }
 
 type MonsterLibraryProps = {
-  onSpawnMonster?: (monster: { id: string; name: string }) => void
+  onSpawnMonster?: (monster: { id: string; name: string }) => void | Promise<void>
   ownerWallet?: string | null
 }
 

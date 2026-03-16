@@ -1,6 +1,9 @@
 'use client'
 
+import { useState } from 'react'
 import VoiceChat from '@/components/table/VoiceChat'
+import { RecordingButton } from './RecordingButton'
+import { SrdSearchOverlay } from '@/components/table/SrdSearchOverlay'
 import type { SessionWithCampaign } from '../types'
 import { formatDateTime } from '../utils'
 
@@ -13,15 +16,19 @@ export function TableTopBar(props: {
   onToggleDiceLog: () => void
 }) {
   const { session, isGm, address, roomName, showDiceLog, onToggleDiceLog } = props
+  const [srdOpen, setSrdOpen] = useState(false)
+  const identity = address?.toLowerCase()
   const campaignMeta = session.campaigns?.[0]
 
   return (
-    <header className="flex flex-col gap-2 rounded-xl border border-slate-800 bg-slate-900/70 p-3 sm:flex-row sm:items-center sm:justify-between">
+    <>
+    <SrdSearchOverlay open={srdOpen} onClose={() => setSrdOpen(false)} />
+    <header className="flex flex-col gap-2 rounded-xl border border-yellow-900/40 bg-slate-900/70 p-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
-        <p className="text-xs uppercase tracking-wide text-slate-400">
+        <p className="text-xs uppercase tracking-wide text-yellow-300/60">
           DND721 Session Table {isGm ? '· GM' : '· Player'}
         </p>
-        <h1 className="text-lg font-bold text-slate-50 sm:text-xl">
+        <h1 className="text-lg font-bold text-yellow-200 sm:text-xl">
           {session.title || 'Untitled Session'}
         </h1>
         <p className="text-xs text-slate-400">
@@ -36,6 +43,17 @@ export function TableTopBar(props: {
 
       <div className="flex flex-col items-start gap-2 text-xs text-slate-300 sm:items-end">
         <div className="flex items-center gap-2">
+          {isGm && (
+            <RecordingButton sessionId={session.id} roomName={roomName} />
+          )}
+          <button
+            type="button"
+            onClick={() => setSrdOpen(true)}
+            className="rounded-md bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:bg-slate-700"
+            title="SRD spell & monster search (spells, monsters)"
+          >
+            📖 SRD
+          </button>
           <button
             type="button"
             onClick={onToggleDiceLog}
@@ -44,11 +62,7 @@ export function TableTopBar(props: {
             {showDiceLog ? 'Hide Dice Log' : 'Show Dice Log'}
           </button>
           <div className="shrink-0">
-            <VoiceChat
-              // extra prop ignored by the simple VoiceChat component
-              // @ts-expect-error
-              roomName={roomName}
-            />
+            <VoiceChat roomName={roomName} identity={identity} />
           </div>
         </div>
 
@@ -67,5 +81,6 @@ export function TableTopBar(props: {
         </div>
       </div>
     </header>
+    </>
   )
 }

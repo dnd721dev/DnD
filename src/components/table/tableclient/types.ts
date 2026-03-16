@@ -9,6 +9,7 @@ export type SessionWithCampaign = {
   campaign_id: string | null
   gm_wallet: string | null
   map_image_url: string | null
+  current_map_id: string | null
   campaigns?:
     | {
         livekit_room_name: string | null

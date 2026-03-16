@@ -12,7 +12,7 @@ export async function GET() {
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production', // ✅ localhost works
     path: '/',
-    maxAge: 60 * 5,
+    maxAge: 60 * 20,
   })
 
   return res

@@ -18,7 +18,6 @@ import { PersonalityNotesPanel } from '@/components/character-sheet/PersonalityN
 import { ResourcesPanel } from '@/components/character-sheet/ResourcesPanel'
 import { CombatStatsPanel } from '@/components/character-sheet/CombatStatsPanel'
 import { EquipmentPanel } from '@/components/character-sheet/EquipmentPanel'
-import { InventoryPanel } from '@/components/character-sheet/InventoryPanel'
 import { ActionsPanel } from '@/components/character-sheet/ActionsPanel'
 
 import { abilityMod } from '@/components/character-sheet/utils'
@@ -368,7 +367,7 @@ export default function CharacterSheetPage() {
             onClick={() => setActiveTab(t)}
             className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
               activeTab === t
-                ? 'bg-slate-800 text-slate-100'
+                ? 'bg-indigo-600/30 text-indigo-100 ring-1 ring-indigo-500/50'
                 : 'bg-slate-900/40 text-slate-300 hover:bg-slate-900'
             }`}
           >
@@ -387,7 +386,7 @@ export default function CharacterSheetPage() {
             onClick={() => setActiveTab('magic')}
             className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
               activeTab === 'magic'
-                ? 'bg-slate-800 text-slate-100'
+                ? 'bg-indigo-600/30 text-indigo-100 ring-1 ring-indigo-500/50'
                 : 'bg-slate-900/40 text-slate-300 hover:bg-slate-900'
             }`}
           >
@@ -402,13 +401,23 @@ export default function CharacterSheetPage() {
         )}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-[1.4fr,2fr,1.2fr]">
+      <div className="grid gap-4 items-start md:grid-cols-[1.4fr,2fr,1.2fr]">
+        {/* LEFT COLUMN — always visible core stats */}
+        <div className="space-y-3">
+          <AbilitiesPanel abilities={abilities} onRollAbilityCheck={rollAbilityCheck} />
+          <CombatStatsPanel d={d} onAttack={rollMainAttack} onDamage={rollMainDamage} />
+          <SavingThrowsPanel
+            abilities={abilities}
+            savingThrowSet={savingThrowSet}
+            profBonus={d.profBonus}
+            onRollSavingThrow={rollSavingThrow}
+          />
+        </div>
+
+        {/* MIDDLE COLUMN — tab-specific content */}
         <div className="space-y-3">
           {activeTab === 'overview' && (
             <>
-              <AbilitiesPanel abilities={abilities} onRollAbilityCheck={rollAbilityCheck} />
-
-              {/* ✅ Actions Panel */}
               <ActionsPanel
                 classKey={normKey(c.main_job)}
                 subclassKey={getSubclassKey(c as any)}
@@ -416,37 +425,12 @@ export default function CharacterSheetPage() {
                 resourceState={resourceValues}
                 onUseAction={handleUseAction}
               />
-
               <ResourcesPanel
                 resources={d.resources ?? []}
                 values={resourceValues}
                 onChange={onChangeResource}
                 onShortRest={onShortRest}
                 onLongRest={onLongRest}
-              />
-
-              <CombatStatsPanel d={d} onAttack={rollMainAttack} onDamage={rollMainDamage} />
-
-              <SavingThrowsPanel
-                abilities={abilities}
-                savingThrowSet={savingThrowSet}
-                profBonus={d.profBonus}
-                onRollSavingThrow={rollSavingThrow}
-              />
-            </>
-          )}
-        </div>
-
-        <div className="space-y-3">
-          {activeTab === 'gear' && (
-            <>
-              <EquipmentPanel
-                c={c}
-                onSaved={(patch) => setC((prev) => (prev ? ({ ...prev, ...patch } as any) : prev))}
-              />
-              <InventoryPanel
-                c={c}
-                onSaved={(patch) => setC((prev) => (prev ? ({ ...prev, ...patch } as any) : prev))}
               />
             </>
           )}
@@ -459,15 +443,26 @@ export default function CharacterSheetPage() {
                 profBonus={d.profBonus}
                 passivePerception={d.passivePerception}
               />
-              <TraitsFeaturesPanel c={c} />
+              <div className="max-h-[60vh] overflow-y-auto rounded-xl">
+                <TraitsFeaturesPanel c={c} />
+              </div>
             </>
           )}
 
+          {activeTab === 'gear' && (
+            <EquipmentPanel
+              c={c}
+              onSaved={(patch) => setC((prev) => (prev ? ({ ...prev, ...patch } as any) : prev))}
+            />
+          )}
+
           {activeTab === 'notes' && <PersonalityNotesPanel c={c} />}
+
+          {activeTab === 'magic' && isMageUser && <SpellsPanel c={c} spellSlots={c.spell_slots ?? null} />}
         </div>
 
+        {/* RIGHT COLUMN — roll log always visible */}
         <div className="space-y-3">
-          {activeTab === 'magic' && isMageUser && <SpellsPanel c={c} spellSlots={c.spell_slots ?? null} />}
           <RollLogPanel rollLog={rollLog} />
         </div>
       </div>

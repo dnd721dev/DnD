@@ -1,11 +1,12 @@
 // src/lib/backgrounds.ts
 // SRD-style backgrounds for DND721.
-// Uses 2014 5e-style backgrounds with:
+// Uses 2014 5e-style backgrounds with 2024 ability score modifiers:
 // - skill proficiencies
 // - tool proficiencies
 // - language choices
 // - starting equipment summary
 // - a short, original "feature" summary
+// - ability score modifiers (2024 rules: typically +2/+1)
 
 import type { SkillKey } from './skills'
 import type { LanguageKey } from './races'
@@ -30,6 +31,8 @@ export type BackgroundFeature = {
   summary: string
 }
 
+export type AbilityModKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
+
 export type Background = {
   key: BackgroundKey
   name: string
@@ -49,6 +52,11 @@ export type Background = {
   startingEquipment: string[]
   /** The unique background feature. */
   feature: BackgroundFeature
+  /**
+   * Ability score bonuses granted by this background (2024 rules).
+   * Typically +2 to one ability and +1 to another.
+   */
+  abilityScoreModifiers: Partial<Record<AbilityModKey, number>>
 }
 
 // ------------------------------------
@@ -76,6 +84,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
       summary:
         'You belong to a religious community that offers you modest shelter, support, and guidance at temples of your faith.',
     },
+    abilityScoreModifiers: { wis: 2, int: 1 },
   },
 
   // ===== CHARLATAN =====
@@ -96,6 +105,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
       summary:
         'You maintain a well-developed second persona, complete with forged papers and disguises, that can pass casual scrutiny.',
     },
+    abilityScoreModifiers: { cha: 2, dex: 1 },
   },
 
   // ===== CRIMINAL / SPY =====
@@ -103,7 +113,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
     key: 'criminal',
     name: 'Criminal / Spy',
     skillProficiencies: ['deception', 'stealth'],
-    toolProficiencies: ['One type of gaming set', 'Thieves’ tools'],
+    toolProficiencies: ['One type of gaming set', "Thieves' tools"],
     extraLanguageChoices: 0,
     startingEquipment: [
       'Crowbar',
@@ -116,6 +126,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
       summary:
         'You have a reliable underworld contact who can pass messages and help you find illicit information or goods.',
     },
+    abilityScoreModifiers: { dex: 2, int: 1 },
   },
 
   // ===== ENTERTAINER =====
@@ -136,6 +147,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
       summary:
         'You can usually find a place to perform, earning food and lodging in exchange for your talents.',
     },
+    abilityScoreModifiers: { cha: 2, dex: 1 },
   },
 
   // ===== FOLK HERO =====
@@ -143,10 +155,10 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
     key: 'folkHero',
     name: 'Folk Hero',
     skillProficiencies: ['animalHandling', 'survival'],
-    toolProficiencies: ['One type of artisan’s tools', 'Vehicles (land)'],
+    toolProficiencies: ["One type of artisan's tools", 'Vehicles (land)'],
     extraLanguageChoices: 0,
     startingEquipment: [
-      'Set of artisan’s tools',
+      "Set of artisan's tools",
       'Shovel or farming implement',
       'Common clothes',
       'Token marking you as a local hero',
@@ -155,8 +167,9 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
     feature: {
       name: 'Rustic Hospitality',
       summary:
-        'Common folk recognize you as one of their own and are inclined to shelter you and your companions, as long as you don’t abuse their trust.',
+        "Common folk recognize you as one of their own and are inclined to shelter you and your companions, as long as you don't abuse their trust.",
     },
+    abilityScoreModifiers: { wis: 2, con: 1 },
   },
 
   // ===== GUILD ARTISAN =====
@@ -164,12 +177,12 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
     key: 'guildArtisan',
     name: 'Guild Artisan',
     skillProficiencies: ['insight', 'persuasion'],
-    toolProficiencies: ['One type of artisan’s tools'],
+    toolProficiencies: ["One type of artisan's tools"],
     extraLanguageChoices: 1,
     startingEquipment: [
-      'Set of artisan’s tools',
+      "Set of artisan's tools",
       'Letter of introduction from your guild',
-      'Traveler’s clothes',
+      "Traveler's clothes",
       '15 gp',
     ],
     feature: {
@@ -177,6 +190,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
       summary:
         'You belong to a trade guild that offers support, legal help, and contacts in exchange for dues and obligations.',
     },
+    abilityScoreModifiers: { cha: 2, int: 1 },
   },
 
   // ===== HERMIT =====
@@ -198,6 +212,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
       summary:
         'During your isolation, you uncovered a significant insight or secret that shapes your path in the world.',
     },
+    abilityScoreModifiers: { wis: 2, con: 1 },
   },
 
   // ===== NOBLE =====
@@ -218,6 +233,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
       summary:
         'Your noble birth opens doors: many commoners defer to you, and you can often secure audiences with local leaders.',
     },
+    abilityScoreModifiers: { cha: 2, int: 1 },
   },
 
   // ===== OUTLANDER =====
@@ -231,7 +247,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
       'Staff',
       'Hunting trap',
       'Trophy from an animal you killed',
-      'Traveler’s clothes',
+      "Traveler's clothes",
       '10 gp',
     ],
     feature: {
@@ -239,6 +255,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
       summary:
         'You have a strong memory for maps and terrain and can usually find food and fresh water for yourself and companions in the wild.',
     },
+    abilityScoreModifiers: { str: 2, wis: 1 },
   },
 
   // ===== SAGE =====
@@ -258,8 +275,9 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
     feature: {
       name: 'Researcher',
       summary:
-        'You know how to track down lore: if you don’t know an answer, you often know where or whom to ask.',
+        "You know how to track down lore: if you don't know an answer, you often know where or whom to ask.",
     },
+    abilityScoreModifiers: { int: 2, wis: 1 },
   },
 
   // ===== SOLDIER =====
@@ -281,6 +299,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
       summary:
         'You carry a rank from your service; soldiers of lower rank, and sometimes civilians, recognize your authority in military matters.',
     },
+    abilityScoreModifiers: { str: 2, con: 1 },
   },
 
   // ===== URCHIN =====
@@ -288,7 +307,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
     key: 'urchin',
     name: 'Urchin',
     skillProficiencies: ['sleightOfHand', 'stealth'],
-    toolProficiencies: ['Disguise kit', 'Thieves’ tools'],
+    toolProficiencies: ['Disguise kit', "Thieves' tools"],
     extraLanguageChoices: 0,
     startingEquipment: [
       'Small knife',
@@ -302,6 +321,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
       summary:
         'You know hidden paths and shortcuts through urban environments, letting you travel quickly through back streets and alleys.',
     },
+    abilityScoreModifiers: { dex: 2, int: 1 },
   },
 }
 

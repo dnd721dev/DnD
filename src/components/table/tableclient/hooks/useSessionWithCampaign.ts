@@ -10,6 +10,8 @@ export function useSessionWithCampaign(sessionId: string) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    let mounted = true
+
     async function load() {
       setLoading(true)
       setError(null)
@@ -26,6 +28,7 @@ export function useSessionWithCampaign(sessionId: string) {
           campaign_id,
           gm_wallet,
           map_image_url,
+          current_map_id,
           campaigns:campaign_id (
             livekit_room_name,
             title
@@ -34,6 +37,8 @@ export function useSessionWithCampaign(sessionId: string) {
         )
         .eq('id', sessionId)
         .limit(1).maybeSingle()
+
+      if (!mounted) return
 
       if (error || !data) {
         console.error(error)
@@ -48,6 +53,27 @@ export function useSessionWithCampaign(sessionId: string) {
     }
 
     load()
+
+    // Realtime: detect when GM switches the active map so all clients update
+    const channel = supabase
+      .channel(`session-meta-${sessionId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'sessions', filter: `id=eq.${sessionId}` },
+        (payload) => {
+          if (!mounted) return
+          const updated = payload.new as any
+          setSession((prev) =>
+            prev ? { ...prev, current_map_id: updated.current_map_id ?? null } : prev
+          )
+        }
+      )
+      .subscribe()
+
+    return () => {
+      mounted = false
+      supabase.removeChannel(channel)
+    }
   }, [sessionId])
 
   return { session, setSession, loading, error }

@@ -1,62 +1,11 @@
-export type MonsterSize = 'Tiny' | 'Small' | 'Medium' | 'Large' | 'Huge' | 'Gargantuan'
-export type MonsterType =
-  | 'aberration'
-  | 'beast'
-  | 'celestial'
-  | 'construct'
-  | 'dragon'
-  | 'elemental'
-  | 'fey'
-  | 'fiend'
-  | 'giant'
-  | 'humanoid'
-  | 'monstrosity'
-  | 'ooze'
-  | 'plant'
-  | 'undead'
+// Re-export all types so existing imports like `import { Monster } from '@/lib/monsters'` still work
+export type { MonsterSize, MonsterType, AbilityScores, MonsterAction, Monster } from './monstersData/types'
 
-export type AbilityScores = {
-  str: number
-  dex: number
-  con: number
-  int: number
-  wis: number
-  cha: number
-}
+import type { Monster } from './monstersData/types'
+import { ALL_SRD_MONSTERS } from './monstersData'
 
-export type MonsterAction = {
-  name: string
-  type: 'attack' | 'ability' | 'trait'
-  description: string
-  attackBonus?: number
-  damage?: string
-  saveDc?: number
-  saveType?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
-}
-
-export type Monster = {
-  id: string
-  name: string
-  cr: number
-  size: MonsterSize
-  type: MonsterType
-  alignment: string
-  armorClass: number
-  hitPoints: number
-  hitDice: string
-  speed: string
-  abilities: AbilityScores
-  skills?: string[]
-  senses?: string[]
-  languages?: string[]
-  traits?: MonsterAction[]
-  actions: MonsterAction[]
-  legendaryActions?: MonsterAction[]
-  tokenImage?: string
-  tags?: string[]
-}
-
-export const MONSTERS: Monster[] = [
+// The three original starter monsters (kept for any legacy token/image references)
+const STARTER_MONSTERS: Monster[] = [
   {
     id: 'goblin',
     name: 'Goblin',
@@ -76,23 +25,21 @@ export const MONSTERS: Monster[] = [
       {
         name: 'Nimble Escape',
         type: 'trait',
-        description:
-          'The goblin can take the Disengage or Hide action as a bonus action on each of its turns.',
+        description: 'The goblin can take the Disengage or Hide action as a bonus action on each of its turns.',
       },
     ],
     actions: [
       {
         name: 'Scimitar',
         type: 'attack',
-        description: 'Melee Weapon Attack: +4 to hit, reach 5 ft., one target. Hit: 5 (1d6 + 2) slashing damage.',
+        description: 'Melee Weapon Attack: +4 to hit, reach 5 ft., one target. Hit: 5 (1d6+2) slashing damage.',
         attackBonus: 4,
         damage: '1d6+2 slashing',
       },
       {
         name: 'Shortbow',
         type: 'attack',
-        description:
-          'Ranged Weapon Attack: +4 to hit, range 80/320 ft., one target. Hit: 5 (1d6 + 2) piercing damage.',
+        description: 'Ranged Weapon Attack: +4 to hit, range 80/320 ft., one target. Hit: 5 (1d6+2) piercing damage.',
         attackBonus: 4,
         damage: '1d6+2 piercing',
       },
@@ -116,15 +63,14 @@ export const MONSTERS: Monster[] = [
       {
         name: 'Scimitar',
         type: 'attack',
-        description: 'Melee Weapon Attack: +3 to hit, reach 5 ft., one target. Hit: 4 (1d6 + 1) slashing damage.',
+        description: 'Melee Weapon Attack: +3 to hit, reach 5 ft., one target. Hit: 4 (1d6+1) slashing damage.',
         attackBonus: 3,
         damage: '1d6+1 slashing',
       },
       {
         name: 'Light Crossbow',
         type: 'attack',
-        description:
-          'Ranged Weapon Attack: +3 to hit, range 80/320 ft., one target. Hit: 5 (1d8 + 1) piercing damage.',
+        description: 'Ranged Weapon Attack: +3 to hit, range 80/320 ft., one target. Hit: 5 (1d8+1) piercing damage.',
         attackBonus: 3,
         damage: '1d8+1 piercing',
       },
@@ -151,23 +97,21 @@ export const MONSTERS: Monster[] = [
       {
         name: 'Aggressive',
         type: 'trait',
-        description:
-          'As a bonus action, the orc can move up to its speed toward a hostile creature that it can see.',
+        description: 'As a bonus action, the orc can move up to its speed toward a hostile creature that it can see.',
       },
     ],
     actions: [
       {
         name: 'Greataxe',
         type: 'attack',
-        description: 'Melee Weapon Attack: +5 to hit, reach 5 ft., one target. Hit: 9 (1d12 + 3) slashing damage.',
+        description: 'Melee Weapon Attack: +5 to hit, reach 5 ft., one target. Hit: 9 (1d12+3) slashing damage.',
         attackBonus: 5,
         damage: '1d12+3 slashing',
       },
       {
         name: 'Javelin',
         type: 'attack',
-        description:
-          'Melee or Ranged Weapon Attack: +5 to hit, reach 5 ft. or range 30/120 ft., one target. Hit: 6 (1d6 + 3) piercing damage.',
+        description: 'Melee or Ranged Weapon Attack: +5 to hit, reach 5 ft. or range 30/120 ft., one target. Hit: 6 (1d6+3) piercing damage.',
         attackBonus: 5,
         damage: '1d6+3 piercing',
       },
@@ -175,4 +119,13 @@ export const MONSTERS: Monster[] = [
     tokenImage: '/tokens/orc.png',
     tags: ['mid level', 'brute'],
   },
+]
+
+// Merge: starter monsters first (with token images), then all SRD monsters
+// Deduplicate by name so goblin/bandit/orc don't appear twice
+const srdIds = new Set(STARTER_MONSTERS.map((m) => m.name.toLowerCase()))
+
+export const MONSTERS: Monster[] = [
+  ...STARTER_MONSTERS,
+  ...ALL_SRD_MONSTERS.filter((m) => !srdIds.has(m.name.toLowerCase())),
 ]

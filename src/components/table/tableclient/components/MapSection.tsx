@@ -7,64 +7,70 @@ import MapBoardView from '@/components/table/MapBoardView'
 import { DiceLogOverlay } from './DiceLogOverlay'
 import { DiceRollOverlay } from './DiceRollOverlay'
 import type { DiceEntry } from '../types'
+import type { SessionMap } from '../hooks/useMapManager'
 
 export function MapSection(props: {
-  mapUrl: string
+  // Map — either a full SessionMap or a fallback legacy URL
+  currentMap?: SessionMap | null
+  legacyMapUrl?: string
+
   encounterId: string | null
   encounterLoading: boolean
   encounterError: string | null
   isGm: boolean
   address: string | undefined
-  onMapUpload: (e: ChangeEvent<HTMLInputElement>) => void
+  viewAsWallet?: string | null
+  characterId?: string | null
+  speedFeet?: number
+  visionFeet?: number
+
   showDiceLog: boolean
   diceLog: DiceEntry[]
   onTestRoll: () => void
   onCloseDiceLog: () => void
-
-  // 🎲 quick roll animation overlay
   rollOverlay?: null | { roller: string; label: string; formula: string; result: number }
 
-  // ✅ keep these if you’re passing them
-  speedFeet?: number
-  visionFeet?: number
-
-  // ✅ player character id (for movement/action tracking)
-  characterId?: string | null
-
-  // ✅ if your dropdown already sets this, pass it in (or ignore if you don’t use it here)
-  viewAsWallet?: string | null
+  // Shown inside the map area when no map is set (GM only)
+  mapControls?: React.ReactNode
 }) {
   const {
-    mapUrl,
+    currentMap,
+    legacyMapUrl,
     encounterId,
     encounterLoading,
     encounterError,
     isGm,
     address,
-    onMapUpload,
+    viewAsWallet,
+    characterId,
+    speedFeet,
+    visionFeet,
     showDiceLog,
     diceLog,
     onTestRoll,
     onCloseDiceLog,
     rollOverlay,
-    speedFeet,
-    visionFeet,
-    characterId,
-    viewAsWallet,
+    mapControls,
   } = props
 
-  // ✅ Player POV wallet:
-  // - Player: always themselves
-  // - GM: only when explicitly viewing a player
+  // Derive what to show on the map canvas
+  const mapImageUrl = currentMap?.image_url ?? legacyMapUrl ?? ''
+  const tileData = currentMap?.is_tile_map ? currentMap.tile_data : null
+  const mapId = currentMap?.id ?? null
+
+  const hasMap = Boolean(currentMap || legacyMapUrl)
+
+  // POV wallet: player = themselves, GM only when "view as" is selected
   const povWallet = useMemo(() => {
-    if (isGm) return (viewAsWallet ?? null)
+    if (isGm) return viewAsWallet ?? null
     return address ?? null
   }, [isGm, viewAsWallet, address])
 
   return (
     <section className="relative h-full overflow-hidden rounded-xl border border-slate-800 bg-slate-950/80">
       <div className="relative w-full min-h-[calc(100vh-180px)] overflow-hidden bg-[radial-gradient(circle_at_top,_#1e293b,_#020617)] p-3">
-        {mapUrl ? (
+
+        {hasMap ? (
           encounterLoading || !encounterId ? (
             <div className="flex h-full items-center justify-center text-center text-slate-400">
               <div className="px-4">
@@ -73,13 +79,15 @@ export function MapSection(props: {
               </div>
             </div>
           ) : isGm ? (
-            // ✅ GM MODE:
-            // - If NO player selected (GM Free View) => MapBoard (NO FOG)
-            // - If player selected => MapBoardView (FOG POV)
+            // GM MODE:
+            // No player selected → MapBoard (no fog, full GM view)
+            // Player selected → MapBoardView (player fog POV)
             povWallet ? (
               <MapBoardView
                 encounterId={encounterId}
-                mapImageUrl={mapUrl}
+                mapImageUrl={mapImageUrl || undefined}
+                tileData={tileData}
+                mapId={mapId}
                 ownerWallet={povWallet}
                 characterId={characterId ?? null}
                 gridSize={50}
@@ -87,13 +95,21 @@ export function MapSection(props: {
                 visionFeet={visionFeet}
               />
             ) : (
-              <MapBoard encounterId={encounterId} mapImageUrl={mapUrl} gridSize={50} />
+              <MapBoard
+                encounterId={encounterId}
+                mapImageUrl={mapImageUrl || undefined}
+                tileData={tileData}
+                mapId={mapId}
+                gridSize={50}
+              />
             )
           ) : (
-            // ✅ PLAYER MODE (always fog POV)
+            // PLAYER MODE — always fog POV
             <MapBoardView
               encounterId={encounterId}
-              mapImageUrl={mapUrl}
+              mapImageUrl={mapImageUrl || undefined}
+              tileData={tileData}
+              mapId={mapId}
               ownerWallet={povWallet}
               characterId={characterId ?? null}
               gridSize={50}
@@ -105,20 +121,10 @@ export function MapSection(props: {
           <div className="flex h-full items-center justify-center text-center text-slate-400">
             <div className="px-4">
               <p className="text-sm font-semibold text-slate-200">No map set for this session.</p>
-
-              {isGm && (
-                <div className="mt-4 space-y-2">
-                  <label className="text-xs text-slate-300">Upload a map image (PNG/JPG)</label>
-                  <input
-                    type="file"
-                    accept="image/png, image/jpeg"
-                    onChange={onMapUpload}
-                    className="text-xs text-slate-100"
-                  />
-                </div>
+              {isGm && mapControls && (
+                <div className="mt-4">{mapControls}</div>
               )}
-
-              {!isGm && <p className="mt-1 text-xs text-slate-400">Waiting for GM to upload a map…</p>}
+              {!isGm && <p className="mt-1 text-xs text-slate-400">Waiting for GM to load a map…</p>}
             </div>
           </div>
         )}

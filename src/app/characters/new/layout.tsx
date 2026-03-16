@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation'
 import type { ReactNode } from 'react'
+import { useCharacterDraftSync } from '@/lib/hooks/useCharacterDraftSync'
 
 const STEPS = [
   { slug: 'step1', label: 'Link NFT' },
@@ -18,6 +19,7 @@ export default function NewCharacterLayout({
   children: ReactNode
 }) {
   const pathname = usePathname()
+  useCharacterDraftSync()
 
   // figure out which step we’re on from the URL
   const currentIndex = STEPS.findIndex((step) =>

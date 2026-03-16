@@ -48,7 +48,7 @@ export default function NewCampaignPage() {
       .insert({
         title: title.trim(),
         description: description.trim() || null,
-        gm_wallet: address,
+        gm_wallet: address.toLowerCase(),
         join_mode: joinMode,
         join_password_hash: passwordHash,
         status: 'active',

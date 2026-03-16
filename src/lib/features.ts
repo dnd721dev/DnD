@@ -14,6 +14,14 @@ export type FeatureKey =
   | 'barbarian_reckless_attack'
   | 'barbarian_danger_sense'
   | 'barbarian_primal_path'
+  | 'barbarian_extra_attack'
+  | 'barbarian_fast_movement'
+  | 'barbarian_feral_instinct'
+  | 'barbarian_brutal_critical'
+  | 'barbarian_relentless_rage'
+  | 'barbarian_persistent_rage'
+  | 'barbarian_indomitable_might'
+  | 'barbarian_primal_champion'
   // Bard
   | 'bard_spellcasting'
   | 'bard_bardic_inspiration'
@@ -21,23 +29,32 @@ export type FeatureKey =
   | 'bard_song_of_rest'
   | 'bard_expertise'
   | 'bard_bard_college'
+  | 'bard_font_of_inspiration'
+  | 'bard_countercharm'
+  | 'bard_magical_secrets'
+  | 'bard_superior_inspiration'
   // Cleric
   | 'cleric_spellcasting'
   | 'cleric_divine_domain'
   | 'cleric_channel_divinity'
   | 'cleric_turn_undead'
   | 'cleric_destroy_undead'
+  | 'cleric_divine_intervention'
   // Druid
   | 'druid_druidic'
   | 'druid_spellcasting'
   | 'druid_wild_shape'
   | 'druid_druid_circle'
+  | 'druid_timeless_body'
+  | 'druid_beast_spells'
+  | 'druid_archdruid'
   // Fighter
   | 'fighter_fighting_style'
   | 'fighter_second_wind'
   | 'fighter_action_surge'
   | 'fighter_martial_archetype'
   | 'fighter_extra_attack'
+  | 'fighter_indomitable'
   // Monk
   | 'monk_unarmored_defense'
   | 'monk_martial_arts'
@@ -45,6 +62,18 @@ export type FeatureKey =
   | 'monk_unarmored_movement'
   | 'monk_monastic_tradition'
   | 'monk_deflect_missiles'
+  | 'monk_slow_fall'
+  | 'monk_extra_attack'
+  | 'monk_stunning_strike'
+  | 'monk_ki_empowered_strikes'
+  | 'monk_evasion'
+  | 'monk_stillness_of_mind'
+  | 'monk_purity_of_body'
+  | 'monk_tongue_of_sun_moon'
+  | 'monk_diamond_soul'
+  | 'monk_timeless_body'
+  | 'monk_empty_body'
+  | 'monk_perfect_self'
   // Paladin
   | 'paladin_divine_sense'
   | 'paladin_lay_on_hands'
@@ -53,6 +82,11 @@ export type FeatureKey =
   | 'paladin_divine_smite'
   | 'paladin_divine_health'
   | 'paladin_sacred_oath'
+  | 'paladin_extra_attack'
+  | 'paladin_aura_of_protection'
+  | 'paladin_aura_of_courage'
+  | 'paladin_improved_divine_smite'
+  | 'paladin_cleansing_touch'
   // Ranger
   | 'ranger_favored_enemy'
   | 'ranger_natural_explorer'
@@ -60,25 +94,44 @@ export type FeatureKey =
   | 'ranger_spellcasting'
   | 'ranger_primeval_awareness'
   | 'ranger_ranger_archetype'
+  | 'ranger_extra_attack'
+  | 'ranger_lands_stride'
+  | 'ranger_hide_in_plain_sight'
+  | 'ranger_vanish'
+  | 'ranger_feral_senses'
+  | 'ranger_foe_slayer'
   // Rogue
   | 'rogue_expertise'
   | 'rogue_sneak_attack'
   | 'rogue_thieves_cant'
   | 'rogue_cunning_action'
+  | 'rogue_roguish_archetype'
+  | 'rogue_uncanny_dodge'
+  | 'rogue_evasion'
+  | 'rogue_reliable_talent'
+  | 'rogue_blindsense'
+  | 'rogue_slippery_mind'
+  | 'rogue_elusive'
+  | 'rogue_stroke_of_luck'
   // Sorcerer
   | 'sorcerer_sorcerous_origin'
   | 'sorcerer_spellcasting'
   | 'sorcerer_font_of_magic'
   | 'sorcerer_metamagic'
+  | 'sorcerer_sorcerous_restoration'
   // Warlock
   | 'warlock_otherworldly_patron'
   | 'warlock_pact_magic'
   | 'warlock_eldritch_invocations'
   | 'warlock_pact_boon'
+  | 'warlock_mystic_arcanum'
+  | 'warlock_eldritch_master'
   // Wizard
   | 'wizard_spellcasting'
   | 'wizard_arcane_recovery'
   | 'wizard_arcane_tradition'
+  | 'wizard_spell_mastery'
+  | 'wizard_signature_spells'
 
 export type Feature = {
   key: FeatureKey
@@ -714,6 +767,558 @@ export const FEATURES: Record<FeatureKey, Feature> = {
     sourceType: 'class',
     summary:
       'You specialize in a school of magic, gaining benefits that support that type of spellcasting.',
+    srd: true,
+  },
+  wizard_spell_mastery: {
+    key: 'wizard_spell_mastery',
+    name: 'Spell Mastery',
+    class: 'wizard',
+    level: 18,
+    sourceType: 'class',
+    summary:
+      'You have studied two spells so thoroughly that you can cast them at their lowest level without expending a spell slot.',
+    srd: true,
+  },
+  wizard_signature_spells: {
+    key: 'wizard_signature_spells',
+    name: 'Signature Spells',
+    class: 'wizard',
+    level: 20,
+    sourceType: 'class',
+    summary:
+      'You master two powerful spells and can cast each of them once per short rest without spending a spell slot.',
+    srd: true,
+  },
+
+  // ---- Barbarian (levels 5–20) ----
+  barbarian_extra_attack: {
+    key: 'barbarian_extra_attack',
+    name: 'Extra Attack',
+    class: 'barbarian',
+    level: 5,
+    sourceType: 'class',
+    summary:
+      'Your combat training lets you strike more than once whenever you take the Attack action on your turn.',
+    srd: true,
+  },
+  barbarian_fast_movement: {
+    key: 'barbarian_fast_movement',
+    name: 'Fast Movement',
+    class: 'barbarian',
+    level: 5,
+    sourceType: 'class',
+    summary:
+      'Your speed increases by 10 feet while you are not wearing heavy armor.',
+    srd: true,
+  },
+  barbarian_feral_instinct: {
+    key: 'barbarian_feral_instinct',
+    name: 'Feral Instinct',
+    class: 'barbarian',
+    level: 7,
+    sourceType: 'class',
+    summary:
+      'Your instincts are so honed that you gain advantage on initiative rolls, and you can act normally on the first turn even if surprised.',
+    srd: true,
+  },
+  barbarian_brutal_critical: {
+    key: 'barbarian_brutal_critical',
+    name: 'Brutal Critical',
+    class: 'barbarian',
+    level: 9,
+    sourceType: 'class',
+    summary:
+      'When you score a critical hit with a melee weapon you roll one additional weapon damage die (increasing to two extra dice at level 13, three at level 17).',
+    srd: true,
+  },
+  barbarian_relentless_rage: {
+    key: 'barbarian_relentless_rage',
+    name: 'Relentless Rage',
+    class: 'barbarian',
+    level: 11,
+    sourceType: 'class',
+    summary:
+      'If you drop to 0 hit points while raging and don\'t die outright, you can make a DC 10 Constitution save to drop to 1 hp instead.',
+    srd: true,
+  },
+  barbarian_persistent_rage: {
+    key: 'barbarian_persistent_rage',
+    name: 'Persistent Rage',
+    class: 'barbarian',
+    level: 15,
+    sourceType: 'class',
+    summary:
+      'Your rage is so powerful it ends only if you fall unconscious or choose to end it — it no longer ends from lack of attacking or damage.',
+    srd: true,
+  },
+  barbarian_indomitable_might: {
+    key: 'barbarian_indomitable_might',
+    name: 'Indomitable Might',
+    class: 'barbarian',
+    level: 18,
+    sourceType: 'class',
+    summary:
+      'If your total for a Strength check is less than your Strength score, you can use that score in place of the total.',
+    srd: true,
+  },
+  barbarian_primal_champion: {
+    key: 'barbarian_primal_champion',
+    name: 'Primal Champion',
+    class: 'barbarian',
+    level: 20,
+    sourceType: 'class',
+    summary:
+      'You embody primal power: your Strength and Constitution scores each increase by 4, and their maximums rise to 24.',
+    srd: true,
+  },
+
+  // ---- Bard (levels 5–20) ----
+  bard_font_of_inspiration: {
+    key: 'bard_font_of_inspiration',
+    name: 'Font of Inspiration',
+    class: 'bard',
+    level: 5,
+    sourceType: 'class',
+    summary:
+      'You regain all of your Bardic Inspiration uses after a short or long rest instead of only a long rest.',
+    srd: true,
+  },
+  bard_countercharm: {
+    key: 'bard_countercharm',
+    name: 'Countercharm',
+    class: 'bard',
+    level: 6,
+    sourceType: 'class',
+    summary:
+      'You can perform as an action to give nearby allies advantage on saves against being frightened or charmed, as long as you keep performing.',
+    srd: true,
+  },
+  bard_magical_secrets: {
+    key: 'bard_magical_secrets',
+    name: 'Magical Secrets',
+    class: 'bard',
+    level: 10,
+    sourceType: 'class',
+    summary:
+      'You plunder the magical knowledge of other classes, learning two spells from any class list. You gain additional pairs at levels 14 and 18.',
+    srd: true,
+  },
+  bard_superior_inspiration: {
+    key: 'bard_superior_inspiration',
+    name: 'Superior Inspiration',
+    class: 'bard',
+    level: 20,
+    sourceType: 'class',
+    summary:
+      'When you roll initiative with no Bardic Inspiration uses remaining, you regain one use immediately.',
+    srd: true,
+  },
+
+  // ---- Cleric (levels 10–20) ----
+  cleric_divine_intervention: {
+    key: 'cleric_divine_intervention',
+    name: 'Divine Intervention',
+    class: 'cleric',
+    level: 10,
+    sourceType: 'class',
+    summary:
+      'You can call on your deity to intercede on your behalf. Success is based on a percentile roll equal to your cleric level; at level 20 it succeeds automatically.',
+    srd: true,
+  },
+
+  // ---- Druid (levels 18–20) ----
+  druid_timeless_body: {
+    key: 'druid_timeless_body',
+    name: 'Timeless Body',
+    class: 'druid',
+    level: 18,
+    sourceType: 'class',
+    summary:
+      'The primal magic you wield causes you to age more slowly — for every 10 years that pass, your body ages only 1 year.',
+    srd: true,
+  },
+  druid_beast_spells: {
+    key: 'druid_beast_spells',
+    name: 'Beast Spells',
+    class: 'druid',
+    level: 18,
+    sourceType: 'class',
+    summary:
+      'You can cast many of your spells in Wild Shape form, even performing the somatic and verbal components while transformed.',
+    srd: true,
+  },
+  druid_archdruid: {
+    key: 'druid_archdruid',
+    name: 'Archdruid',
+    class: 'druid',
+    level: 20,
+    sourceType: 'class',
+    summary:
+      'You can use Wild Shape an unlimited number of times, and you ignore the verbal and somatic components of your druid spells.',
+    srd: true,
+  },
+
+  // ---- Fighter (levels 9+) ----
+  fighter_indomitable: {
+    key: 'fighter_indomitable',
+    name: 'Indomitable',
+    class: 'fighter',
+    level: 9,
+    sourceType: 'class',
+    summary:
+      'You can reroll a saving throw you fail, using the new result. You gain additional uses at levels 13 and 17.',
+    srd: true,
+  },
+
+  // ---- Monk (levels 4–20) ----
+  monk_slow_fall: {
+    key: 'monk_slow_fall',
+    name: 'Slow Fall',
+    class: 'monk',
+    level: 4,
+    sourceType: 'class',
+    summary:
+      'You can use your reaction to reduce falling damage by an amount equal to five times your monk level.',
+    srd: true,
+  },
+  monk_extra_attack: {
+    key: 'monk_extra_attack',
+    name: 'Extra Attack',
+    class: 'monk',
+    level: 5,
+    sourceType: 'class',
+    summary:
+      'You can attack twice whenever you take the Attack action on your turn.',
+    srd: true,
+  },
+  monk_stunning_strike: {
+    key: 'monk_stunning_strike',
+    name: 'Stunning Strike',
+    class: 'monk',
+    level: 5,
+    sourceType: 'class',
+    summary:
+      'When you hit with a melee weapon attack, you can spend 1 ki point to force the target to make a Constitution save or be stunned until the end of your next turn.',
+    srd: true,
+  },
+  monk_ki_empowered_strikes: {
+    key: 'monk_ki_empowered_strikes',
+    name: 'Ki-Empowered Strikes',
+    class: 'monk',
+    level: 6,
+    sourceType: 'class',
+    summary:
+      'Your unarmed strikes count as magical for the purpose of overcoming resistance and immunity to non-magical attacks.',
+    srd: true,
+  },
+  monk_evasion: {
+    key: 'monk_evasion',
+    name: 'Evasion',
+    class: 'monk',
+    level: 7,
+    sourceType: 'class',
+    summary:
+      'When an effect lets you make a Dexterity save for half damage, you take no damage on a success and only half on a failure.',
+    srd: true,
+  },
+  monk_stillness_of_mind: {
+    key: 'monk_stillness_of_mind',
+    name: 'Stillness of Mind',
+    class: 'monk',
+    level: 7,
+    sourceType: 'class',
+    summary:
+      'As an action you can end one effect on yourself that is causing you to be charmed or frightened.',
+    srd: true,
+  },
+  monk_purity_of_body: {
+    key: 'monk_purity_of_body',
+    name: 'Purity of Body',
+    class: 'monk',
+    level: 10,
+    sourceType: 'class',
+    summary:
+      'Your mastery of ki has made you immune to disease and poison.',
+    srd: true,
+  },
+  monk_tongue_of_sun_moon: {
+    key: 'monk_tongue_of_sun_moon',
+    name: 'Tongue of the Sun and Moon',
+    class: 'monk',
+    level: 13,
+    sourceType: 'class',
+    summary:
+      'You learn to touch the ki of other minds so that you can communicate with any creature that has a language.',
+    srd: true,
+  },
+  monk_diamond_soul: {
+    key: 'monk_diamond_soul',
+    name: 'Diamond Soul',
+    class: 'monk',
+    level: 13,
+    sourceType: 'class',
+    summary:
+      'You gain proficiency in all saving throws. When you fail a save you can spend 1 ki point to reroll it.',
+    srd: true,
+  },
+  monk_timeless_body: {
+    key: 'monk_timeless_body',
+    name: 'Timeless Body',
+    class: 'monk',
+    level: 15,
+    sourceType: 'class',
+    summary:
+      'Your ki sustains you so that you no longer need food or water, and you suffer none of the frailty of old age.',
+    srd: true,
+  },
+  monk_empty_body: {
+    key: 'monk_empty_body',
+    name: 'Empty Body',
+    class: 'monk',
+    level: 18,
+    sourceType: 'class',
+    summary:
+      'You can spend 4 ki points to become invisible for 1 minute and gain resistance to all damage except force. You can also spend 8 ki to cast astral projection on yourself.',
+    srd: true,
+  },
+  monk_perfect_self: {
+    key: 'monk_perfect_self',
+    name: 'Perfect Self',
+    class: 'monk',
+    level: 20,
+    sourceType: 'class',
+    summary:
+      'When you roll initiative with no ki points remaining, you regain 4 ki points.',
+    srd: true,
+  },
+
+  // ---- Paladin (levels 5–14) ----
+  paladin_extra_attack: {
+    key: 'paladin_extra_attack',
+    name: 'Extra Attack',
+    class: 'paladin',
+    level: 5,
+    sourceType: 'class',
+    summary:
+      'You can attack twice whenever you take the Attack action on your turn.',
+    srd: true,
+  },
+  paladin_aura_of_protection: {
+    key: 'paladin_aura_of_protection',
+    name: 'Aura of Protection',
+    class: 'paladin',
+    level: 6,
+    sourceType: 'class',
+    summary:
+      'You and friendly creatures within 10 feet add your Charisma modifier to all saving throws (expands to 30 feet at level 18).',
+    srd: true,
+  },
+  paladin_aura_of_courage: {
+    key: 'paladin_aura_of_courage',
+    name: 'Aura of Courage',
+    class: 'paladin',
+    level: 7,
+    sourceType: 'class',
+    summary:
+      'You and friendly creatures within 10 feet cannot be frightened while you are conscious (expands to 30 feet at level 18).',
+    srd: true,
+  },
+  paladin_improved_divine_smite: {
+    key: 'paladin_improved_divine_smite',
+    name: 'Improved Divine Smite',
+    class: 'paladin',
+    level: 11,
+    sourceType: 'class',
+    summary:
+      'Your melee weapon strikes are so imbued with righteous power that every hit adds an extra 1d8 radiant damage automatically.',
+    srd: true,
+  },
+  paladin_cleansing_touch: {
+    key: 'paladin_cleansing_touch',
+    name: 'Cleansing Touch',
+    class: 'paladin',
+    level: 14,
+    sourceType: 'class',
+    summary:
+      'As an action you can end one spell on yourself or a willing creature you touch. Uses per long rest equal your Charisma modifier.',
+    srd: true,
+  },
+
+  // ---- Ranger (levels 5–20) ----
+  ranger_extra_attack: {
+    key: 'ranger_extra_attack',
+    name: 'Extra Attack',
+    class: 'ranger',
+    level: 5,
+    sourceType: 'class',
+    summary:
+      'You can attack twice whenever you take the Attack action on your turn.',
+    srd: true,
+  },
+  ranger_lands_stride: {
+    key: 'ranger_lands_stride',
+    name: "Land's Stride",
+    class: 'ranger',
+    level: 8,
+    sourceType: 'class',
+    summary:
+      'Moving through nonmagical difficult terrain costs no extra movement, and you have advantage on saves against magically created plants that impede movement.',
+    srd: true,
+  },
+  ranger_hide_in_plain_sight: {
+    key: 'ranger_hide_in_plain_sight',
+    name: 'Hide in Plain Sight',
+    class: 'ranger',
+    level: 10,
+    sourceType: 'class',
+    summary:
+      'By spending 1 minute camouflaging yourself, you can gain +10 to Stealth checks as long as you remain still.',
+    srd: true,
+  },
+  ranger_vanish: {
+    key: 'ranger_vanish',
+    name: 'Vanish',
+    class: 'ranger',
+    level: 14,
+    sourceType: 'class',
+    summary:
+      'You can use the Hide action as a bonus action, and you cannot be tracked by non-magical means unless you choose to leave a trail.',
+    srd: true,
+  },
+  ranger_feral_senses: {
+    key: 'ranger_feral_senses',
+    name: 'Feral Senses',
+    class: 'ranger',
+    level: 18,
+    sourceType: 'class',
+    summary:
+      'You gain supernatural awareness: you don\'t suffer disadvantage against invisible creatures, and you are aware of any invisible creature within 30 feet.',
+    srd: true,
+  },
+  ranger_foe_slayer: {
+    key: 'ranger_foe_slayer',
+    name: 'Foe Slayer',
+    class: 'ranger',
+    level: 20,
+    sourceType: 'class',
+    summary:
+      'Once per turn when you attack a favored enemy, you can add your Wisdom modifier to the attack roll or the damage roll.',
+    srd: true,
+  },
+
+  // ---- Rogue (levels 3–20) ----
+  rogue_roguish_archetype: {
+    key: 'rogue_roguish_archetype',
+    name: 'Roguish Archetype',
+    class: 'rogue',
+    level: 3,
+    sourceType: 'class',
+    summary:
+      'You choose an archetype that defines your style — such as thief, assassin, or arcane trickster — granting extra features at later levels.',
+    srd: true,
+  },
+  rogue_uncanny_dodge: {
+    key: 'rogue_uncanny_dodge',
+    name: 'Uncanny Dodge',
+    class: 'rogue',
+    level: 5,
+    sourceType: 'class',
+    summary:
+      'When an attacker you can see hits you, you can use your reaction to halve the damage.',
+    srd: true,
+  },
+  rogue_evasion: {
+    key: 'rogue_evasion',
+    name: 'Evasion',
+    class: 'rogue',
+    level: 7,
+    sourceType: 'class',
+    summary:
+      'When an effect lets you make a Dexterity save for half damage, you take no damage on a success and only half on a failure.',
+    srd: true,
+  },
+  rogue_reliable_talent: {
+    key: 'rogue_reliable_talent',
+    name: 'Reliable Talent',
+    class: 'rogue',
+    level: 11,
+    sourceType: 'class',
+    summary:
+      'Whenever you make an ability check using a skill or tool you are proficient in, a roll of 9 or lower counts as a 10.',
+    srd: true,
+  },
+  rogue_blindsense: {
+    key: 'rogue_blindsense',
+    name: 'Blindsense',
+    class: 'rogue',
+    level: 14,
+    sourceType: 'class',
+    summary:
+      'If you can hear, you are aware of the location of any hidden or invisible creature within 10 feet of you.',
+    srd: true,
+  },
+  rogue_slippery_mind: {
+    key: 'rogue_slippery_mind',
+    name: 'Slippery Mind',
+    class: 'rogue',
+    level: 15,
+    sourceType: 'class',
+    summary:
+      'Your sharp wits extend to mental fortitude — you gain proficiency in Wisdom saving throws.',
+    srd: true,
+  },
+  rogue_elusive: {
+    key: 'rogue_elusive',
+    name: 'Elusive',
+    class: 'rogue',
+    level: 18,
+    sourceType: 'class',
+    summary:
+      'You are so hard to pin down that no attack roll gains advantage against you as long as you aren\'t incapacitated.',
+    srd: true,
+  },
+  rogue_stroke_of_luck: {
+    key: 'rogue_stroke_of_luck',
+    name: 'Stroke of Luck',
+    class: 'rogue',
+    level: 20,
+    sourceType: 'class',
+    summary:
+      'If your attack misses a target within range, you can turn the miss into a hit. Or if you fail an ability check, you can treat the d20 roll as a 20. Recharges on a short or long rest.',
+    srd: true,
+  },
+
+  // ---- Sorcerer (level 20) ----
+  sorcerer_sorcerous_restoration: {
+    key: 'sorcerer_sorcerous_restoration',
+    name: 'Sorcerous Restoration',
+    class: 'sorcerer',
+    level: 20,
+    sourceType: 'class',
+    summary:
+      'You regain 4 expended sorcery points whenever you finish a short rest.',
+    srd: true,
+  },
+
+  // ---- Warlock (levels 11–20) ----
+  warlock_mystic_arcanum: {
+    key: 'warlock_mystic_arcanum',
+    name: 'Mystic Arcanum',
+    class: 'warlock',
+    level: 11,
+    sourceType: 'class',
+    summary:
+      'Your patron bestows a powerful secret: you gain one 6th-level spell you can cast once per long rest without a spell slot. You gain 7th-, 8th-, and 9th-level arcana at levels 13, 15, and 17.',
+    srd: true,
+  },
+  warlock_eldritch_master: {
+    key: 'warlock_eldritch_master',
+    name: 'Eldritch Master',
+    class: 'warlock',
+    level: 20,
+    sourceType: 'class',
+    summary:
+      'You can spend 1 minute entreating your patron to regain all expended Pact Magic spell slots. Usable once per long rest.',
     srd: true,
   },
 }

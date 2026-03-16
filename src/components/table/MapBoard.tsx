@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import TokenHUD from '@/components/table/TokenHUD';
+import { renderTilesToCanvas, type TileData } from '@/lib/tilemap';
 
 type Token = {
   id: string;
@@ -19,7 +20,9 @@ type Token = {
 
 type MapBoardProps = {
   encounterId: string;
-  mapImageUrl: string;
+  mapImageUrl?: string;
+  tileData?: TileData | null;
+  mapId?: string | null;
   gridSize?: number;
   highlightTokenId?: string;
 };
@@ -32,6 +35,8 @@ const MAX_ZOOM = 3;
 const MapBoard: React.FC<MapBoardProps> = ({
   encounterId,
   mapImageUrl,
+  tileData,
+  mapId,
   gridSize = 50,
   highlightTokenId,
 }) => {
@@ -60,36 +65,93 @@ const MapBoard: React.FC<MapBoardProps> = ({
   const activeHudToken =
     hudTokenId ? tokens.find((t) => t.id === hudTokenId) ?? null : null;
 
-  /** Load map image */
+  // Canvas dimensions — driven by image or tile data
+  const canvasSize = useMemo(() => {
+    if (tileData) return { width: tileData.cols * gridSize, height: tileData.rows * gridSize };
+    if (img) return { width: img.width, height: img.height };
+    return null;
+  }, [tileData, img, gridSize]);
+
+  /** Load map image (image maps only) */
   useEffect(() => {
-    if (!mapImageUrl) return;
+    if (!mapImageUrl) { setImg(null); return; }
     const image = new Image();
     image.src = mapImageUrl;
     image.onload = () => setImg(image);
   }, [mapImageUrl]);
 
-  /** Listen for initiative highlight events */
+  /** Listen for initiative highlight events (same-tab fast path) */
   useEffect(() => {
     if (typeof window === 'undefined') return;
-
     const handler = (event: Event) => {
       const custom = event as CustomEvent<{ name: string | null }>;
       setActiveInitiativeName(custom.detail?.name ?? null);
     };
-
     window.addEventListener('dnd721-active-initiative', handler);
     return () => window.removeEventListener('dnd721-active-initiative', handler);
   }, []);
+
+  /** Subscribe to encounters.active_entry_id for cross-device reliability */
+  useEffect(() => {
+    let mounted = true;
+
+    async function applyEntry(entryId: string | null) {
+      if (!entryId) { setActiveInitiativeName(null); return; }
+      const { data, error } = await supabase
+        .from('initiative_entries')
+        .select('name')
+        .eq('id', entryId)
+        .maybeSingle();
+      if (!mounted || error) return;
+      setActiveInitiativeName(data?.name ?? null);
+    }
+
+    async function load() {
+      const { data, error } = await supabase
+        .from('encounters')
+        .select('active_entry_id')
+        .eq('id', encounterId)
+        .maybeSingle();
+      if (!mounted || error) return;
+      await applyEntry((data as any)?.active_entry_id ?? null);
+    }
+
+    load();
+
+    const channel = supabase
+      .channel(`gm-encounter-turn-${encounterId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'encounters', filter: `id=eq.${encounterId}` },
+        (payload) => {
+          const rec = (payload as any).new as { active_entry_id?: string | null };
+          applyEntry(rec?.active_entry_id ?? null);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      mounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, [encounterId]);
 
   /** Load tokens + subscribe to DB updates */
   useEffect(() => {
     let isMounted = true;
 
     async function loadTokens() {
-      const { data, error } = await supabase
+      let query = supabase
         .from('tokens')
         .select('id, label, x, y, color, hp, ac, current_hp, type, monster_id')
         .eq('encounter_id', encounterId);
+
+      // GM free view: show tokens for current map + tokens with no map (PC tokens)
+      if (mapId) {
+        query = query.or(`map_id.eq.${mapId},map_id.is.null`);
+      }
+
+      const { data, error } = await query;
 
       if (!isMounted) return;
       if (error) return console.error('Error loading tokens:', error);
@@ -113,7 +175,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
     loadTokens();
 
     const channel = supabase
-      .channel(`tokens-${encounterId}`)
+      .channel(`tokens-${encounterId}-${mapId ?? 'all'}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'tokens', filter: `encounter_id=eq.${encounterId}` },
@@ -128,59 +190,57 @@ const MapBoard: React.FC<MapBoardProps> = ({
       supabase.removeChannel(channel);
       window.removeEventListener('dnd721-tokens-updated', loadTokens);
     };
-  }, [encounterId]);
+  }, [encounterId, mapId]);
 
   /** Draw map + grid */
   useEffect(() => {
     const canvas = mapCanvasRef.current;
     const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx || !img) return;
+    if (!canvas || !ctx) return;
+    if (!tileData && !img) return;
 
-    canvas.width = img.width;
-    canvas.height = img.height;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0);
-
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(148,163,184,0.3)';
-
-    for (let x = 0; x < canvas.width; x += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, canvas.height);
-      ctx.stroke();
+    if (tileData) {
+      canvas.width = tileData.cols * gridSize;
+      canvas.height = tileData.rows * gridSize;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      renderTilesToCanvas(ctx, tileData, gridSize);
+      return;
     }
 
-    for (let y = 0; y < canvas.height; y += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(canvas.width, y);
-      ctx.stroke();
+    if (img) {
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(148,163,184,0.3)';
+      for (let x = 0; x < canvas.width; x += gridSize) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += gridSize) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+      }
     }
-  }, [img, gridSize]);
+  }, [img, tileData, gridSize]);
 
   /** Draw tokens */
   useEffect(() => {
     const canvas = tokenCanvasRef.current;
     const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx || !img) return;
+    if (!canvas || !ctx || !canvasSize) return;
 
-    canvas.width = img.width;
-    canvas.height = img.height;
-
+    canvas.width = canvasSize.width;
+    canvas.height = canvasSize.height;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     tokens.forEach((t) => {
       const r = gridSize * 0.35;
 
-      // Token circle
       ctx.beginPath();
       ctx.fillStyle = t.color || '#111827';
       ctx.arc(t.x, t.y, r, 0, Math.PI * 2);
       ctx.fill();
 
-      // Initiative/GM highlight
       const isHighlighted =
         (highlightTokenId && t.id === highlightTokenId) ||
         (activeInitiativeName && t.label === activeInitiativeName);
@@ -198,15 +258,13 @@ const MapBoard: React.FC<MapBoardProps> = ({
         ctx.restore();
       }
 
-      // Label text
       ctx.font = `${Math.max(12, gridSize * 0.35)}px system-ui, sans-serif`;
       ctx.fillStyle = '#e5e7eb';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(t.label || 'T', t.x, t.y);
-
     });
-  }, [tokens, img, gridSize, highlightTokenId, activeInitiativeName]);
+  }, [tokens, canvasSize, gridSize, highlightTokenId, activeInitiativeName]);
 
   /** Math helpers */
   const getScreenPoint = (e: React.MouseEvent) => {
@@ -217,10 +275,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
 
   const getWorldPoint = (e: React.MouseEvent) => {
     const p = getScreenPoint(e);
-    return {
-      x: (p.x - translate.x) / zoom,
-      y: (p.y - translate.y) / zoom,
-    };
+    return { x: (p.x - translate.x) / zoom, y: (p.y - translate.y) / zoom };
   };
 
   const snap = (v: number) => Math.round(v / gridSize) * gridSize;
@@ -228,10 +283,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
   /** HUD positioning */
   const updateHudPosition = (token: Token | null) => {
     if (!token) return setHudPos(null);
-    setHudPos({
-      x: translate.x + token.x * zoom,
-      y: translate.y + token.y * zoom - 72,
-    });
+    setHudPos({ x: translate.x + token.x * zoom, y: translate.y + token.y * zoom - 72 });
   };
 
   useEffect(() => {
@@ -286,7 +338,6 @@ const MapBoard: React.FC<MapBoardProps> = ({
     const t = tokens.find((tok) => tok.id === dragTokenId);
     setDragTokenId(null);
 
-    // ✅ if this was a click (no movement), treat it as target selection
     const downId = downTokenIdRef.current;
     const downPos = downTokenPosRef.current;
     downTokenIdRef.current = null;
@@ -299,28 +350,18 @@ const MapBoard: React.FC<MapBoardProps> = ({
     }
 
     if (!t) return;
-
     await supabase.from('tokens').update({ x: t.x, y: t.y }).eq('id', t.id);
   };
 
-  const onLeave = () => {
-    setIsPanning(false);
-    setDragTokenId(null);
-  };
+  const onLeave = () => { setIsPanning(false); setDragTokenId(null); };
 
   const onContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     const world = getWorldPoint(e);
     const hit = tokens.find((t) => Math.hypot(t.x - world.x, t.y - world.y) < gridSize * 0.5);
-
-    if (!hit) {
-      setHudTokenId(null);
-      return;
-    }
-
+    if (!hit) { setHudTokenId(null); return; }
     setHudTokenId(hit.id);
     updateHudPosition(hit);
-
     window.dispatchEvent(new CustomEvent('dnd721-open-monster', { detail: { token: hit } }));
   };
 
@@ -328,23 +369,16 @@ const MapBoard: React.FC<MapBoardProps> = ({
   const onWheel = (e: React.WheelEvent) => {
     const delta = -e.deltaY;
     if (delta === 0) return;
-
     const zoomFactor = delta > 0 ? 1.1 : 0.9;
     const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * zoomFactor));
     if (newZoom === zoom) return;
-
     const screen = getScreenPoint(e);
     const worldX = (screen.x - translate.x) / zoom;
     const worldY = (screen.y - translate.y) / zoom;
-
     setZoom(newZoom);
-    setTranslate({
-      x: screen.x - worldX * newZoom,
-      y: screen.y - worldY * newZoom,
-    });
+    setTranslate({ x: screen.x - worldX * newZoom, y: screen.y - worldY * newZoom });
   };
 
-  /** Prevent page scroll on wheel */
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -353,33 +387,25 @@ const MapBoard: React.FC<MapBoardProps> = ({
     return () => el.removeEventListener('wheel', prevent);
   }, []);
 
-  /** HUD handlers */
   const onHudClose = () => setHudTokenId(null);
 
   const onHudHP = async (amount: number) => {
     if (!hudTokenId) return;
     const tok = tokens.find((t) => t.id === hudTokenId);
     if (!tok) return;
-
     const newHp = (tok.current_hp ?? tok.hp ?? 0) + amount;
-
-    setTokens((prev) =>
-      prev.map((t) => (t.id === hudTokenId ? { ...t, current_hp: newHp } : t))
-    );
-
+    setTokens((prev) => prev.map((t) => (t.id === hudTokenId ? { ...t, current_hp: newHp } : t)));
     await supabase.from('tokens').update({ current_hp: newHp }).eq('id', hudTokenId);
   };
 
   const onHudDelete = async () => {
     if (!hudTokenId) return;
     const id = hudTokenId;
-
     setTokens((p) => p.filter((t) => t.id !== id));
     setHudTokenId(null);
     await supabase.from('tokens').delete().eq('id', id);
   };
 
-  /** Render */
   const transformStyle = {
     transform: `translate(${translate.x}px, ${translate.y}px) scale(${zoom})`,
     transformOrigin: 'top left' as const,

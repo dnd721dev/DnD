@@ -6,6 +6,7 @@ import { useAccount } from 'wagmi'
 import { loadDraft, saveDraft, clearDraft } from '@/lib/characterDraft'
 import type { CharacterDraft } from '../../../../types/characterDraft'
 import { RACE_LIST, getRace, type RaceKey } from '@/lib/races'
+import { BACKGROUNDS, type BackgroundKey } from '@/lib/backgrounds'
 import { proficiencyForLevel } from '@/lib/rules'
 import { supabase } from '@/lib/supabase'
 
@@ -329,8 +330,26 @@ export default function NewCharacterStep6Page() {
       const vision_ft = 60
       const darkvision_ft = (race as any)?.vision === 'darkvision' ? 60 : 0
 
-      const abilitiesPayload: Abilities =
-        finalAbilities ?? (draft.baseAbilities as Abilities | null) ?? DEFAULT_ABILITIES
+      const abilitiesPayload: Abilities = {
+        ...(finalAbilities ?? (draft.baseAbilities as Abilities | null) ?? DEFAULT_ABILITIES),
+      }
+
+      // Apply 2024-style ability score modifiers from selected background
+      const bgKey = draft.backgroundKey as BackgroundKey | undefined
+      const bg = bgKey ? BACKGROUNDS[bgKey] : undefined
+      if (bg?.abilityScoreModifiers) {
+        for (const [stat, bonus] of Object.entries(bg.abilityScoreModifiers)) {
+          const k = stat as keyof Abilities
+          abilitiesPayload[k] = ((abilitiesPayload[k] as number) ?? 10) + (bonus ?? 0)
+        }
+      }
+
+      // Build merged skill proficiency map: background skills are the floor,
+      // anything already in the draft (class-granted expertise etc.) takes precedence.
+      const bgSkills = bg?.skillProficiencies ?? []
+      const bgSkillMap: Record<string, string> = {}
+      for (const skill of bgSkills) { bgSkillMap[skill] = 'proficient' }
+      const finalSkillProfs = { ...bgSkillMap, ...(draft.skillProficiencies ?? {}) }
 
       // ✅ NEW: compute HP from class + level + CON
       const classKey = String(draft.classKey ?? 'fighter').toLowerCase() as ClassKey
@@ -369,14 +388,14 @@ export default function NewCharacterStep6Page() {
               .filter(([, v]) => !!v)
               .map(([k]) => k)
           : [],
-        skill_proficiencies: draft.skillProficiencies ?? {},
+        skill_proficiencies: finalSkillProfs,
         passive_perception: passivePerception,
 
         // combat-ish fields
         hp: computedMaxHp,
         hit_points_current: computedCurrentHp,
         hit_points_max: computedMaxHp,
-        ac: draft.armorClass ?? 10,
+        ac: (draft.armorClass && draft.armorClass > 0) ? draft.armorClass : 10,
 
         // ✅ NEW: movement + vision authority
         speed_ft,
@@ -423,7 +442,7 @@ export default function NewCharacterStep6Page() {
         return
       }
 
-      clearDraft()
+      clearDraft(address?.toLowerCase())
       setSaving(false)
 
       if (data?.id) router.push(`/characters/${data.id}`)

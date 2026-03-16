@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { renderTilesToCanvas, type TileData } from '@/lib/tilemap'
 
 type Token = {
   id: string
@@ -22,7 +23,9 @@ type FogReveal = {
 
 type MapBoardViewProps = {
   encounterId: string
-  mapImageUrl: string
+  mapImageUrl?: string
+  tileData?: TileData | null
+  mapId?: string | null
   ownerWallet?: string | null
   // ✅ if provided, we can track per-turn movement + action economy in characters.action_state
   characterId?: string | null
@@ -64,6 +67,8 @@ function logSupabaseError(prefix: string, err: any) {
 const MapBoardView: React.FC<MapBoardViewProps> = ({
   encounterId,
   mapImageUrl,
+  tileData,
+  mapId,
   ownerWallet,
   characterId,
   gridSize = 50,
@@ -87,8 +92,9 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   const dragStartTokenRef = useRef<Point | null>(null)
   const clickTokenIdRef = useRef<string | null>(null)
 
-  // ✅ initiative turn lock (from InitiativeTracker)
+  // ✅ initiative turn lock — set from DB subscription so all clients stay in sync
   const [activeWalletLower, setActiveWalletLower] = useState<string | null>(null)
+  const [activeInitiativeName, setActiveInitiativeName] = useState<string | null>(null)
 
   // ✅ movement tracking (feet used this turn)
   const [moveUsedFt, setMoveUsedFt] = useState<number>(0)
@@ -102,19 +108,62 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
 
   const ownerLower = useMemo(() => (ownerWallet ? ownerWallet.toLowerCase() : null), [ownerWallet])
 
-  // Listen for active initiative changes (locks movement to the active player)
-  useEffect(() => {
-    if (typeof window === 'undefined') return
+  // Canvas dimensions driven by tile data or image
+  const canvasSize = useMemo(() => {
+    if (tileData) return { width: tileData.cols * gridSize, height: tileData.rows * gridSize }
+    if (img) return { width: img.width, height: img.height }
+    return null
+  }, [tileData, img, gridSize])
 
-    const handler = (ev: any) => {
-      const detail = (ev?.detail ?? {}) as { name?: string | null; wallet?: string | null }
-      const w = detail.wallet ? String(detail.wallet).toLowerCase() : null
-      setActiveWalletLower(w)
+  // Subscribe to encounters.active_entry_id so all clients get the active turn via DB realtime
+  useEffect(() => {
+    let mounted = true
+
+    async function applyActiveEntry(entryId: string | null) {
+      if (!entryId) {
+        setActiveWalletLower(null)
+        setActiveInitiativeName(null)
+        return
+      }
+      const { data, error } = await supabase
+        .from('initiative_entries')
+        .select('name, wallet_address')
+        .eq('id', entryId)
+        .maybeSingle()
+      if (!mounted || error) return
+      setActiveWalletLower(data?.wallet_address ? String(data.wallet_address).toLowerCase() : null)
+      setActiveInitiativeName(data?.name ?? null)
     }
 
-    window.addEventListener('dnd721-active-initiative', handler as any)
-    return () => window.removeEventListener('dnd721-active-initiative', handler as any)
-  }, [])
+    async function loadEncounterTurn() {
+      const { data, error } = await supabase
+        .from('encounters')
+        .select('active_entry_id')
+        .eq('id', encounterId)
+        .maybeSingle()
+      if (!mounted || error) return
+      await applyActiveEntry((data as any)?.active_entry_id ?? null)
+    }
+
+    loadEncounterTurn()
+
+    const channel = supabase
+      .channel(`encounter-turn-${encounterId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'encounters', filter: `id=eq.${encounterId}` },
+        (payload) => {
+          const rec = (payload as any).new as { active_entry_id?: string | null }
+          applyActiveEntry(rec?.active_entry_id ?? null)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      mounted = false
+      supabase.removeChannel(channel)
+    }
+  }, [encounterId])
 
   const isMyTurn = useMemo(() => {
     if (!ownerLower) return false
@@ -193,23 +242,29 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     return (safe / 5) * gridSize
   }, [visionFeet, gridSize])
 
-  // Load map image
+  // Load map image (image maps only)
   useEffect(() => {
-    if (!mapImageUrl) return
+    if (!mapImageUrl) { setImg(null); return }
     const image = new Image()
     image.src = mapImageUrl
     image.onload = () => setImg(image)
   }, [mapImageUrl])
 
-  // Load tokens + realtime
+  // Load tokens + realtime — filter by map (null map_id = PC tokens visible everywhere)
   useEffect(() => {
     let mounted = true
 
     async function loadTokens() {
-      const { data, error } = await supabase
+      let query = supabase
         .from('tokens')
         .select('id, label, x, y, color, hp, ac, owner_wallet, type')
         .eq('encounter_id', encounterId)
+
+      if (mapId) {
+        query = query.or(`map_id.eq.${mapId},map_id.is.null`)
+      }
+
+      const { data, error } = await query
 
       if (!mounted) return
       if (error) {
@@ -222,7 +277,7 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     loadTokens()
 
     const channel = supabase
-      .channel(`tokens-view-${encounterId}`)
+      .channel(`tokens-view-${encounterId}-${mapId ?? 'all'}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'tokens', filter: `encounter_id=eq.${encounterId}` },
@@ -234,9 +289,9 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       mounted = false
       supabase.removeChannel(channel)
     }
-  }, [encounterId])
+  }, [encounterId, mapId])
 
-  // Load fog reveals + realtime (per viewer)
+  // Load fog reveals + realtime (per viewer, per map)
   useEffect(() => {
     if (!ownerLower) {
       setReveals([])
@@ -247,11 +302,20 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     let mounted = true
 
     async function loadReveals() {
-      const { data, error } = await supabase
+      let query = supabase
         .from('fog_reveals')
         .select('tile_x, tile_y')
         .eq('encounter_id', encounterId)
         .eq('viewer_wallet', ownerLower)
+
+      // Scope fog to the active map so each map starts fresh
+      if (mapId) {
+        query = query.eq('map_id', mapId)
+      } else {
+        query = query.is('map_id', null)
+      }
+
+      const { data, error } = await query
 
       if (!mounted) return
 
@@ -271,7 +335,7 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     loadReveals()
 
     const channel = supabase
-      .channel(`fog-${encounterId}-${ownerLower}`)
+      .channel(`fog-${encounterId}-${ownerLower}-${mapId ?? 'nomap'}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'fog_reveals', filter: `encounter_id=eq.${encounterId}` },
@@ -283,7 +347,7 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       mounted = false
       supabase.removeChannel(channel)
     }
-  }, [encounterId, ownerLower])
+  }, [encounterId, ownerLower, mapId])
 
   // Persist “eraser trail” reveals
   async function revealAround(center: Point) {
@@ -324,16 +388,14 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     const payload = toInsert.map((t) => ({
       encounter_id: encounterId,
       viewer_wallet: ownerLower,
+      map_id: mapId ?? null,
       tile_x: t.tile_x,
       tile_y: t.tile_y,
     }))
 
     const { error } = await supabase
       .from('fog_reveals')
-      .upsert(payload, {
-        onConflict: 'encounter_id,viewer_wallet,tile_x,tile_y',
-        ignoreDuplicates: true,
-      })
+      .upsert(payload, { ignoreDuplicates: true })
 
     if (error) {
       logSupabaseError('Failed to persist fog reveals:', error)
@@ -353,53 +415,83 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   useEffect(() => {
     const canvas = mapCanvasRef.current
     const ctx = canvas?.getContext('2d')
-    if (!canvas || !ctx || !img) return
+    if (!canvas || !ctx) return
+    if (!tileData && !img) return
 
-    canvas.width = img.width
-    canvas.height = img.height
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
-    ctx.drawImage(img, 0, 0)
-
-    ctx.lineWidth = 1
-    ctx.strokeStyle = 'rgba(148,163,184,0.25)'
-
-    for (let x = 0; x < canvas.width; x += gridSize) {
-      ctx.beginPath()
-      ctx.moveTo(x, 0)
-      ctx.lineTo(x, canvas.height)
-      ctx.stroke()
+    if (tileData) {
+      canvas.width = tileData.cols * gridSize
+      canvas.height = tileData.rows * gridSize
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      renderTilesToCanvas(ctx, tileData, gridSize)
+      return
     }
 
-    for (let y = 0; y < canvas.height; y += gridSize) {
-      ctx.beginPath()
-      ctx.moveTo(0, y)
-      ctx.lineTo(canvas.width, y)
-      ctx.stroke()
+    if (img) {
+      canvas.width = img.width
+      canvas.height = img.height
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0)
+
+      ctx.lineWidth = 1
+      ctx.strokeStyle = 'rgba(148,163,184,0.25)'
+
+      for (let x = 0; x < canvas.width; x += gridSize) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke()
+      }
+      for (let y = 0; y < canvas.height; y += gridSize) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke()
+      }
     }
-  }, [img, gridSize])
+  }, [img, tileData, gridSize])
 
   // Draw tokens
   useEffect(() => {
     const canvas = tokenCanvasRef.current
     const ctx = canvas?.getContext('2d')
-    if (!canvas || !ctx || !img) return
+    if (!canvas || !ctx || !canvasSize) return
 
-    canvas.width = img.width
-    canvas.height = img.height
+    canvas.width = canvasSize.width
+    canvas.height = canvasSize.height
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
     tokens.forEach((t) => {
-      const r = gridSize * 0.35
+      const isPC = t.type === 'pc'
       const isMine = ownerLower && t.owner_wallet?.toLowerCase() === ownerLower
+
+      // Hide non-PC tokens that are inside unrevealed fog tiles.
+      // PC tokens (players' characters) are always visible to everyone.
+      if (!isPC) {
+        const tokenTileX = Math.floor(t.x / gridSize)
+        const tokenTileY = Math.floor(t.y / gridSize)
+        if (!revealSet.has(keyTile(tokenTileX, tokenTileY))) return
+      }
+
+      const r = gridSize * 0.35
+
+      // Active initiative token — green glow (visible to ALL players, NPC or PC)
+      const isActiveTurn =
+        (activeInitiativeName && t.label === activeInitiativeName) ||
+        (activeWalletLower && t.owner_wallet?.toLowerCase() === activeWalletLower)
 
       ctx.beginPath()
       ctx.fillStyle = t.color || '#111827'
       ctx.arc(t.x, t.y, r, 0, Math.PI * 2)
       ctx.fill()
 
-      if (isMine) {
+      if (isActiveTurn) {
+        const lw = Math.max(3, gridSize * 0.12)
+        ctx.save()
+        ctx.beginPath()
+        ctx.lineWidth = lw
+        ctx.strokeStyle = 'rgba(16,185,129,0.95)'
+        ctx.shadowColor = 'rgba(16,185,129,0.7)'
+        ctx.shadowBlur = Math.max(10, gridSize * 0.35)
+        ctx.arc(t.x, t.y, r + lw * 0.7, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.restore()
+      } else if (isMine) {
+        // Blue ring for my own token when it's not my turn
         const lw = Math.max(3, gridSize * 0.12)
         ctx.save()
         ctx.beginPath()
@@ -417,19 +509,17 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       ctx.fillText(t.label || 'T', t.x, t.y)
-
-      // (conditions overlay removed)
     })
-  }, [tokens, img, gridSize, ownerLower])
+  }, [tokens, canvasSize, gridSize, ownerLower, revealSet, activeInitiativeName, activeWalletLower])
 
   // Draw fog overlay (PERSISTENT reveals only)
   useEffect(() => {
     const canvas = fogCanvasRef.current
     const ctx = canvas?.getContext('2d')
-    if (!canvas || !ctx || !img) return
+    if (!canvas || !ctx || !canvasSize) return
 
-    canvas.width = img.width
-    canvas.height = img.height
+    canvas.width = canvasSize.width
+    canvas.height = canvasSize.height
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
@@ -445,7 +535,7 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       ctx.fillRect(r.tile_x * gridSize, r.tile_y * gridSize, gridSize, gridSize)
     }
     ctx.restore()
-  }, [img, reveals, gridSize])
+  }, [canvasSize, reveals, gridSize])
 
   // Helpers
   const getScreenPointFromMouse = (e: React.MouseEvent) => {
@@ -611,6 +701,15 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
 
     // success: permanent eraser reveal
     void revealAround({ x: tok.x, y: tok.y })
+
+    // Notify trigger system about the tile the token landed on
+    const tileX = Math.round(tok.x / gridSize)
+    const tileY = Math.round(tok.y / gridSize)
+    window.dispatchEvent(
+      new CustomEvent('dnd721-token-moved', {
+        detail: { tokenId: tok.id, tileX, tileY, mapId, encounterId },
+      })
+    )
   }
 
   const handleMouseLeave = () => {

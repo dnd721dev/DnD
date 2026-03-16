@@ -2,16 +2,17 @@
 
 import { WagmiProvider } from 'wagmi'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { wagmiConfig } from '@/lib/wagmi'
-import { initWeb3Modal } from '@/lib/web3modal'
-import { useEffect, useState } from 'react'
+import { wagmiConfig, initAppKit } from '@/lib/appkit'
+import { useState } from 'react'
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient())
 
-  useEffect(() => {
-    initWeb3Modal()
-  }, [])
+  // Initialize AppKit synchronously during first render, NOT in a useEffect.
+  // useEffect runs after render — by then wagmi has already started restoring
+  // the WalletConnect session and relay messages may arrive before AppKit's
+  // handlers are registered, causing the {} relay error on mobile.
+  useState(() => { initAppKit() })
 
   return (
     <WagmiProvider config={wagmiConfig}>

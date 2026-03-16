@@ -125,8 +125,8 @@ export function SpellsPanel({
 
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-xs">
-      <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <div className="mb-3">
+        <div className="flex items-center gap-2 mb-2">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
             Spellbook
           </h2>
@@ -137,13 +137,25 @@ export function SpellsPanel({
             Prepared {preparedSpellNames.size}
           </span>
         </div>
-        <div className="text-[10px] text-slate-500">
-          {c.spellcasting_ability
-            ? `Save DC ${c.spell_save_dc ?? '—'} • Attack ${
-                c.spell_attack_bonus != null ? formatMod(c.spell_attack_bonus) : '—'
-              }`
-            : 'Non-spellcaster'}
-        </div>
+        {c.spellcasting_ability ? (
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 rounded-md bg-violet-900/30 border border-violet-700/40 px-2.5 py-1">
+              <span className="text-[10px] uppercase tracking-wide text-violet-400">Save DC</span>
+              <span className="text-base font-bold text-violet-200">{c.spell_save_dc ?? '—'}</span>
+            </div>
+            <div className="flex items-center gap-1.5 rounded-md bg-blue-900/30 border border-blue-700/40 px-2.5 py-1">
+              <span className="text-[10px] uppercase tracking-wide text-blue-400">Spell Attack</span>
+              <span className="text-base font-bold text-blue-200">
+                {c.spell_attack_bonus != null ? formatMod(c.spell_attack_bonus) : '—'}
+              </span>
+            </div>
+            <span className="text-[10px] text-slate-500 ml-1">
+              {c.spellcasting_ability.toUpperCase()}
+            </span>
+          </div>
+        ) : (
+          <div className="text-[10px] text-slate-500 italic">Non-spellcaster</div>
+        )}
       </div>
 
       {(saving || saveErr) && (

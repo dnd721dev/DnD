@@ -68,7 +68,7 @@ export default function NewCharacterStep4Page() {
     const existing = loadDraft()
 
     const level = existing.level ?? 1
-    const classKey = existing.classKey ?? 'fighter'
+    const classKey = (existing.classKey ?? 'fighter').toLowerCase()
 
     // If this class does not cast spells, skip this step entirely
     if (!SPELLCASTING_CLASSES.includes(classKey)) {
@@ -165,7 +165,7 @@ export default function NewCharacterStep4Page() {
   }
 
   const level = draft.level ?? 1
-  const classKey = draft.classKey ?? 'fighter'
+  const classKey = (draft.classKey ?? 'fighter').toLowerCase()
   const proficiencyBonus =
     draft.proficiencyBonus ?? proficiencyForLevel(level)
 

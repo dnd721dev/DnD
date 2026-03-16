@@ -44,11 +44,7 @@ export function TableTopBar(props: {
             {showDiceLog ? 'Hide Dice Log' : 'Show Dice Log'}
           </button>
           <div className="shrink-0">
-            <VoiceChat
-              // extra prop ignored by the simple VoiceChat component
-              // @ts-expect-error
-              roomName={roomName}
-            />
+            <VoiceChat roomName={roomName} identity={address?.toLowerCase()} />
           </div>
         </div>
 
