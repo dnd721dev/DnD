@@ -3,7 +3,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { z } from 'zod'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 
-type Params = { params: { id: string } }
+type Params = { params: Promise<{ id: string }> }
 
 const PatchSponsorSchema = z.object({
   status: z.enum(['approved', 'rejected'], {
@@ -14,7 +14,7 @@ const PatchSponsorSchema = z.object({
 
 /** PATCH /api/sponsor/[id]  — GM approves or rejects a sponsored monster */
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const { id } = params
+  const { id } = await params
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
   // 20 approvals/rejections per minute per IP
