@@ -340,7 +340,6 @@ export default function SessionClient({ sessionId }: SessionClientProps) {
                 )}
               </div>
             </div>
-            </div>
           </section>
 
           {/* RSVP Panel */}
