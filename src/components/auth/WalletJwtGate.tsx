@@ -10,11 +10,11 @@ const REFRESH_BEFORE_EXPIRY_S = 60 * 60
 
 /**
  * How long to wait before treating a disconnect as real.
- * wagmi briefly emits isConnected=false on every page load/refresh while
- * re-establishing the wallet connection. Without this debounce, the gate
- * immediately clears auth state, causing "session not found" loops.
+ * WalletConnect briefly drops isConnected while signing (relay keepalive /
+ * session update). 3 s was too short — a 3 s timer would fire mid-sign,
+ * clearing the JWT and triggering another signature request.
  */
-const DISCONNECT_DEBOUNCE_MS = 3000
+const DISCONNECT_DEBOUNCE_MS = 15_000
 
 /** sessionStorage key for mobile auth state that must survive page reloads */
 const AUTH_ATTEMPT_KEY = 'dnd721_auth_attempt'
@@ -157,10 +157,11 @@ export default function WalletJwtGate() {
         clearAuthAttempt() // auth complete — no longer need the saved attempt
         try { localStorage.setItem('dnd721_wallet', wallet) } catch {}
 
-        // Inject into Supabase so realtime WebSocket gets proper auth context.
-        // The JWT is signed with SUPABASE_JWT_SECRET and carries role=authenticated,
-        // so Supabase accepts it for both REST and realtime channels.
-        void supabase.auth.setSession({ access_token: token, refresh_token: token })
+        // Authenticate the Supabase Realtime WebSocket with our JWT so that
+        // realtime subscriptions run under the 'authenticated' role.
+        // We use setAuth (not setSession) to avoid triggering autoRefresh logic
+        // that would try to use our JWT as a refresh token, fail, and clear state.
+        void supabase.realtime.setAuth(token)
 
         scheduleRefresh(wallet, token)
       }
@@ -215,8 +216,8 @@ export default function WalletJwtGate() {
 
     if (existing && existingIsForThisWallet && isTokenFresh(existing)) {
       scheduleRefresh(wallet, existing)
-      // Re-inject into Supabase in case the session was lost (e.g. new tab, refresh)
-      void supabase.auth.setSession({ access_token: existing, refresh_token: existing })
+      // Re-authenticate the realtime WebSocket in case it was lost (new tab, refresh)
+      void supabase.realtime.setAuth(existing)
       return
     }
 
