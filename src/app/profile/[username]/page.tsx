@@ -22,8 +22,8 @@ type CharacterRow = {
   id: string
   name: string | null
   level: number | null
-  class_key: string | null
-  race_key: string | null
+  main_job: string | null
+  race: string | null
   avatar_url: string | null
   wallet_address: string | null
 }
@@ -120,7 +120,7 @@ export default function PublicProfilePage() {
 
   const getCharName = (ch: CharacterRow) => ch.name || `Character ${ch.id}`
   const getCharLevel = (ch: CharacterRow) => ch.level ?? 1
-  const getCharClass = (ch: CharacterRow) => ch.class_key || 'Unknown class'
+  const getCharClass = (ch: CharacterRow) => ch.main_job || 'Unknown class'
   const getCharAvatar = (ch: CharacterRow) => ch.avatar_url || '/default-character.png'
 
   return (

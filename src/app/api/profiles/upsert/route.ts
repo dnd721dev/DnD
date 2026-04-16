@@ -20,26 +20,13 @@ function verifyEvmSignature(params: { wallet: string; message: string; signature
   return normalizeAddr(recovered) === normalizeAddr(params.wallet)
 }
 
-/**
- * HARD RULE:
- * 1 wallet = 1 auth user
- * 1 auth user = 1 wallet
- *
- * This function ENFORCES that rule.
- */
 async function getOrCreateAuthUserIdForWallet(wallet: string) {
   const w = normalizeAddr(wallet)
   const email = `${w}@wallet.local`
 
-  // Look up existing auth user
-  const list = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 })
-  if (list.error) throw new Error(list.error.message)
-
-  const existing = list.data.users.find(
-    (u) => (u.email || '').toLowerCase() === email
-  )
-
-  if (existing?.id) return existing.id
+  // Try to look up by email first (avoids fetching all users)
+  const { data: existing } = await supabaseAdmin.auth.admin.getUserByEmail(email)
+  if (existing?.user?.id) return existing.user.id
 
   // Create auth user if missing
   const created = await supabaseAdmin.auth.admin.createUser({
@@ -57,10 +44,21 @@ async function getOrCreateAuthUserIdForWallet(wallet: string) {
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const { wallet_address, username, bio, signature, message } = body as {
+    const {
+      wallet_address, username, bio, display_name,
+      avatar_url, location, timezone, twitter, discord, twitch,
+      signature, message,
+    } = body as {
       wallet_address: string
       username: string
       bio?: string
+      display_name?: string
+      avatar_url?: string
+      location?: string
+      timezone?: string
+      twitter?: string
+      discord?: string
+      twitch?: string
       signature: string
       message: string
     }
@@ -80,11 +78,8 @@ export async function POST(req: Request) {
     // Get or create auth user
     const user_id = await getOrCreateAuthUserIdForWallet(wallet)
 
-    /**
-     * 🔥 CRITICAL FIX 🔥
-     * If this user_id was previously linked to ANOTHER wallet,
-     * we NULL it out first so UNIQUE(user_id) never explodes.
-     */
+    // If this user_id was previously linked to a different wallet, clear it first
+    // so the UNIQUE(user_id) constraint never fires.
     const clear = await supabaseAdmin
       .from('profiles')
       .update({ user_id: null })
@@ -95,7 +90,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: clear.error.message }, { status: 400 })
     }
 
-    // Final authoritative upsert
+    // Upsert all profile fields
     const { data, error } = await supabaseAdmin
       .from('profiles')
       .upsert(
@@ -104,6 +99,13 @@ export async function POST(req: Request) {
           wallet_address: wallet,
           username,
           bio: bio ?? null,
+          display_name: display_name ?? null,
+          avatar_url: avatar_url ?? null,
+          location: location ?? null,
+          timezone: timezone ?? null,
+          twitter: twitter ?? null,
+          discord: discord ?? null,
+          twitch: twitch ?? null,
         },
         { onConflict: 'wallet_address' }
       )

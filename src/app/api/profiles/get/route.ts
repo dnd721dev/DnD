@@ -28,7 +28,7 @@ export async function GET(req: Request) {
 
     const { data: chars, error: cErr } = await admin
       .from('characters')
-      .select('id, name, level, class_key, race_key, avatar_url, wallet_address')
+      .select('id, name, level, main_job, race, avatar_url, wallet_address')
       .eq('wallet_address', profile.wallet_address)
       .order('created_at', { ascending: true })
 
