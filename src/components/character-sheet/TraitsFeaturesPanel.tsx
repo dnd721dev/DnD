@@ -38,13 +38,29 @@ export function TraitsFeaturesPanel({ c }: { c: CharacterSheetData }) {
     return String(f.subclass).toLowerCase() === subclassKey && Number(f.level) <= level
   })
 
+  // Languages: auto from race lib + any stored on sheet
+  const autoLanguages: string[] = raceFromLib?.languages ?? []
+  const sheetLanguages: string[] = (c.languages ?? []).filter(Boolean).map(String)
+  const allLanguages = [...new Set([...autoLanguages, ...sheetLanguages])]
+
+  // Tool proficiencies: from bg lib first, then stored on sheet
+  const bgToolProfs: string[] = bgFromLib?.toolProficiencies ?? []
+  const sheetToolProfs: string[] = (c.tool_proficiencies ?? []).filter(Boolean).map(String)
+  const allToolProfs = [...new Set([...bgToolProfs, ...sheetToolProfs])]
+
+  // Feats
+  const feats: string[] = (c.feats ?? []).filter(Boolean).map(String)
+
   const hasAnything =
     (raceFromLib?.traits?.length ?? 0) > 0 ||
     racialTraitsFallback.length > 0 ||
     Boolean(bgFromLib?.feature) ||
     Boolean(backgroundFeatureFallback) ||
     classFeatures.length > 0 ||
-    subclassFeatures.length > 0
+    subclassFeatures.length > 0 ||
+    allLanguages.length > 0 ||
+    allToolProfs.length > 0 ||
+    feats.length > 0
 
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-200">
@@ -153,6 +169,57 @@ export function TraitsFeaturesPanel({ c }: { c: CharacterSheetData }) {
                   </li>
                 ))}
             </ul>
+          </div>
+        )}
+
+        {/* LANGUAGES */}
+        {allLanguages.length > 0 && (
+          <div>
+            <div className="text-[10px] font-semibold uppercase text-slate-400">Languages</div>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {allLanguages.map((lang) => (
+                <span
+                  key={lang}
+                  className="rounded-full border border-slate-600 bg-slate-900/60 px-2 py-0.5 text-[11px] capitalize text-slate-300"
+                >
+                  {lang.replace(/([A-Z])/g, ' $1').trim()}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* TOOL PROFICIENCIES */}
+        {allToolProfs.length > 0 && (
+          <div>
+            <div className="text-[10px] font-semibold uppercase text-slate-400">Tool Proficiencies</div>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {allToolProfs.map((tool) => (
+                <span
+                  key={tool}
+                  className="rounded-full border border-amber-700/40 bg-amber-900/20 px-2 py-0.5 text-[11px] text-amber-200"
+                >
+                  {tool}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* FEATS */}
+        {feats.length > 0 && (
+          <div>
+            <div className="text-[10px] font-semibold uppercase text-slate-400">Feats</div>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {feats.map((feat) => (
+                <span
+                  key={feat}
+                  className="rounded-full border border-violet-700/50 bg-violet-900/20 px-2 py-0.5 text-[11px] text-violet-200"
+                >
+                  {feat}
+                </span>
+              ))}
+            </div>
           </div>
         )}
 

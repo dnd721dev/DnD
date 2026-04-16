@@ -41,6 +41,10 @@ export type RaceKey =
   | 'half_orc'
   | 'tiefling'
 
+export type SpellClass =
+  | 'bard' | 'cleric' | 'druid' | 'paladin' | 'ranger'
+  | 'sorcerer' | 'warlock' | 'wizard'
+
 export type RaceTrait = {
   key: string
   name: string
@@ -57,7 +61,7 @@ export type Race = {
   speed: number // base walking speed in feet
   /**
    * Ability score adjustments (e.g. { con: +2, wis: +1 }).
-   * Use 0 for abilities that don’t change.
+   * Use 0 for abilities that don't change.
    */
   abilityBonuses: Record<AbilityKey, number>
   /** Darkvision vs normal vision, etc. */
@@ -71,6 +75,15 @@ export type Race = {
   extraLanguageChoices: number
   /** Racial traits like Dwarven Resilience, Fey Ancestry, etc. */
   traits: RaceTrait[]
+  /**
+   * Innate spell grants from racial heritage.
+   * `auto` spells are always granted (no choice needed).
+   * `cantripChoiceFrom` means the player picks 1 cantrip from that class list.
+   */
+  innateSpells?: {
+    auto?: Array<{ spellName: string; unlocksAtLevel?: number }>
+    cantripChoiceFrom?: SpellClass
+  }
 }
 
 // -----------------------------
@@ -113,7 +126,7 @@ export const RACES: Record<RaceKey, Race> = {
         key: 'tool_proficiency_dwarf',
         name: 'Tool Proficiency',
         summary:
-          'You gain proficiency with a set of artisan’s tools from the classic dwarf crafts (such as smithing, brewing, or stonework).',
+          "You gain proficiency with a set of artisan's tools from the classic dwarf crafts (such as smithing, brewing, or stonework).",
       },
       {
         key: 'stonecunning',
@@ -164,7 +177,7 @@ export const RACES: Record<RaceKey, Race> = {
         key: 'tool_proficiency_dwarf',
         name: 'Tool Proficiency',
         summary:
-          'You gain proficiency with a set of artisan’s tools from the classic dwarf crafts (such as smithing, brewing, or stonework).',
+          "You gain proficiency with a set of artisan's tools from the classic dwarf crafts (such as smithing, brewing, or stonework).",
       },
       {
         key: 'stonecunning',
@@ -228,9 +241,10 @@ export const RACES: Record<RaceKey, Race> = {
         key: 'cantrip_high_elf',
         name: 'High Elf Cantrip',
         summary:
-          'You know a simple arcane cantrip, hinting at your people’s deep magical tradition.',
+          "You know a simple arcane cantrip, hinting at your people's deep magical tradition.",
       },
     ],
+    innateSpells: { cantripChoiceFrom: 'wizard' },
   },
 
   elf_wood: {
@@ -351,6 +365,13 @@ export const RACES: Record<RaceKey, Race> = {
           'You are proficient with rapiers, shortswords, and hand crossbows.',
       },
     ],
+    innateSpells: {
+      auto: [
+        { spellName: 'Dancing Lights' },
+        { spellName: 'Faerie Fire', unlocksAtLevel: 3 },
+        { spellName: 'Darkness', unlocksAtLevel: 5 },
+      ],
+    },
   },
 
   // ===== HALFLINGS =====
@@ -388,7 +409,7 @@ export const RACES: Record<RaceKey, Race> = {
         key: 'halfling_nimbleness',
         name: 'Halfling Nimbleness',
         summary:
-          'You can move through the space of creatures larger than you as if they weren’t full obstacles.',
+          "You can move through the space of creatures larger than you as if they weren't full obstacles.",
       },
       {
         key: 'naturally_stealthy',
@@ -433,7 +454,7 @@ export const RACES: Record<RaceKey, Race> = {
         key: 'halfling_nimbleness',
         name: 'Halfling Nimbleness',
         summary:
-          'You can move through the space of creatures larger than you as if they weren’t full obstacles.',
+          "You can move through the space of creatures larger than you as if they weren't full obstacles.",
       },
       {
         key: 'stout_resilience',
@@ -550,6 +571,9 @@ export const RACES: Record<RaceKey, Race> = {
           'Small forest animals tend to understand your simple speech and gestures.',
       },
     ],
+    innateSpells: {
+      auto: [{ spellName: 'Minor Illusion' }],
+    },
   },
 
   gnome_rock: {
@@ -578,7 +602,7 @@ export const RACES: Record<RaceKey, Race> = {
       },
       {
         key: 'artificers_lore',
-        name: 'Artificer’s Lore',
+        name: "Artificer's Lore",
         summary:
           'You have extra insight into magic items, alchemy, and technical objects.',
       },
@@ -703,6 +727,13 @@ export const RACES: Record<RaceKey, Race> = {
           'You know a few innate spells flavored by infernal magic.',
       },
     ],
+    innateSpells: {
+      auto: [
+        { spellName: 'Thaumaturgy' },
+        { spellName: 'Hellish Rebuke', unlocksAtLevel: 3 },
+        { spellName: 'Darkness', unlocksAtLevel: 5 },
+      ],
+    },
   },
 }
 
@@ -730,4 +761,12 @@ export const RACE_LIST: Race[] = [
 
 export function getRace(key: RaceKey): Race | undefined {
   return RACES[key]
+}
+
+export function hasRaceInnateSpells(raceKey: string): boolean {
+  const race = (RACES as any)[raceKey] as Race | undefined
+  return Boolean(
+    race?.innateSpells?.auto?.length ||
+    race?.innateSpells?.cantripChoiceFrom
+  )
 }

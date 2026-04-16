@@ -256,6 +256,7 @@ export const LEVEL4_SPELLS: SrdSpell[] = [
     saveAbility: 'dex',
     damage: '2d8+4d6',
     notes: 'Hailstones hit 20-ft radius, 40-ft cylinder. Dex save for bludgeoning + cold damage (half on success). Difficult terrain afterward.',
+    upcastDamage: '1d8',
     classes: ['druid', 'sorcerer', 'wizard'],
   },
   {

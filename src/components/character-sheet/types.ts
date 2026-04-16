@@ -26,6 +26,8 @@ export type CharacterSheetData = {
   wallet_address?: string | null
 
   level?: number | null
+  is_caya?: boolean | null
+  experience_points?: number | null
   main_job?: string | null
   subclass?: string | null
   race?: string | null
@@ -43,6 +45,7 @@ export type CharacterSheetData = {
 
   hit_points_max?: number | null
   hit_points_current?: number | null
+  temp_hp?: number | null
   armor_class?: number | null
 
   // ✅ NEW: movement + vision authority for VTT rules
@@ -59,9 +62,16 @@ export type CharacterSheetData = {
   spells_known?: string[] | null
   spells_prepared?: string[] | null
 
+  skill_proficiencies?: Record<string, 'none' | 'proficient' | 'expertise'> | null
+
   // ✅ persistent sheet state
   resource_state?: Record<string, number> | null
   action_state?: Record<string, any> | null
+
+  // Languages, tool proficiencies, feats
+  languages?: string[] | null
+  tool_proficiencies?: string[] | null
+  feats?: string[] | null
 
   [key: string]: any
 }

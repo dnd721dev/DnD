@@ -6,6 +6,7 @@ import MapBoard from '@/components/table/MapBoard'
 import MapBoardView from '@/components/table/MapBoardView'
 import { DiceLogOverlay } from './DiceLogOverlay'
 import { DiceRollOverlay } from './DiceRollOverlay'
+import { DiceCanvas3D } from '@/components/dice/DiceCanvas3D'
 import type { DiceEntry } from '../types'
 import type { SessionMap } from '../hooks/useMapManager'
 
@@ -23,11 +24,16 @@ export function MapSection(props: {
   characterId?: string | null
   speedFeet?: number
   visionFeet?: number
+  sessionPlayerWallets?: string[]
 
   showDiceLog: boolean
   diceLog: DiceEntry[]
   onTestRoll: () => void
   onCloseDiceLog: () => void
+  onRollEntry?: (entry: DiceEntry) => void
+  sessionId?: string
+  rollerName?: string
+  rollerWallet?: string
   rollOverlay?: null | { roller: string; label: string; formula: string; result: number }
 
   // Shown inside the map area when no map is set (GM only)
@@ -45,10 +51,15 @@ export function MapSection(props: {
     characterId,
     speedFeet,
     visionFeet,
+    sessionPlayerWallets,
     showDiceLog,
     diceLog,
     onTestRoll,
     onCloseDiceLog,
+    onRollEntry,
+    sessionId,
+    rollerName,
+    rollerWallet,
     rollOverlay,
     mapControls,
   } = props
@@ -101,6 +112,7 @@ export function MapSection(props: {
                 tileData={tileData}
                 mapId={mapId}
                 gridSize={50}
+                sessionPlayerWallets={sessionPlayerWallets}
               />
             )
           ) : (
@@ -129,8 +141,18 @@ export function MapSection(props: {
           </div>
         )}
 
+        <DiceCanvas3D roll={rollOverlay ?? null} show={Boolean(rollOverlay)} />
         <DiceRollOverlay show={Boolean(rollOverlay)} payload={rollOverlay ?? null} />
-        <DiceLogOverlay show={showDiceLog} diceLog={diceLog} onTestRoll={onTestRoll} onClose={onCloseDiceLog} />
+        <DiceLogOverlay
+          show={showDiceLog}
+          diceLog={diceLog}
+          onTestRoll={onTestRoll}
+          onClose={onCloseDiceLog}
+          sessionId={sessionId}
+          rollerName={rollerName}
+          rollerWallet={rollerWallet}
+          onRollEntry={onRollEntry}
+        />
       </div>
     </section>
   )

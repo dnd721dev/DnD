@@ -130,6 +130,7 @@ export const LEVEL1_SPELLS: SrdSpell[] = [
     duration: 'Instantaneous',
     damage: '1d8+3',
     notes: 'Heals instead of damage; use the roller for the amount.',
+    upcastDamage: '1d8',
     classes: ['bard', 'cleric', 'druid', 'paladin', 'ranger'],
   },
   {
@@ -302,6 +303,7 @@ export const LEVEL1_SPELLS: SrdSpell[] = [
     attackRoll: true,
     damage: '4d6',
     notes: 'Ranged spell attack, radiant damage. Next attack against the target has advantage.',
+    upcastDamage: '1d6',
     classes: ['cleric'],
   },
   {
@@ -314,6 +316,7 @@ export const LEVEL1_SPELLS: SrdSpell[] = [
     duration: 'Instantaneous',
     damage: '1d4+3',
     notes: 'Restore HP as a bonus action.',
+    upcastDamage: '1d4',
     classes: ['bard', 'cleric', 'druid'],
   },
   {
@@ -384,6 +387,7 @@ export const LEVEL1_SPELLS: SrdSpell[] = [
     attackRoll: true,
     damage: '3d10',
     notes: 'Melee spell attack, necrotic damage.',
+    upcastDamage: '1d10',
     classes: ['cleric'],
   },
   {
@@ -429,6 +433,8 @@ export const LEVEL1_SPELLS: SrdSpell[] = [
     duration: 'Instantaneous',
     damage: '3d4+3',
     notes: 'Three darts, each auto-hitting for 1d4+1 force damage.',
+    upcastDamage: '1d4+1',
+    upcastNotes: 'Adds one dart per slot level above 1st.',
     classes: ['sorcerer', 'wizard'],
   },
   {
@@ -545,6 +551,7 @@ export const LEVEL1_SPELLS: SrdSpell[] = [
     saveAbility: 'con',
     damage: '2d8',
     notes: 'Con save or take thunder damage and be pushed 10 ft. Loud boom audible 300 ft away.',
+    upcastDamage: '1d8',
     classes: ['bard', 'druid', 'sorcerer', 'wizard'],
   },
   {
@@ -569,6 +576,7 @@ export const LEVEL1_SPELLS: SrdSpell[] = [
     attackRoll: true,
     damage: '1d12',
     notes: 'Ranged spell attack, lightning damage. On subsequent turns, use action to deal 1d12 lightning damage automatically.',
+    upcastDamage: '1d12',
     classes: ['sorcerer', 'warlock', 'wizard'],
   },
   {

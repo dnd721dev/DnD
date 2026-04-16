@@ -14,6 +14,8 @@ type Session = {
   scheduled_start: string | null
   duration_minutes: number
   status: SessionStatus
+  session_type: 'set_level' | 'caya'
+  required_level: number | null
 }
 
 type Campaign = {
@@ -38,6 +40,8 @@ export default function SessionsClient({ campaignId }: Props) {
   const [description, setDescription] = useState('')
   const [datetime, setDatetime] = useState('')
   const [duration, setDuration] = useState('120')
+  const [sessionType, setSessionType] = useState<'set_level' | 'caya'>('set_level')
+  const [requiredLevel, setRequiredLevel] = useState('1')
   const [creating, setCreating] = useState(false)
 
   const myAddress = address?.toLowerCase() ?? null
@@ -64,7 +68,7 @@ export default function SessionsClient({ campaignId }: Props) {
           supabase
             .from('sessions')
             .select(
-              'id, title, description, scheduled_start, duration_minutes, status'
+              'id, title, description, scheduled_start, duration_minutes, status, session_type, required_level'
             )
             .eq('campaign_id', campaignId)
             .order('scheduled_start', { ascending: true }),
@@ -152,9 +156,11 @@ export default function SessionsClient({ campaignId }: Props) {
         status: 'planned',
         // Use the connected GM wallet (lowercased) to satisfy the FK constraint.
         gm_wallet: gmWallet,
+        session_type: sessionType,
+        required_level: sessionType === 'set_level' ? (parseInt(requiredLevel) || 1) : null,
       })
       .select(
-        'id, title, description, scheduled_start, duration_minutes, status'
+        'id, title, description, scheduled_start, duration_minutes, status, session_type, required_level'
       )
       .limit(1).maybeSingle()
 
@@ -183,6 +189,8 @@ export default function SessionsClient({ campaignId }: Props) {
     setDescription('')
     setDatetime('')
     setDuration('120')
+    setSessionType('set_level')
+    setRequiredLevel('1')
     setCreating(false)
   }
 
@@ -244,6 +252,51 @@ export default function SessionsClient({ campaignId }: Props) {
                 placeholder="Session name"
               />
             </label>
+
+            <div className="space-y-1 text-sm md:col-span-2">
+              <span className="text-slate-200">Session Type</span>
+              <div className="flex gap-2 mt-1">
+                <button
+                  type="button"
+                  onClick={() => setSessionType('set_level')}
+                  className={`flex-1 rounded border px-3 py-2 text-xs font-semibold transition ${
+                    sessionType === 'set_level'
+                      ? 'border-sky-500 bg-sky-500/20 text-sky-200'
+                      : 'border-slate-600 bg-slate-800 text-slate-400 hover:border-slate-400'
+                  }`}
+                >
+                  Set Level
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSessionType('caya')}
+                  className={`flex-1 rounded border px-3 py-2 text-xs font-semibold transition ${
+                    sessionType === 'caya'
+                      ? 'border-amber-500 bg-amber-500/20 text-amber-200'
+                      : 'border-slate-600 bg-slate-800 text-slate-400 hover:border-slate-400'
+                  }`}
+                >
+                  CAYA — Come As You Are
+                </button>
+              </div>
+              {sessionType === 'set_level' && (
+                <div className="mt-2 flex items-center gap-3">
+                  <span className="text-xs text-slate-400">Required Level:</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    className="w-20 rounded bg-slate-800 px-2 py-1 text-sm outline-none"
+                    value={requiredLevel}
+                    onChange={e => setRequiredLevel(e.target.value)}
+                  />
+                  <span className="text-[11px] text-slate-500">Players must join with a character at this exact level.</span>
+                </div>
+              )}
+              {sessionType === 'caya' && (
+                <p className="text-[11px] text-amber-400/80 mt-1">Players bring their CAYA character (level 1) and earn XP each session.</p>
+              )}
+            </div>
 
             <label className="space-y-1 text-sm">
               <span className="text-slate-200">Start (local time)</span>
@@ -319,13 +372,22 @@ export default function SessionsClient({ campaignId }: Props) {
                 className="flex flex-col gap-2 rounded border border-slate-700 bg-slate-900/80 p-3 md:flex-row md:items-center md:justify-between"
               >
                 <div className="space-y-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-sm font-semibold text-slate-100">
                       {session.title}
                     </h3>
                     <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-200">
                       {session.status}
                     </span>
+                    {session.session_type === 'caya' ? (
+                      <span className="rounded-full border border-amber-600 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
+                        CAYA
+                      </span>
+                    ) : session.required_level ? (
+                      <span className="rounded-full border border-slate-600 bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-slate-300">
+                        Lv {session.required_level}
+                      </span>
+                    ) : null}
                   </div>
                   <p className="text-xs text-slate-400">{dateText}</p>
                   {session.description && (

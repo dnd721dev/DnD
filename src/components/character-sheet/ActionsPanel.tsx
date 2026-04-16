@@ -9,6 +9,8 @@ type Props = {
   actionState: Record<string, any>
   resourceState: Record<string, number>
   onUseAction: (action: SheetAction) => void
+  sneakArmed?: boolean
+  onToggleSneakArm?: () => void
 }
 
 function normKey(v: unknown) {
@@ -47,6 +49,8 @@ export function ActionsPanel({
   actionState,
   resourceState,
   onUseAction,
+  sneakArmed,
+  onToggleSneakArm,
 }: Props) {
   const normalizedClass = normKey(classKey)
   const normalizedSubclass = normKey(subclassKey)
@@ -66,9 +70,26 @@ export function ActionsPanel({
     else groups[2].items.push(a) // subclass and any composite gates default here
   }
 
+  const isRogue = normalizedClass === 'rogue'
+
   return (
     <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-      <div className="text-sm font-semibold text-slate-100">Actions</div>
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold text-slate-100">Actions</div>
+        {isRogue && onToggleSneakArm && (
+          <button
+            type="button"
+            onClick={onToggleSneakArm}
+            className={`rounded-md px-3 py-1 text-[11px] font-semibold transition ${
+              sneakArmed
+                ? 'bg-amber-500/25 text-amber-200 ring-1 ring-amber-500/50 hover:bg-amber-500/35'
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+            }`}
+          >
+            {sneakArmed ? '🗡 Sneak Armed' : 'Arm Sneak Attack'}
+          </button>
+        )}
+      </div>
 
       {groups.map((g) => {
         if (g.items.length === 0) return null

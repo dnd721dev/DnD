@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Room, RoomEvent } from 'livekit-client';
 import { RoomAudioRenderer } from '@livekit/components-react';
 import '@livekit/components-styles';
@@ -16,8 +16,21 @@ export default function VoiceChat({ roomName, identity }: VoiceChatProps) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [participantCount, setParticipantCount] = useState(0);
+  const [cachedToken, setCachedToken] = useState<string | null>(null);
 
   const url = process.env.NEXT_PUBLIC_LIVEKIT_URL || '';
+  const stableId = useRef(identity || `guest-${Math.random().toString(36).slice(2, 8)}`);
+
+  // Pre-fetch LiveKit token in background so it's ready when user clicks Voice
+  useEffect(() => {
+    if (!url || !roomName) return;
+    fetch(
+      `/api/livekit-token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(stableId.current)}`
+    )
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => { if (d.token) setCachedToken(d.token); })
+      .catch(() => {}); // silent — handleConnect will fetch fresh if this fails
+  }, [url, roomName]);
 
   // Clean up room on unmount
   useEffect(() => {
@@ -40,19 +53,19 @@ export default function VoiceChat({ roomName, identity }: VoiceChatProps) {
       setError(null);
       setIsConnecting(true);
 
-      // Derive a stable identity: wallet address, fallback to random guest id
-      const id = identity || `guest-${Math.random().toString(36).slice(2, 8)}`;
-
-      // Fetch a fresh signed token from the server
-      const res = await fetch(
-        `/api/livekit-token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(id)}`
-      );
-      if (!res.ok) {
-        const { error: msg } = await res.json().catch(() => ({ error: 'Token fetch failed' }));
-        setError(msg);
-        return;
+      // Use pre-fetched token if available, otherwise fetch fresh
+      let token = cachedToken;
+      if (!token) {
+        const res = await fetch(
+          `/api/livekit-token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(stableId.current)}`
+        );
+        if (!res.ok) {
+          const { error: msg } = await res.json().catch(() => ({ error: 'Token fetch failed' }));
+          setError(msg);
+          return;
+        }
+        ({ token } = await res.json());
       }
-      const { token } = await res.json();
 
       const newRoom = new Room();
 
@@ -72,7 +85,10 @@ export default function VoiceChat({ roomName, identity }: VoiceChatProps) {
           setParticipantCount(newRoom.numParticipants);
         });
 
-      await newRoom.connect(url, token);
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Connection timed out after 10s')), 10_000)
+      );
+      await Promise.race([newRoom.connect(url, token!), timeout]);
       setRoom(newRoom);
     } catch (e: any) {
       console.error(e);

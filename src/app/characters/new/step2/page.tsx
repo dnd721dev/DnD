@@ -4,9 +4,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { loadDraft, saveDraft } from '@/lib/characterDraft'
 import type { CharacterDraft } from '../../../../types/characterDraft'
-import { RACE_LIST, type RaceKey } from '@/lib/races'
-import { BACKGROUND_LIST, type BackgroundKey } from '@/lib/backgrounds'
+import { RACE_LIST, RACES, type RaceKey } from '@/lib/races'
+import { BACKGROUND_LIST, BACKGROUNDS, type BackgroundKey } from '@/lib/backgrounds'
 import { proficiencyForLevel } from '@/lib/rules'
+import { supabase } from '@/lib/supabase'
 
 // ✅ pull subclasses from the real library
 import { CLASS_SUBCLASSES, type ClassKey, type SubclassKey } from '@/lib/subclasses'
@@ -24,6 +25,24 @@ const CLASS_OPTIONS = [
   { key: 'bard', label: 'Bard' },
   { key: 'monk', label: 'Monk' },
   { key: 'druid', label: 'Druid' },
+]
+
+const ALL_LANGUAGES = [
+  { key: 'common', label: 'Common' },
+  { key: 'dwarvish', label: 'Dwarvish' },
+  { key: 'elvish', label: 'Elvish' },
+  { key: 'giant', label: 'Giant' },
+  { key: 'gnomish', label: 'Gnomish' },
+  { key: 'goblin', label: 'Goblin' },
+  { key: 'halfling', label: 'Halfling' },
+  { key: 'orc', label: 'Orc' },
+  { key: 'draconic', label: 'Draconic' },
+  { key: 'deepSpeech', label: 'Deep Speech' },
+  { key: 'infernal', label: 'Infernal' },
+  { key: 'celestial', label: 'Celestial' },
+  { key: 'primordial', label: 'Primordial' },
+  { key: 'sylvan', label: 'Sylvan' },
+  { key: 'undercommon', label: 'Undercommon' },
 ]
 
 const ALIGNMENT_OPTIONS = [
@@ -49,11 +68,14 @@ function getSubclassOptions(classKeyRaw: string | null | undefined) {
   }>
 }
 
+type HomebrewSubclass = { id: string; name: string; parent_class: string; subclass_type: string | null }
+
 export default function NewCharacterStep2Page() {
   const router = useRouter()
   const [draft, setDraft] = useState<CharacterDraft | null>(null)
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [homebrewSubclasses, setHomebrewSubclasses] = useState<HomebrewSubclass[]>([])
 
   function ensureAbilities(base?: CharacterDraft['baseAbilities']) {
     if (base) return base
@@ -146,11 +168,30 @@ export default function NewCharacterStep2Page() {
     router.push('/characters/new/step3')
   }
 
+  // Load homebrew subclasses whenever class changes
+  useEffect(() => {
+    const classKey = draft?.classKey
+    if (!classKey) return
+    const parentClass = classKey.charAt(0).toUpperCase() + classKey.slice(1)
+    supabase
+      .from('homebrew_subclasses')
+      .select('id, name, parent_class, subclass_type')
+      .eq('parent_class', parentClass)
+      .order('name')
+      .then(({ data }) => { if (data) setHomebrewSubclasses(data as HomebrewSubclass[]) })
+  }, [draft?.classKey])
+
   // ✅ FIX: hooks must run every render → compute subclassOptions BEFORE early return
   const subclassOptions = useMemo(() => {
     const ck = (draft?.classKey ?? 'fighter') as any
-    return getSubclassOptions(ck)
-  }, [draft?.classKey])
+    const base = getSubclassOptions(ck)
+    const homebrew = homebrewSubclasses.map((sc) => ({
+      key: `hb_sc_${sc.id}`,
+      label: sc.name,
+      source: sc.subclass_type ? `Homebrew · ${sc.subclass_type}` : 'Homebrew',
+    }))
+    return [...base, ...homebrew]
+  }, [draft?.classKey, homebrewSubclasses])
 
   if (!ready || !draft) {
     return <div className="text-sm text-slate-300">Loading basics…</div>
@@ -170,7 +211,7 @@ export default function NewCharacterStep2Page() {
       <div className="space-y-1">
         <h2 className="text-lg md:text-xl font-semibold text-white">Step 2 — Character Basics</h2>
         <p className="text-xs md:text-sm text-slate-400">
-          Name, class, race, and background. We’ll bring the crunch (abilities, spells, and equipment) in the next
+          Name, class, race, and background. We'll bring the crunch (abilities, spells, and equipment) in the next
           steps.
         </p>
       </div>
@@ -196,14 +237,38 @@ export default function NewCharacterStep2Page() {
             type="number"
             min={1}
             max={20}
-            className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
+            disabled={!!draft.is_caya}
+            className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
             value={draft.level ?? 1}
             onChange={(e) => {
+              if (draft.is_caya) return
               const nextLevel = Math.min(20, Math.max(1, Number(e.target.value) || 1))
               updateDraft({ level: nextLevel, proficiencyBonus: proficiencyForLevel(nextLevel) })
             }}
           />
-          <p className="text-[11px] text-slate-500">We’ll auto-calc proficiency bonus and spell slots based on your level.</p>
+          <button
+            type="button"
+            onClick={() => {
+              const next = !draft.is_caya
+              updateDraft({
+                is_caya: next,
+                level: next ? 1 : draft.level ?? 1,
+                proficiencyBonus: proficiencyForLevel(next ? 1 : draft.level ?? 1),
+              })
+            }}
+            className={`mt-1 w-full rounded-md border px-3 py-1.5 text-[11px] font-semibold transition ${
+              draft.is_caya
+                ? 'border-amber-500 bg-amber-500/20 text-amber-300'
+                : 'border-slate-600 bg-slate-900/40 text-slate-400 hover:border-slate-400'
+            }`}
+          >
+            {draft.is_caya ? 'CAYA — Come As You Are' : 'Enable CAYA mode'}
+          </button>
+          {draft.is_caya ? (
+            <p className="text-[11px] text-amber-400/80">CAYA characters start at level 1 and earn XP through play.</p>
+          ) : (
+            <p className="text-[11px] text-slate-500">We'll auto-calc proficiency bonus and spell slots based on your level.</p>
+          )}
         </div>
 
         <div className="space-y-1 text-xs">
@@ -219,7 +284,7 @@ export default function NewCharacterStep2Page() {
               </option>
             ))}
           </select>
-          <p className="text-[11px] text-slate-500">Purely roleplay and flavor. DND721 doesn’t lock mechanics to alignment.</p>
+          <p className="text-[11px] text-slate-500">Purely roleplay and flavor. DND721 doesn't lock mechanics to alignment.</p>
         </div>
       </div>
 
@@ -249,7 +314,7 @@ export default function NewCharacterStep2Page() {
               </option>
             ))}
           </select>
-          <p className="text-[11px] text-slate-500">Determines your hit dice, primary abilities, and which spells you’ll learn later.</p>
+          <p className="text-[11px] text-slate-500">Determines your hit dice, primary abilities, and which spells you'll learn later.</p>
         </div>
 
         <div className="space-y-1 text-xs">
@@ -343,6 +408,78 @@ export default function NewCharacterStep2Page() {
           )}
         </div>
       </div>
+
+      {/* Language section */}
+      {(() => {
+        const raceData = draft.raceKey ? (RACES as any)[draft.raceKey] : null
+        const bgData = draft.backgroundKey ? (BACKGROUNDS as any)[draft.backgroundKey] : null
+        const autoLanguages: string[] = raceData?.languages ?? []
+        const extraCount = (raceData?.extraLanguageChoices ?? 0) + (bgData?.extraLanguageChoices ?? 0)
+        const chosenExtras: string[] = draft.languages ?? []
+
+        function toggleLanguage(key: string) {
+          const already = chosenExtras.includes(key)
+          if (already) {
+            updateDraft({ languages: chosenExtras.filter((l) => l !== key) })
+          } else if (chosenExtras.length < extraCount) {
+            updateDraft({ languages: [...chosenExtras, key] })
+          }
+        }
+
+        return (
+          <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4 space-y-3 text-xs">
+            <div className="font-semibold text-slate-300 text-sm">Languages</div>
+
+            {autoLanguages.length > 0 && (
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">Automatic (from race)</div>
+                <div className="flex flex-wrap gap-2">
+                  {autoLanguages.map((lang) => (
+                    <span key={lang} className="rounded-full border border-emerald-700 bg-emerald-900/30 px-2.5 py-0.5 text-[11px] text-emerald-200 capitalize">
+                      {ALL_LANGUAGES.find((l) => l.key === lang)?.label ?? lang}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {extraCount > 0 && (
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">
+                  Choose {extraCount} extra language{extraCount !== 1 ? 's' : ''} ({chosenExtras.length}/{extraCount} selected)
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {ALL_LANGUAGES.filter((l) => !autoLanguages.includes(l.key)).map((lang) => {
+                    const selected = chosenExtras.includes(lang.key)
+                    const disabled = !selected && chosenExtras.length >= extraCount
+                    return (
+                      <button
+                        key={lang.key}
+                        type="button"
+                        onClick={() => toggleLanguage(lang.key)}
+                        disabled={disabled}
+                        className={`rounded-full border px-2.5 py-0.5 text-[11px] transition ${
+                          selected
+                            ? 'border-cyan-400 bg-cyan-500/20 text-cyan-200'
+                            : disabled
+                            ? 'border-slate-700 bg-slate-900/40 text-slate-600 cursor-not-allowed'
+                            : 'border-slate-600 bg-slate-900/40 text-slate-300 hover:border-slate-400'
+                        }`}
+                      >
+                        {lang.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {autoLanguages.length === 0 && extraCount === 0 && (
+              <p className="text-slate-500 text-[11px]">Select a race to see your languages.</p>
+            )}
+          </div>
+        )
+      })()}
 
       <div className="flex justify-between items-center pt-4 border-t border-slate-800 mt-4">
         <button

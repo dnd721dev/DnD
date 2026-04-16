@@ -6,6 +6,7 @@ import { loadDraft, saveDraft } from '@/lib/characterDraft'
 import type { CharacterDraft } from '../../../../types/characterDraft'
 import type { Abilities } from '../../../../types/character'
 import { RACE_LIST } from '@/lib/races'
+import { asiSlotsForClassLevel } from '@/lib/rules'
 
 type AbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
 
@@ -250,6 +251,122 @@ export default function NewCharacterStep3Page() {
           )
         })}
       </div>
+
+      {/* ASI / Feat section */}
+      {(() => {
+        const asiCount = asiSlotsForClassLevel(currentDraft.classKey ?? 'fighter', currentDraft.level ?? 1)
+        if (asiCount === 0) return null
+
+        const choices = currentDraft.asiChoices ?? []
+
+        function setChoice(index: number, patch: Partial<NonNullable<CharacterDraft['asiChoices']>[number]>) {
+          const next = Array.from({ length: asiCount }, (_, i) => {
+            const base = choices[i] ?? { type: 'plus2' as const }
+            return i === index ? { ...base, ...patch } : base
+          })
+          const updated: CharacterDraft = { ...currentDraft, asiChoices: next }
+          setDraft(updated)
+          saveDraft(updated)
+        }
+
+        return (
+          <div className="rounded-xl border border-amber-700/40 bg-amber-900/10 p-4 space-y-3">
+            <div>
+              <div className="text-sm font-semibold text-amber-200">
+                Ability Score Improvements
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                At level {currentDraft.level ?? 1} your {currentDraft.classKey ?? 'class'} earns {asiCount} ASI slot{asiCount !== 1 ? 's' : ''}.
+                Each slot can raise ability scores or grant a feat.
+              </p>
+            </div>
+
+            {Array.from({ length: asiCount }, (_, i) => {
+              const choice = choices[i] ?? { type: 'plus2' as const }
+              return (
+                <div key={i} className="rounded-lg border border-slate-700 bg-slate-900/70 p-3 space-y-3 text-xs">
+                  <div className="font-semibold text-slate-300">Slot {i + 1}</div>
+
+                  {/* Type selector */}
+                  <div className="flex gap-2 flex-wrap">
+                    {(['plus2', 'plus1plus1', 'feat'] as const).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setChoice(i, { type: t })}
+                        className={`rounded-full border px-3 py-0.5 text-[11px] transition ${
+                          choice.type === t
+                            ? 'border-amber-400 bg-amber-500/20 text-amber-200'
+                            : 'border-slate-600 text-slate-400 hover:border-slate-400'
+                        }`}
+                      >
+                        {t === 'plus2' ? '+2 to one stat' : t === 'plus1plus1' ? '+1/+1 to two stats' : 'Take a Feat'}
+                      </button>
+                    ))}
+                  </div>
+
+                  {choice.type === 'plus2' && (
+                    <div className="space-y-1">
+                      <label className="text-[11px] text-slate-400">Which ability?</label>
+                      <select
+                        className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-xs focus:border-cyan-400 focus:outline-none"
+                        value={choice.ability1 ?? 'str'}
+                        onChange={(e) => setChoice(i, { ability1: e.target.value as AbilityKey })}
+                      >
+                        {ABILITY_KEYS.map((k) => (
+                          <option key={k} value={k}>{ABILITY_LABELS[k]}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {choice.type === 'plus1plus1' && (
+                    <div className="flex gap-3 items-end flex-wrap">
+                      <div className="space-y-1">
+                        <label className="text-[11px] text-slate-400">First ability</label>
+                        <select
+                          className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-xs focus:border-cyan-400 focus:outline-none"
+                          value={choice.ability1 ?? 'str'}
+                          onChange={(e) => setChoice(i, { ability1: e.target.value as AbilityKey })}
+                        >
+                          {ABILITY_KEYS.map((k) => (
+                            <option key={k} value={k}>{ABILITY_LABELS[k]}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] text-slate-400">Second ability</label>
+                        <select
+                          className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-xs focus:border-cyan-400 focus:outline-none"
+                          value={choice.ability2 ?? 'dex'}
+                          onChange={(e) => setChoice(i, { ability2: e.target.value as AbilityKey })}
+                        >
+                          {ABILITY_KEYS.map((k) => (
+                            <option key={k} value={k}>{ABILITY_LABELS[k]}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  {choice.type === 'feat' && (
+                    <div className="space-y-1">
+                      <label className="text-[11px] text-slate-400">Feat name</label>
+                      <input
+                        type="text"
+                        className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-xs focus:border-cyan-400 focus:outline-none w-full"
+                        placeholder="e.g. War Caster, Sentinel, Lucky…"
+                        value={choice.featName ?? ''}
+                        onChange={(e) => setChoice(i, { featName: e.target.value })}
+                      />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )
+      })()}
 
       {/* Navigation buttons */}
       <div className="flex justify-between items-center pt-4 border-t border-slate-800">

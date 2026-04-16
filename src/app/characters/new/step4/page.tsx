@@ -4,10 +4,10 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { loadDraft, saveDraft } from '@/lib/characterDraft'
 import type { CharacterDraft } from '../../../../types/characterDraft'
-import { RACE_LIST, getRace, type RaceKey } from '@/lib/races'
+import { RACE_LIST, RACES, getRace, hasRaceInnateSpells, type RaceKey } from '@/lib/races'
 import { SRD_SPELLS } from '@/lib/srdspells'
 import type { SpellClass } from '@/lib/srdspells/types'
-import { getSpellSlotsForClass, getWarlockPactRow } from '@/lib/spellcastingProgression'
+import { getSpellSlotsForClass, getSlotsForCasterType, getWarlockPactRow } from '@/lib/spellcastingProgression'
 import { proficiencyForLevel } from '@/lib/rules'
 
 type Abilities = {
@@ -69,9 +69,16 @@ export default function NewCharacterStep4Page() {
 
     const level = existing.level ?? 1
     const classKey = (existing.classKey ?? 'fighter').toLowerCase()
+    const subclassKey = String(existing.subclassKey ?? '').toLowerCase()
+    const raceKey = String(existing.raceKey ?? '').toLowerCase()
 
-    // If this class does not cast spells, skip this step entirely
-    if (!SPELLCASTING_CLASSES.includes(classKey)) {
+    const isSpellcastingClass = SPELLCASTING_CLASSES.includes(classKey)
+    const isSpellcastingSubclass =
+      (classKey === 'fighter' && subclassKey === 'fighter_eldritch_knight' && level >= 3) ||
+      (classKey === 'rogue' && subclassKey === 'rogue_arcane_trickster' && level >= 3)
+    const raceHasMagic = hasRaceInnateSpells(raceKey)
+
+    if (!isSpellcastingClass && !isSpellcastingSubclass && !raceHasMagic) {
       const merged: CharacterDraft = {
         ...existing,
         level,
@@ -166,11 +173,18 @@ export default function NewCharacterStep4Page() {
 
   const level = draft.level ?? 1
   const classKey = (draft.classKey ?? 'fighter').toLowerCase()
+  const subclassKey = String(draft.subclassKey ?? '').toLowerCase()
   const proficiencyBonus =
     draft.proficiencyBonus ?? proficiencyForLevel(level)
 
   const raceKey = (draft.raceKey as RaceKey) ?? (RACE_LIST[0]?.key as RaceKey)
   const race = getRace(raceKey)
+  const raceData = (RACES as any)[raceKey]
+
+  // Is this an EK / AT third-caster subclass?
+  const isEK = classKey === 'fighter' && subclassKey === 'fighter_eldritch_knight' && level >= 3
+  const isAT = classKey === 'rogue' && subclassKey === 'rogue_arcane_trickster' && level >= 3
+  const isThirdCasterSubclass = isEK || isAT
 
   // Determine which SpellClass we should filter by (no hooks)
   let spellClass: SpellClass | null = null
@@ -198,6 +212,10 @@ export default function NewCharacterStep4Page() {
       break
     case 'warlock':
       spellClass = 'warlock'
+      break
+    case 'fighter': // Eldritch Knight
+    case 'rogue':   // Arcane Trickster
+      if (isThirdCasterSubclass) spellClass = 'wizard'
       break
     default:
       spellClass = null
@@ -229,33 +247,37 @@ export default function NewCharacterStep4Page() {
   })()
 
   // Filter spells (no hooks)
-  const filteredSpells = SRD_SPELLS.filter((spell) => {
-    // class filter
-    if (spellClass && !spell.classes?.includes(spellClass)) {
-      return false
-    }
+  // Only show class spells if the character has a spellcasting class/subclass
+  const showClassSpells = Boolean(spellClass)
 
-    // level filter
-    if (spellLevelFilter !== 'all' && spell.level !== spellLevelFilter) {
-      return false
-    }
+  const filteredSpells = showClassSpells ? SRD_SPELLS.filter((spell) => {
+    // class filter
+    if (spellClass && !spell.classes?.includes(spellClass)) return false
+
+    // level-cap filter: never show spells above the max accessible level
+    if (spell.level > 0 && spell.level > maxSpellLevel) return false
+
+    // manual level filter (user dropdown)
+    if (spellLevelFilter !== 'all' && spell.level !== spellLevelFilter) return false
 
     // search filter
     if (spellSearch) {
       const t = spellSearch.toLowerCase()
-      const n = spell.name.toLowerCase()
-      const s = spell.school.toLowerCase()
-      if (!n.includes(t) && !s.includes(t)) return false
+      if (!spell.name.toLowerCase().includes(t) && !spell.school.toLowerCase().includes(t)) return false
     }
 
     return true
-  })
+  }) : []
 
   // Determine casting ability for DC/attack (no hooks)
   let castingAbilityKey: keyof Abilities | null = null
   switch (classKey) {
     case 'wizard':
       castingAbilityKey = 'int'
+      break
+    case 'fighter': // Eldritch Knight — INT
+    case 'rogue':   // Arcane Trickster — INT
+      if (isThirdCasterSubclass) castingAbilityKey = 'int'
       break
     case 'sorcerer':
     case 'bard':
@@ -286,19 +308,41 @@ export default function NewCharacterStep4Page() {
   }
 
   // slot progression for non-warlocks
-  const spellSlots =
-    classKey !== 'warlock'
-      ? // 👇 Cast to any so TS stops complaining about ClassKey type
-        getSpellSlotsForClass(classKey as any, level)
-      : null
+  const spellSlots = (() => {
+    if (classKey === 'warlock') return null
+    if (isThirdCasterSubclass) return getSlotsForCasterType('third', level)
+    if (SPELLCASTING_CLASSES.includes(classKey)) return getSpellSlotsForClass(classKey as any, level)
+    return null
+  })()
 
   // warlock pact data
   const pact = classKey === 'warlock'
     ? getWarlockPactRow(level)
     : null
 
+  // Max spell level accessible at this class+level
+  const maxSpellLevel = (() => {
+    if (classKey === 'warlock') return pact?.pactSlotLevel ?? 1
+    if (spellSlots) {
+      const keys = Object.keys(spellSlots).map(Number).filter(k => spellSlots[k] > 0)
+      return keys.length > 0 ? Math.max(...keys) : 0
+    }
+    return 0 // racial magic only, no class slots
+  })()
+
   const knownSpells = draft.knownSpells ?? []
   const preparedSpells = draft.preparedSpells ?? []
+
+  // Racial cantrip choice
+  const racialCantripChoice = draft.racialCantripChoice ?? null
+  const cantripChoiceFrom = raceData?.innateSpells?.cantripChoiceFrom as SpellClass | undefined
+  const racialCantripOptions = cantripChoiceFrom
+    ? SRD_SPELLS.filter(s => s.level === 0 && s.classes?.includes(cantripChoiceFrom))
+    : []
+
+  function selectRacialCantrip(spellName: string) {
+    updateDraft({ racialCantripChoice: spellName === racialCantripChoice ? undefined : spellName })
+  }
 
   function toggleKnown(spellName: string) {
     const exists = knownSpells.includes(spellName)
@@ -334,39 +378,133 @@ export default function NewCharacterStep4Page() {
         </p>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col md:flex-row gap-3 items-center">
-        <input
-          className="flex-1 rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
-          placeholder="Search spells by name or school…"
-          value={spellSearch}
-          onChange={(e) => setSpellSearch(e.target.value)}
-        />
+      {/* Racial Magic section */}
+      {raceData?.innateSpells && (
+        <div className="rounded-xl border border-violet-700/40 bg-violet-900/10 p-4 space-y-3">
+          <div className="text-sm font-semibold text-violet-200">
+            Racial Magic — {raceData.name ?? raceKey}
+          </div>
 
-        <select
-          className="rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none w-44"
-          value={spellLevelFilter}
-          onChange={(e) =>
-            setSpellLevelFilter(
-              e.target.value === 'all' ? 'all' : Number(e.target.value)
-            )
-          }
-        >
-          <option value="all">All Levels</option>
-          <option value={0}>Cantrips</option>
-          <option value={1}>1st Level</option>
-          <option value={2}>2nd Level</option>
-          <option value={3}>3rd Level</option>
-          <option value={4}>4th Level</option>
-          <option value={5}>5th Level</option>
-          <option value={6}>6th Level</option>
-          <option value={7}>7th Level</option>
-          <option value={8}>8th Level</option>
-          <option value={9}>9th Level</option>
-        </select>
-      </div>
+          {/* Auto-granted spells */}
+          {(raceData.innateSpells.auto ?? []).length > 0 && (
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5">
+                Innate Spells (auto-granted)
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {(raceData.innateSpells.auto as Array<{ spellName: string; unlocksAtLevel?: number }>).map((entry) => {
+                  const locked = entry.unlocksAtLevel != null && level < entry.unlocksAtLevel
+                  return (
+                    <div
+                      key={entry.spellName}
+                      className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] ${
+                        locked
+                          ? 'border-slate-700 bg-slate-900/60 text-slate-500'
+                          : 'border-violet-600/60 bg-violet-900/30 text-violet-200'
+                      }`}
+                    >
+                      {locked ? '🔒' : '✦'} {entry.spellName}
+                      {entry.unlocksAtLevel != null && (
+                        <span className="text-slate-500 text-[10px]">
+                          {locked ? `(level ${entry.unlocksAtLevel})` : ''}
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Cantrip choice (e.g. High Elf) */}
+          {cantripChoiceFrom && (
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5">
+                Choose 1 cantrip from the {cantripChoiceFrom} list
+                {racialCantripChoice && (
+                  <span className="ml-2 text-violet-300 normal-case">— {racialCantripChoice} selected</span>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto pr-1">
+                {racialCantripOptions.map((spell) => {
+                  const selected = racialCantripChoice === spell.name
+                  return (
+                    <button
+                      key={spell.name}
+                      type="button"
+                      onClick={() => selectRacialCantrip(spell.name)}
+                      className={`rounded-full border px-2.5 py-0.5 text-[11px] transition ${
+                        selected
+                          ? 'border-violet-400 bg-violet-500/25 text-violet-200'
+                          : 'border-slate-600 text-slate-300 hover:border-slate-400'
+                      }`}
+                    >
+                      {spell.name}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Subclass spellcasting note for EK/AT */}
+      {isThirdCasterSubclass && (
+        <div className="rounded-lg border border-amber-700/40 bg-amber-900/10 px-4 py-2.5 text-xs text-amber-200">
+          <span className="font-semibold">{isEK ? 'Eldritch Knight' : 'Arcane Trickster'}:</span>{' '}
+          {isEK
+            ? 'You cast spells from the Wizard list, primarily Abjuration and Enchantment schools. Third-caster progression.'
+            : 'You cast spells from the Wizard list, primarily Divination and Enchantment schools. Third-caster progression.'}
+        </div>
+      )}
+
+      {/* Filters (only shown when there's a class spell list) */}
+      {showClassSpells && (
+        <div className="space-y-2">
+          <div className="flex flex-col md:flex-row gap-3 items-center">
+            <input
+              className="flex-1 rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
+              placeholder="Search spells by name or school…"
+              value={spellSearch}
+              onChange={(e) => setSpellSearch(e.target.value)}
+            />
+
+            <select
+              className="rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none w-44"
+              value={spellLevelFilter}
+              onChange={(e) =>
+                setSpellLevelFilter(
+                  e.target.value === 'all' ? 'all' : Number(e.target.value)
+                )
+              }
+            >
+              <option value="all">All Levels</option>
+              <option value={0}>Cantrips</option>
+              {[1,2,3,4,5,6,7,8,9].map((n) => (
+                <option key={n} value={n} disabled={n > maxSpellLevel}>
+                  {n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`} Level{n > maxSpellLevel ? ' (locked)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          {/* Spell access info chip */}
+          <div className="text-[11px] text-slate-400">
+            Spell access:{' '}
+            <span className="text-slate-200">
+              {maxSpellLevel === 0 ? 'Cantrips only' : `Cantrips + up to ${maxSpellLevel === 1 ? '1st' : maxSpellLevel === 2 ? '2nd' : maxSpellLevel === 3 ? '3rd' : `${maxSpellLevel}th`} level`}
+            </span>
+            {' '}• based on level {level} {isThirdCasterSubclass ? (isEK ? 'Eldritch Knight' : 'Arcane Trickster') : classKey} progression
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6">
+        {!showClassSpells && (
+          <div className="text-sm text-slate-500 py-6 text-center italic">
+            This character has no class-based spells. Use Racial Magic above.
+          </div>
+        )}
         {/* Spell list */}
         <div className="space-y-2 max-h-[460px] overflow-y-auto pr-2">
           {filteredSpells.map((spell) => {

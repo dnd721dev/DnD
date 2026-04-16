@@ -29,6 +29,9 @@ export function useSessionWithCampaign(sessionId: string) {
           gm_wallet,
           map_image_url,
           current_map_id,
+          session_type,
+          required_level,
+          xp_award,
           campaigns:campaign_id (
             livekit_room_name,
             title

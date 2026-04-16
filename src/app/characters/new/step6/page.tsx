@@ -7,7 +7,8 @@ import { loadDraft, saveDraft, clearDraft } from '@/lib/characterDraft'
 import type { CharacterDraft } from '../../../../types/characterDraft'
 import { RACE_LIST, getRace, type RaceKey } from '@/lib/races'
 import { BACKGROUNDS, type BackgroundKey } from '@/lib/backgrounds'
-import { proficiencyForLevel } from '@/lib/rules'
+import { proficiencyForLevel, calcAC } from '@/lib/rules'
+import { RACES } from '@/lib/races'
 import { supabase } from '@/lib/supabase'
 
 import type { Abilities } from '../../../../types/character'
@@ -107,11 +108,19 @@ function buildInventoryFromDraft(draft: CharacterDraft): InventoryItem[] {
 
   const aKey = norm(draft.armorKey ?? '')
   const a = (ARMORS as any)[aKey]
-  if (a && a.key && a.category !== 'shield') {
-    const key = String(a.key)
-    const prev = counts.get(key)
-    if (prev) prev.qty += 1
-    else counts.set(key, { name: a.name ?? key, category: 'armor', qty: 1 })
+  if (a && a.key) {
+    if (String(a.category).toLowerCase() === 'shield') {
+      // Shields tracked separately via equipment_items — add to inventory as shield category
+      const key = String(a.key)
+      const prev = counts.get(key)
+      if (prev) prev.qty += 1
+      else counts.set(key, { name: a.name ?? key, category: 'shield', qty: 1 })
+    } else {
+      const key = String(a.key)
+      const prev = counts.get(key)
+      if (prev) prev.qty += 1
+      else counts.set(key, { name: a.name ?? key, category: 'armor', qty: 1 })
+    }
   }
 
   const out: InventoryItem[] = []
@@ -344,11 +353,31 @@ export default function NewCharacterStep6Page() {
         }
       }
 
+      // Apply ASI numeric bumps from step3 choices
+      for (const choice of draft.asiChoices ?? []) {
+        if (choice.type === 'plus2' && choice.ability1) {
+          const k = choice.ability1 as keyof Abilities
+          abilitiesPayload[k] = Math.min(20, (abilitiesPayload[k] ?? 10) + 2)
+        } else if (choice.type === 'plus1plus1') {
+          if (choice.ability1) {
+            const k = choice.ability1 as keyof Abilities
+            abilitiesPayload[k] = Math.min(20, (abilitiesPayload[k] ?? 10) + 1)
+          }
+          if (choice.ability2) {
+            const k = choice.ability2 as keyof Abilities
+            abilitiesPayload[k] = Math.min(20, (abilitiesPayload[k] ?? 10) + 1)
+          }
+        }
+      }
+
       // Build merged skill proficiency map: background skills are the floor,
       // anything already in the draft (class-granted expertise etc.) takes precedence.
       const bgSkills = bg?.skillProficiencies ?? []
       const bgSkillMap: Record<string, string> = {}
-      for (const skill of bgSkills) { bgSkillMap[skill] = 'proficient' }
+      for (const skill of bgSkills) {
+        const key = String(skill).toLowerCase().replace(/\s+/g, '_')
+        bgSkillMap[key] = 'proficient'
+      }
       const finalSkillProfs = { ...bgSkillMap, ...(draft.skillProficiencies ?? {}) }
 
       // ✅ NEW: compute HP from class + level + CON
@@ -365,7 +394,10 @@ export default function NewCharacterStep6Page() {
           : computedMaxHp
 
       const inventory_items = buildInventoryFromDraft(draft)
-      const equipment_items: string[] | null = null
+      const selectedArmorKey = norm(draft.armorKey ?? '')
+      const selectedArmor = (ARMORS as any)[selectedArmorKey]
+      const shieldSelected = selectedArmor && String(selectedArmor.category).toLowerCase() === 'shield'
+      const equipment_items: string[] | null = shieldSelected ? ['shield'] : null
 
       const payload: Record<string, any> = {
         // ✅ identity
@@ -395,7 +427,7 @@ export default function NewCharacterStep6Page() {
         hp: computedMaxHp,
         hit_points_current: computedCurrentHp,
         hit_points_max: computedMaxHp,
-        ac: (draft.armorClass && draft.armorClass > 0) ? draft.armorClass : 10,
+        ac: calcAC(draft.armorKey ?? null, abilitiesPayload.dex, draft.acOverride ?? null),
 
         // ✅ NEW: movement + vision authority
         speed_ft,
@@ -411,14 +443,37 @@ export default function NewCharacterStep6Page() {
         // inventory
         inventory_items,
 
-        // spells
-        spells_known: draft.knownSpells ?? [],
+        // spells (merge racial innate spells into known list)
+        spells_known: (() => {
+          const raceDataForSpells = (RACES as any)[raceKey as string]
+          const innateAuto: string[] = (raceDataForSpells?.innateSpells?.auto ?? []).map((e: any) => e.spellName)
+          const innateChoice: string[] = draft.racialCantripChoice ? [draft.racialCantripChoice] : []
+          return [...new Set([...(draft.knownSpells ?? []), ...innateAuto, ...innateChoice])]
+        })(),
         spells_prepared: draft.preparedSpells ?? [],
 
         // NFT
         nft_contract: (draft as any).nft_contract ?? null,
         nft_token_id: (draft as any).nft_token_id ?? null,
         avatar_url: (draft as any).avatar_url ?? null,
+
+        // languages (race auto + user choices)
+        languages: [
+          ...((RACES as any)[raceKey as string]?.languages ?? []),
+          ...(draft.languages ?? []),
+        ].filter((v, i, a) => a.indexOf(v) === i),
+
+        // tool proficiencies (from background)
+        tool_proficiencies: bg?.toolProficiencies ?? [],
+
+        // feats (from ASI choices)
+        feats: (draft.asiChoices ?? [])
+          .filter((c) => c.type === 'feat' && c.featName)
+          .map((c) => c.featName as string),
+
+        // CAYA progression
+        is_caya: draft.is_caya ?? false,
+        experience_points: 0,
 
         // personality
         personality_traits: draft.personalityTraits ?? '',

@@ -5,6 +5,7 @@ export interface CharacterDraft {
   avatar_url?: string | null
 
   // Basics
+  is_caya?: boolean
   name?: string
   level?: number
   classKey?: string
@@ -42,6 +43,7 @@ export interface CharacterDraft {
   maxHp?: number
   currentHp?: number
   armorClass?: number
+  acOverride?: number | null
   initiative?: number
   speed?: number
 
@@ -62,9 +64,25 @@ export interface CharacterDraft {
     category?: 'weapon' | 'armor' | 'shield' | 'gear' | 'consumable' | 'treasure' | 'misc'
   }>
 
+  // Languages (from race + extra choices)
+  languages?: string[]
+
+  // Tool proficiencies (from background)
+  toolProficiencies?: string[]
+
+  // Ability Score Improvements / Feats
+  asiChoices?: Array<{
+    type: 'plus2' | 'plus1plus1' | 'feat'
+    ability1?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
+    ability2?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
+    featName?: string
+  }>
+
   // Spells
   knownSpells?: string[]
   preparedSpells?: string[]
+  /** Chosen cantrip for races with a cantrip choice (e.g. High Elf) */
+  racialCantripChoice?: string
 
   // Personality
   notes?: string

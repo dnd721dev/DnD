@@ -217,3 +217,54 @@ export const CONDITION_LIST: Condition[] = [
 export function getCondition(key: ConditionKey): Condition | undefined {
   return CONDITIONS[key]
 }
+
+// ─── Mechanical effects per condition (D&D 5e 2024) ───────────────────────────
+
+export type ConditionMechanics = {
+  attackDisadvantage?: true   // attacker has disadvantage on their attack rolls
+  blockActions?: true         // can't take Action or Bonus Action
+  blockReactions?: true       // can't take Reactions
+  zeroMovement?: true         // movement becomes 0 ft
+  halfMovement?: true         // movement speed halved
+  autoFailStr?: true          // auto-fail Strength saving throws
+  autoFailDex?: true          // auto-fail Dexterity saving throws
+  concentrationRisk?: true    // taking damage triggers CON save (DC = max(10, ½ dmg))
+}
+
+export const CONDITION_MECHANICS: Partial<Record<ConditionKey, ConditionMechanics>> = {
+  blinded:        { attackDisadvantage: true },
+  frightened:     { attackDisadvantage: true },
+  incapacitated:  { blockActions: true, blockReactions: true },
+  poisoned:       { attackDisadvantage: true },
+  prone:          { attackDisadvantage: true, halfMovement: true },
+  restrained:     { attackDisadvantage: true },
+  stunned:        { blockActions: true, blockReactions: true, zeroMovement: true, autoFailStr: true, autoFailDex: true },
+  paralyzed:      { blockActions: true, blockReactions: true, zeroMovement: true, autoFailStr: true, autoFailDex: true },
+  unconscious:    { blockActions: true, blockReactions: true, zeroMovement: true, autoFailStr: true, autoFailDex: true },
+  // 'concentration' is not a standard condition key — tracked separately via the string 'concentration'
+}
+
+/**
+ * Merges mechanics for all active conditions into a single object.
+ * Accepts any string[] (lowercase condition keys or 'concentration').
+ */
+export function getActiveConditionMechanics(conditions: string[]): ConditionMechanics {
+  const out: ConditionMechanics = {}
+  for (const key of conditions) {
+    const m = CONDITION_MECHANICS[key as ConditionKey]
+    if (!m) continue
+    if (m.attackDisadvantage) out.attackDisadvantage = true
+    if (m.blockActions)       out.blockActions = true
+    if (m.blockReactions)     out.blockReactions = true
+    if (m.zeroMovement)       out.zeroMovement = true
+    if (m.halfMovement)       out.halfMovement = true
+    if (m.autoFailStr)        out.autoFailStr = true
+    if (m.autoFailDex)        out.autoFailDex = true
+    if (m.concentrationRisk)  out.concentrationRisk = true
+  }
+  // Concentration is tracked as the string 'concentration' — flag it
+  if (conditions.some(c => c.toLowerCase() === 'concentration')) {
+    out.concentrationRisk = true
+  }
+  return out
+}

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { loadDraft, saveDraft } from '@/lib/characterDraft'
 import type { CharacterDraft } from '../../../../types/characterDraft'
-import { proficiencyForLevel } from '@/lib/rules'
+import { proficiencyForLevel, calcAC } from '@/lib/rules'
 
 import { WEAPONS } from '@/lib/weapons'
 import { ARMORS } from '@/lib/armor'
@@ -388,6 +388,16 @@ export default function NewCharacterStep5Page() {
               {currentArmor.disadvantageOnStealth ? (
                 <p className="text-[11px] text-slate-500">Disadvantage on Stealth</p>
               ) : null}
+              {(() => {
+                const dexScore = (draft.baseAbilities?.dex ?? 10) + (draft.abilityBonuses?.dex ?? 0)
+                const computedAC = calcAC(currentArmor.key, dexScore, draft.acOverride ?? null)
+                return (
+                  <div className="mt-2 flex items-center gap-2 rounded-md border border-cyan-700/40 bg-cyan-900/20 px-2 py-1.5">
+                    <div className="text-[11px] text-cyan-300 font-semibold">Computed AC: {computedAC}</div>
+                    <div className="text-[11px] text-slate-500">(with your DEX {dexScore > 10 ? `+${Math.floor((dexScore-10)/2)}` : Math.floor((dexScore-10)/2)})</div>
+                  </div>
+                )
+              })()}
             </div>
           ) : null}
         </div>

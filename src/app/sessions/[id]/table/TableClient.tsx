@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ChangeEvent, useMemo, useRef } from 'react'
 import { useAccount } from 'wagmi'
-import { useMounted } from '@/lib/hooks/useMounted'
+import { useMounted } from '@/hooks/useMounted'
 import { supabase } from '@/lib/supabase'
 import GMSidebar from '@/components/table/GMSidebar'
 import { PlayerSidebar } from '@/components/table/PlayerSidebar'
@@ -13,7 +13,6 @@ import { MONSTERS } from '@/lib/monsters'
 import type { DiceEntry, ExternalRoll } from '@/components/table/tableclient/types'
 import { TableTopBar } from '@/components/table/tableclient/components/TableTopBar'
 import { MapSection } from '@/components/table/tableclient/components/MapSection'
-import { GMQuickRolls } from '@/components/table/tableclient/components/GMQuickRolls'
 import { useSessionWithCampaign } from '@/components/table/tableclient/hooks/useSessionWithCampaign'
 import { useEncounter } from '@/components/table/tableclient/hooks/useEncounter'
 import { useSessionRolls } from '@/components/table/tableclient/hooks/useSessionRolls'
@@ -382,57 +381,8 @@ export default function TableClient({ sessionId }: TableClientProps) {
     void ensure()
   }, [session?.id, campaignId, walletLower, isGm, selectedCharacter?.id])
 
-  // ✅ Ensure PC token exists for this wallet (players only)
-  useEffect(() => {
-    if (!encounterId) return
-    if (!walletLower) return
-    if (isGm) return
-    if (!selectedCharacter) return
-
-    const ensurePcToken = async () => {
-      try {
-        const { data: existing, error: existingError } = await supabase
-          .from('tokens')
-          .select('id')
-          .eq('encounter_id', encounterId)
-          .eq('type', 'pc')
-          .eq('owner_wallet', walletLower)
-          .limit(1)
-          .maybeSingle()
-
-        if (existingError && (existingError as any).code !== 'PGRST116') {
-          console.error('tokens existing pc error', existingError)
-        }
-
-        if (!existing) {
-          const hp = getCharacterMaxHP(selectedCharacter)
-          const ac = getCharacterAC(selectedCharacter)
-
-          const { error: insertError } = await supabase.from('tokens').insert({
-            encounter_id: encounterId,
-            type: 'pc',
-            label: selectedCharacter.name || 'PC',
-            x: 100,
-            y: 100,
-            owner_wallet: walletLower,
-            hp,
-            current_hp: hp,
-            ac,
-          })
-
-          if (insertError) {
-            console.error('Failed to create PC token', insertError)
-          } else if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('dnd721-tokens-updated', { detail: { source: 'campaign-char' } }))
-          }
-        }
-      } catch (err) {
-        console.error('Error ensuring PC token', err)
-      }
-    }
-
-    void ensurePcToken()
-  }, [encounterId, walletLower, isGm, selectedCharacter])
+  // PC tokens are now placed manually by the GM via the initiative tracker "📍 Place" button.
+  // Auto-spawn removed intentionally.
 
   // ---------- Dice persistence ----------
   async function persistRollToSupabase(params: {
@@ -456,7 +406,6 @@ export default function TableClient({ sessionId }: TableClientProps) {
           label: params.label,
           formula: params.formula,
           result_total: params.result,
-          result_data: null,
         })
         .select('id, label, formula, result_total, created_at, roller_name')
         .limit(1)
@@ -841,7 +790,6 @@ export default function TableClient({ sessionId }: TableClientProps) {
         console.warn('Monster initiative insert failed', err)
       }
 
-      window.dispatchEvent(new CustomEvent('dnd721-tokens-updated', { detail: { encounterId } }))
     }
   }
 
@@ -871,9 +819,14 @@ export default function TableClient({ sessionId }: TableClientProps) {
       diceLog={diceLog}
       onTestRoll={handleTestRoll}
       onCloseDiceLog={() => setShowDiceLog(false)}
+      onRollEntry={(entry) => { pushRollLocal(entry); setShowDiceLog(true) }}
+      sessionId={sessionId}
+      rollerName={buildRollerName({ selectedCharacter, address })}
+      rollerWallet={walletLower ?? undefined}
       rollOverlay={rollOverlay}
       visionFeet={visionFeet}
       speedFeet={speedFeet}
+      sessionPlayerWallets={sessionPlayers.map((p) => p.wallet_address)}
     />
   )
 
@@ -1062,7 +1015,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
           {/* GM overlay panel */}
           <div className="absolute bottom-0 left-0 right-0 z-30 pointer-events-none">
-            <GMSidebar sessionId={session?.id ?? null} encounterId={encounterId} address={walletLower ?? null} activeMapId={currentMapId} onRoll={handleExternalRoll} spawnMonsterToken={spawnMonsterToken} />
+            <GMSidebar sessionId={session?.id ?? null} encounterId={encounterId} address={walletLower ?? null} activeMapId={currentMapId} onRoll={handleExternalRoll} spawnMonsterToken={spawnMonsterToken} sessionType={(session as any)?.session_type ?? null} sessionStatus={session?.status ?? null} xpAwardedAlready={(session as any)?.xp_award ?? null} />
           </div>
         </div>
       </div>

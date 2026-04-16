@@ -9,9 +9,15 @@ import { supabase } from '@/lib/supabase'
 export function SpellsPanel({
   c,
   spellSlots,
+  slotUsed,
+  onSpendSlot,
+  onRestoreSlot,
 }: {
   c: CharacterSheetData
   spellSlots: SpellSlotsSummary | null
+  slotUsed?: Record<string, number>
+  onSpendSlot?: (level: string) => void
+  onRestoreSlot?: (level: string) => void
 }) {
   const [spellSearch, setSpellSearch] = useState('')
   const [spellLevelFilter, setSpellLevelFilter] = useState<number | 'all'>('all')
@@ -59,6 +65,15 @@ export function SpellsPanel({
     return job === 'cleric' || job === 'druid' || job === 'wizard' || job === 'paladin'
   }, [c.main_job])
 
+  const maxPrepared = useMemo(() => {
+    if (!isPreparedCaster) return null
+    const level = Number(c.level ?? 1)
+    const abilityKey = (c.spellcasting_ability ?? 'int') as keyof typeof c.abilities
+    const score = Number((c.abilities as any)?.[abilityKey] ?? 10)
+    const mod = Math.floor((score - 10) / 2)
+    return Math.max(1, level + mod)
+  }, [isPreparedCaster, c.level, c.spellcasting_ability, c.abilities])
+
   async function persistSpells(nextKnown: string[], nextPrepared: string[]) {
     setSaving(true)
     setSaveErr(null)
@@ -99,6 +114,13 @@ export function SpellsPanel({
 
     const cur = [...preparedList]
     const exists = preparedSpellNames.has(spellName)
+
+    // Enforce prepared spell cap for prepared-caster classes
+    if (!exists && maxPrepared !== null && cur.length >= maxPrepared) {
+      setSaveErr(`Can only prepare ${maxPrepared} spell${maxPrepared === 1 ? '' : 's'} (level + ability mod)`)
+      return
+    }
+
     const next = exists ? cur.filter((n) => n !== spellName) : [...cur, spellName]
 
     await persistSpells(nextKnown, next)
@@ -133,8 +155,8 @@ export function SpellsPanel({
           <span className="rounded bg-slate-900/70 px-1.5 py-0.5 text-[10px] text-slate-300">
             Known {knownSpellNames.size}
           </span>
-          <span className="rounded bg-slate-900/70 px-1.5 py-0.5 text-[10px] text-slate-300">
-            Prepared {preparedSpellNames.size}
+          <span className={`rounded px-1.5 py-0.5 text-[10px] ${maxPrepared !== null && preparedSpellNames.size >= maxPrepared ? 'bg-amber-900/60 text-amber-300' : 'bg-slate-900/70 text-slate-300'}`}>
+            Prepared {preparedSpellNames.size}{maxPrepared !== null ? `/${maxPrepared}` : ''}
           </span>
         </div>
         {c.spellcasting_ability ? (
@@ -170,13 +192,52 @@ export function SpellsPanel({
           <div className="mb-1 text-[10px] font-semibold uppercase text-slate-400">
             Spell Slots
           </div>
-          <div className="space-y-1">
-            {Object.entries(spellSlots).map(([lvl, count]) => (
-              <div key={lvl} className="flex items-center justify-between">
-                <span className="text-[11px] text-slate-200">Level {lvl}</span>
-                <span className="text-[11px] text-slate-100">{count}</span>
-              </div>
-            ))}
+          <div className="space-y-1.5">
+            {Object.entries(spellSlots).map(([lvl, maxCount]) => {
+              const used = slotUsed?.[`spell_slot_used_${lvl}`] ?? 0
+              const remaining = Math.max(0, maxCount - used)
+              return (
+                <div key={lvl} className="flex items-center gap-2">
+                  <span className="w-14 shrink-0 text-[11px] text-slate-400">Level {lvl}</span>
+                  {/* Slot pips */}
+                  <div className="flex gap-1">
+                    {Array.from({ length: maxCount }).map((_, i) => (
+                      <div
+                        key={i}
+                        className={`h-3 w-3 rounded-full border transition ${
+                          i < remaining
+                            ? 'border-violet-500 bg-violet-500/60'
+                            : 'border-slate-700 bg-slate-800'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <span className="ml-auto text-[11px] tabular-nums text-slate-300">
+                    {remaining}/{maxCount}
+                  </span>
+                  {onSpendSlot && (
+                    <button
+                      type="button"
+                      disabled={remaining === 0}
+                      onClick={() => onSpendSlot(lvl)}
+                      className="rounded px-1.5 py-0.5 text-[10px] text-violet-300 bg-violet-900/30 hover:bg-violet-900/50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                    >
+                      Use
+                    </button>
+                  )}
+                  {onRestoreSlot && (
+                    <button
+                      type="button"
+                      disabled={used === 0}
+                      onClick={() => onRestoreSlot(lvl)}
+                      className="rounded px-1.5 py-0.5 text-[10px] text-slate-300 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                    >
+                      +
+                    </button>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
@@ -329,6 +390,51 @@ export function SpellsPanel({
             <div className="mt-2 rounded-lg bg-slate-900/60 p-2">
               <div className="text-[10px] font-semibold uppercase text-slate-400">Notes</div>
               <div className="whitespace-pre-wrap text-[11px] text-slate-200">{selected.notes}</div>
+            </div>
+          )}
+
+          {selected.upcastDamage && selected.level >= 1 && (
+            <div className="mt-2 rounded-lg bg-slate-900/60 p-2">
+              <div className="text-[10px] font-semibold uppercase text-slate-400">
+                Upcast Damage
+                {selected.upcastNotes && (
+                  <span className="ml-1 normal-case text-slate-500">— {selected.upcastNotes}</span>
+                )}
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {Array.from({ length: 9 - selected.level + 1 }, (_, i) => {
+                  const slot = selected.level + i
+                  const extraDice = i
+                  let label: string
+                  if (i === 0) {
+                    label = selected.damage ?? '—'
+                  } else if (selected.upcastNotes) {
+                    // spell uses per-dart/per-ray scaling — show base + extras
+                    label = `+${extraDice}× ${selected.upcastDamage}`
+                  } else {
+                    // add extra dice to base formula
+                    const base = selected.damage ?? ''
+                    const extra = selected.upcastDamage!
+                    // parse "NdX" extra and multiply N by extraDice
+                    const m = extra.match(/^(\d+)(d\d+.*)$/)
+                    const scaled = m
+                      ? `${parseInt(m[1]) * extraDice}${m[2]}`
+                      : `+${extraDice}×${extra}`
+                    label = `${base}+${scaled}`
+                  }
+                  return (
+                    <div
+                      key={slot}
+                      className="flex flex-col items-center rounded bg-slate-800/70 px-2 py-1"
+                    >
+                      <span className="text-[9px] font-semibold text-slate-400">
+                        {slot === 0 ? 'Cantrip' : `${slot}${['st','nd','rd'][slot-1] ?? 'th'}`}
+                      </span>
+                      <span className="text-[10px] text-amber-300">{label}</span>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           )}
 

@@ -71,6 +71,7 @@ export const LEVEL3_SPELLS: SrdSpell[] = [
     saveAbility: 'dex',
     damage: '3d10',
     notes: 'Storm cloud summons lightning bolt as action each turn (Dex save for half). Outdoors = 4d10.',
+    upcastDamage: '1d10',
     classes: ['druid'],
   },
   {
@@ -174,6 +175,7 @@ export const LEVEL3_SPELLS: SrdSpell[] = [
     saveAbility: 'dex',
     damage: '8d6',
     notes: 'Dex save for half fire damage in 20-ft radius.',
+    upcastDamage: '1d6',
     classes: ['sorcerer', 'wizard'],
   },
   {

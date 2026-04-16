@@ -17,6 +17,8 @@ type SessionRow = {
   status: SessionStatus
   campaign_id: string
   gm_wallet: string | null
+  session_type: 'set_level' | 'caya' | null
+  required_level: number | null
 }
 
 type CampaignParticipantRow = {
@@ -44,6 +46,8 @@ export default function SessionPage() {
   const [session, setSession] = useState<SessionRow | null>(null)
   const [isCampaignParticipant, setIsCampaignParticipant] = useState(false)
   const [campaignCharacterId, setCampaignCharacterId] = useState<string | null>(null)
+  const [campaignCharacterLevel, setCampaignCharacterLevel] = useState<number | null>(null)
+  const [campaignCharacterIsCaya, setCampaignCharacterIsCaya] = useState<boolean | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -68,7 +72,7 @@ export default function SessionPage() {
       // 1) Load session
       const { data: sessionData, error: sessionError } = await supabase
         .from('sessions')
-        .select('id, title, description, scheduled_start, duration_minutes, status, campaign_id, gm_wallet')
+        .select('id, title, description, scheduled_start, duration_minutes, status, campaign_id, gm_wallet, session_type, required_level')
         .eq('id', sessionId)
         .limit(1)
         .maybeSingle()
@@ -124,6 +128,19 @@ export default function SessionPage() {
       const selectedId = (selRes.data as any)?.character_id ?? null
       setCampaignCharacterId(selectedId)
 
+      // Fetch character level and CAYA status for join enforcement
+      if (selectedId) {
+        const { data: charData } = await supabase
+          .from('characters')
+          .select('level, is_caya')
+          .eq('id', selectedId)
+          .maybeSingle()
+        if (charData) {
+          setCampaignCharacterLevel((charData as any).level ?? null)
+          setCampaignCharacterIsCaya((charData as any).is_caya ?? false)
+        }
+      }
+
       setLoading(false)
     }
 
@@ -147,6 +164,28 @@ export default function SessionPage() {
     if (!isGm && !campaignCharacterId) {
       setError('Pick your Campaign Character first (on the campaign page).')
       return
+    }
+
+    // ✅ Enforce session type restrictions
+    if (!isGm && campaignCharacterId) {
+      const sessionType = session.session_type
+      const requiredLevel = session.required_level
+
+      if (sessionType === 'set_level' && requiredLevel != null) {
+        if (campaignCharacterLevel !== requiredLevel) {
+          setError(
+            `This session requires a level ${requiredLevel} character. Your selected character is level ${campaignCharacterLevel ?? '?'}.`
+          )
+          return
+        }
+      }
+
+      if (sessionType === 'caya') {
+        if (!campaignCharacterIsCaya) {
+          setError('This is a CAYA session. You need a CAYA character to join. Create one from the Characters page.')
+          return
+        }
+      }
     }
 
     router.push(`/sessions/${session.id}/table`)
@@ -176,7 +215,18 @@ export default function SessionPage() {
 
       <header className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">{session.title}</h1>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-2xl font-bold">{session.title}</h1>
+            {session.session_type === 'caya' ? (
+              <span className="rounded-full border border-amber-600 bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
+                CAYA
+              </span>
+            ) : session.required_level ? (
+              <span className="rounded-full border border-slate-600 bg-slate-800 px-2 py-0.5 text-[11px] font-semibold text-slate-300">
+                Level {session.required_level} Required
+              </span>
+            ) : null}
+          </div>
           <p className="text-xs text-slate-400">
             Status: <span className="font-medium">{session.status}</span> • Scheduled:{' '}
             <span className="font-medium">{scheduledText}</span>

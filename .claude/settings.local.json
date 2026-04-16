@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/cwell/dnd721/src -type f \\\\\\( -name \"*.tsx\" -o -name \"*.ts\" \\\\\\) -exec grep -l \"@/hooks/useCurrentActor\\\\|from.*hooks.*useCurrentActor\" {} \\\\;)",
+      "Bash(ls src/lib/diceSoNice/*.raw.js)",
+      "Bash(ls public/*.svg)",
+      "Bash(npx next:*)",
+      "Bash(npm run:*)"
+    ]
+  }
+}

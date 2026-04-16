@@ -1,3 +1,6 @@
+'use client'
+
+import { useState } from 'react'
 import type { DerivedStats } from './calc'
 import { formatMod } from './utils'
 
@@ -17,17 +20,39 @@ function HpBar({ current, max }: { current: number; max: number }) {
 
 export function CombatStatsPanel({
   d,
+  tempHp,
   onAttack,
   onDamage,
+  onAdjustHp,
+  onSetTempHp,
 }: {
   d: DerivedStats
+  tempHp: number
   onAttack: () => void
   onDamage: () => void
+  onAdjustHp: (delta: number) => void
+  onSetTempHp: (val: number) => void
 }) {
+  const [hpInput, setHpInput] = useState('')
+  const [tempInput, setTempInput] = useState('')
+
   const visionLine =
     d.darkvisionFt > 0
       ? `Normal ${d.visionFt} ft • Darkvision ${d.darkvisionFt} ft`
       : `Normal ${d.visionFt} ft`
+
+  function applyDamage() {
+    const n = parseInt(hpInput, 10)
+    if (!isNaN(n) && n > 0) { onAdjustHp(-n); setHpInput('') }
+  }
+  function applyHeal() {
+    const n = parseInt(hpInput, 10)
+    if (!isNaN(n) && n > 0) { onAdjustHp(n); setHpInput('') }
+  }
+  function applyTempHp() {
+    const n = parseInt(tempInput, 10)
+    if (!isNaN(n) && n >= 0) { onSetTempHp(n); setTempInput('') }
+  }
 
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
@@ -65,15 +90,67 @@ export function CombatStatsPanel({
           <div className="text-xl font-bold text-slate-50">{formatMod(d.initiative)}</div>
         </div>
 
-        {/* HP with bar */}
+        {/* HP with bar + temp HP */}
         <div className="rounded-lg bg-slate-900/80 p-2 col-span-2">
           <div className="flex items-center justify-between">
             <div className="text-[10px] uppercase text-slate-400">Hit Points</div>
-            <div className="text-[10px] text-slate-400 tabular-nums">
-              {d.hpCurrent} / {d.hpMax}
+            <div className="flex items-center gap-2">
+              {tempHp > 0 && (
+                <span className="rounded bg-teal-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-teal-300">
+                  +{tempHp} temp
+                </span>
+              )}
+              <div className="text-[10px] text-slate-400 tabular-nums">
+                {d.hpCurrent} / {d.hpMax}
+              </div>
             </div>
           </div>
           <HpBar current={d.hpCurrent} max={d.hpMax} />
+
+          {/* HP adjustment */}
+          <div className="mt-2 flex gap-1">
+            <input
+              type="number"
+              min={0}
+              placeholder="Amount"
+              value={hpInput}
+              onChange={(e) => setHpInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') applyHeal() }}
+              className="w-20 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-100 placeholder-slate-500 focus:border-indigo-600 focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={applyHeal}
+              className="rounded-md bg-emerald-600/20 px-2 py-1 text-[11px] text-emerald-200 hover:bg-emerald-600/30"
+            >
+              Heal
+            </button>
+            <button
+              type="button"
+              onClick={applyDamage}
+              className="rounded-md bg-red-600/20 px-2 py-1 text-[11px] text-red-200 hover:bg-red-600/30"
+            >
+              Dmg
+            </button>
+            <div className="ml-auto flex gap-1">
+              <input
+                type="number"
+                min={0}
+                placeholder="Temp"
+                value={tempInput}
+                onChange={(e) => setTempInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') applyTempHp() }}
+                className="w-14 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-teal-200 placeholder-slate-500 focus:border-teal-600 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={applyTempHp}
+                className="rounded-md bg-teal-600/20 px-2 py-1 text-[11px] text-teal-200 hover:bg-teal-600/30"
+              >
+                Set
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="rounded-lg bg-slate-900/80 p-2">

@@ -19,10 +19,12 @@ import { ResourcesPanel } from '@/components/character-sheet/ResourcesPanel'
 import { CombatStatsPanel } from '@/components/character-sheet/CombatStatsPanel'
 import { EquipmentPanel } from '@/components/character-sheet/EquipmentPanel'
 import { ActionsPanel } from '@/components/character-sheet/ActionsPanel'
+import { ConditionsPanel } from '@/components/character-sheet/ConditionsPanel'
 
 import { abilityMod } from '@/components/character-sheet/utils'
 import { deriveStats } from '@/components/character-sheet/calc'
 import { roll, rollD20WithCrit, rollDamageWithCrit } from '@/lib/dice'
+import { levelForXp, xpForLevel } from '@/lib/rules'
 
 import { canUseAction, type SheetAction } from '@/lib/actions'
 import { ALL_ACTIONS } from '@/lib/actions/registry'
@@ -184,6 +186,38 @@ export default function CharacterSheetPage() {
     'overview' | 'skills_traits' | 'gear' | 'magic' | 'notes'
   >('overview')
 
+  // ✅ Local temp HP (mirrors DB; update written immediately)
+  const [tempHp, setTempHpLocal] = useState<number>(0)
+  useEffect(() => {
+    if (c) setTempHpLocal(Number(c.temp_hp ?? 0))
+  }, [c])
+
+  async function onSetTempHp(val: number) {
+    const next = Math.max(0, val)
+    setTempHpLocal(next)
+    if (!c?.id) return
+    await supabase.from('characters').update({ temp_hp: next }).eq('id', c.id)
+    setC((prev) => prev ? { ...prev, temp_hp: next } : prev)
+  }
+
+  async function onAdjustHp(delta: number) {
+    if (!c?.id || !d) return
+    let effectiveDelta = delta
+    let nextTempHp = tempHp
+    // Absorb damage into temp HP first
+    if (delta < 0 && nextTempHp > 0) {
+      const absorbed = Math.min(nextTempHp, -delta)
+      nextTempHp -= absorbed
+      effectiveDelta += absorbed
+      setTempHpLocal(nextTempHp)
+      await supabase.from('characters').update({ temp_hp: nextTempHp }).eq('id', c.id)
+    }
+    const current = Number(c.hit_points_current ?? d.hpMax)
+    const next = clamp(current + effectiveDelta, 0, d.hpMax)
+    setC((prev) => prev ? { ...prev, hit_points_current: next, temp_hp: nextTempHp } : prev)
+    await supabase.from('characters').update({ hit_points_current: next }).eq('id', c.id)
+  }
+
   function showRoll(label: string, formula: string, result: number) {
     setRollLog((prev) => [{ label, formula: formula.trim(), result }, ...prev.slice(0, 14)])
   }
@@ -263,6 +297,35 @@ export default function CharacterSheetPage() {
     setResourceValues((prev) => ({ ...prev, [key]: clamp(next, 0, r.max) }))
   }
 
+  function onToggleCondition(key: string) {
+    setActionState((prev) => {
+      const cur: string[] = Array.isArray(prev?.active_conditions) ? prev.active_conditions : []
+      const next = cur.includes(key) ? cur.filter((c) => c !== key) : [...cur, key]
+      return { ...prev, active_conditions: next }
+    })
+  }
+
+  // ✅ Spell slot tracking — stored in resourceValues as spell_slot_used_1, etc.
+  function onSpendSlot(level: string) {
+    if (!c?.spell_slots) return
+    const max = Number(c.spell_slots[level] ?? 0)
+    setResourceValues((prev) => {
+      const key = `spell_slot_used_${level}`
+      const cur = Number(prev[key] ?? 0)
+      return { ...prev, [key]: Math.min(max, cur + 1) }
+    })
+  }
+
+  function onRestoreSlot(level: string) {
+    setResourceValues((prev) => {
+      const key = `spell_slot_used_${level}`
+      const cur = Number(prev[key] ?? 0)
+      return { ...prev, [key]: Math.max(0, cur - 1) }
+    })
+  }
+
+  const isWarlock = normKey(c?.main_job) === 'warlock'
+
   function onShortRest() {
     if (!d) return
 
@@ -271,6 +334,12 @@ export default function CharacterSheetPage() {
       const next = { ...prev }
       for (const r of d.resources ?? []) {
         if (r.recharge === 'short_rest') next[r.key] = r.max
+      }
+      // Warlock spell slots recharge on short rest
+      if (isWarlock && c?.spell_slots) {
+        for (const lvl of Object.keys(c.spell_slots)) {
+          delete next[`spell_slot_used_${lvl}`]
+        }
       }
       return next
     })
@@ -282,11 +351,17 @@ export default function CharacterSheetPage() {
   function onLongRest() {
     if (!d) return
 
-    // refill resources that recharge on short or long rest
+    // refill resources that recharge on short or long rest + restore all spell slots
     setResourceValues((prev) => {
       const next = { ...prev }
       for (const r of d.resources ?? []) {
         if (r.recharge === 'short_rest' || r.recharge === 'long_rest') next[r.key] = r.max
+      }
+      // Restore all spell slots on long rest
+      if (c?.spell_slots) {
+        for (const lvl of Object.keys(c.spell_slots)) {
+          delete next[`spell_slot_used_${lvl}`]
+        }
       }
       return next
     })
@@ -300,6 +375,31 @@ export default function CharacterSheetPage() {
     })
 
     setSneakArmed(false)
+  }
+
+  function executeEffects(action: SheetAction) {
+    if (!action.effects?.length) return
+    for (const effect of action.effects) {
+      switch (effect.type) {
+        case 'setFlag':
+          setActionState((prev) => ({ ...(prev ?? {}), [effect.flag]: effect.value }))
+          break
+        case 'rollFormula': {
+          const r = roll(effect.formula)
+          showRoll(effect.label || action.name, effect.formula, r.total)
+          break
+        }
+        case 'rollAttack':
+          rollMainAttack()
+          break
+        case 'rollDamage':
+          rollMainDamage()
+          break
+        case 'logNote':
+          showRoll(action.name, effect.text, 0)
+          break
+      }
+    }
   }
 
   // ✅ FIXED: Use actions from registry (class/subclass/dnd721) — TS-safe narrowing
@@ -322,32 +422,27 @@ export default function CharacterSheetPage() {
     const cost = action.cost
 
     switch (cost.type) {
-      case 'none': {
-        return
-      }
+      case 'none':
+        break
 
-      case 'perTurnFlag': {
+      case 'perTurnFlag':
         setActionState((prev) => ({ ...(prev ?? {}), [cost.flag]: true }))
-        return
-      }
+        break
 
-      case 'perRestFlag': {
+      case 'perRestFlag':
         setActionState((prev) => ({ ...(prev ?? {}), [cost.flag]: true }))
-        return
-      }
+        break
 
       case 'resource': {
         const key = cost.key
         const have = Number(resourceValues?.[key] ?? 0)
         const nextVal = Math.max(0, have - cost.amount)
         setResourceValues((prev) => ({ ...(prev ?? {}), [key]: nextVal }))
-        return
-      }
-
-      default: {
-        return
+        break
       }
     }
+
+    executeEffects(action)
   }
 
   if (loading) return <div className="p-4 text-slate-300">Loading character...</div>
@@ -355,9 +450,53 @@ export default function CharacterSheetPage() {
 
   const isMageUser = Boolean(c.spellcasting_ability)
 
+  const isCaya = Boolean((c as any)?.is_caya)
+  const xp = isCaya ? ((c as any)?.experience_points ?? 0) : 0
+  const earnedLevel = isCaya ? levelForXp(xp) : null
+  const currentLevel = c.level ?? 1
+  const xpForCurrentLevel = isCaya ? xpForLevel(currentLevel) : 0
+  const xpForNextLevel = isCaya ? xpForLevel(Math.min(20, currentLevel + 1)) : 0
+  const xpPct = isCaya && currentLevel < 20
+    ? Math.min(100, Math.round(((xp - xpForCurrentLevel) / (xpForNextLevel - xpForCurrentLevel)) * 100))
+    : 100
+
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4 px-3 pb-16 md:px-6">
       <CharacterHeader c={c} d={d} />
+
+      {/* Level-up banner */}
+      {isCaya && earnedLevel !== null && earnedLevel > currentLevel && (
+        <div className="rounded-lg border border-amber-500 bg-amber-950/40 px-4 py-3 text-sm text-amber-200">
+          <span className="font-bold text-amber-300">Level Up!</span> You&apos;ve earned enough XP to reach level {earnedLevel}.
+          Update your character sheet to reflect your new abilities, spells, and features.
+        </div>
+      )}
+
+      {/* XP progress bar (CAYA only) */}
+      {isCaya && (
+        <div className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3 space-y-1.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-amber-300">CAYA — Experience Points</span>
+            <span className="text-slate-400">
+              {currentLevel < 20
+                ? `${xp.toLocaleString()} / ${xpForNextLevel.toLocaleString()} XP`
+                : `${xp.toLocaleString()} XP — Max Level`}
+            </span>
+          </div>
+          <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all"
+              style={{
+                width: `${xpPct}%`,
+                background: 'linear-gradient(90deg, #d97706, #f59e0b)',
+              }}
+            />
+          </div>
+          <p className="text-[10px] text-slate-500">
+            Level {currentLevel}{currentLevel < 20 ? ` → ${currentLevel + 1}` : ' (max)'}
+          </p>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex flex-wrap gap-2 rounded-xl border border-slate-800 bg-slate-950/60 p-2">
@@ -405,7 +544,14 @@ export default function CharacterSheetPage() {
         {/* LEFT COLUMN — always visible core stats */}
         <div className="space-y-3">
           <AbilitiesPanel abilities={abilities} onRollAbilityCheck={rollAbilityCheck} />
-          <CombatStatsPanel d={d} onAttack={rollMainAttack} onDamage={rollMainDamage} />
+          <CombatStatsPanel
+            d={d}
+            tempHp={tempHp}
+            onAttack={rollMainAttack}
+            onDamage={rollMainDamage}
+            onAdjustHp={onAdjustHp}
+            onSetTempHp={onSetTempHp}
+          />
           <SavingThrowsPanel
             abilities={abilities}
             savingThrowSet={savingThrowSet}
@@ -418,12 +564,22 @@ export default function CharacterSheetPage() {
         <div className="space-y-3">
           {activeTab === 'overview' && (
             <>
+              <ConditionsPanel
+                activeConditions={Array.isArray(actionState?.active_conditions) ? actionState.active_conditions : []}
+                onToggleCondition={onToggleCondition}
+                exhaustionLevel={Number(actionState?.exhaustion_level ?? 0)}
+                onExhaustionChange={(level) => {
+                  setActionState((prev) => ({ ...prev, exhaustion_level: level }))
+                }}
+              />
               <ActionsPanel
                 classKey={normKey(c.main_job)}
                 subclassKey={getSubclassKey(c as any)}
                 actionState={actionState}
                 resourceState={resourceValues}
                 onUseAction={handleUseAction}
+                sneakArmed={sneakArmed}
+                onToggleSneakArm={() => setSneakArmed((prev) => !prev)}
               />
               <ResourcesPanel
                 resources={d.resources ?? []}
@@ -431,6 +587,14 @@ export default function CharacterSheetPage() {
                 onChange={onChangeResource}
                 onShortRest={onShortRest}
                 onLongRest={onLongRest}
+                conMod={abilityMod(abilities.con)}
+                onRoll={({ label, formula, result }) => showRoll(label, formula, result)}
+                currentHp={Number(c.hit_points_current ?? d.hpMax)}
+                maxHp={d.hpMax}
+                onHpChange={(newHp) => {
+                  setC((prev) => prev ? { ...prev, hit_points_current: newHp } : prev)
+                  supabase.from('characters').update({ hit_points_current: newHp }).eq('id', c.id)
+                }}
               />
             </>
           )}
@@ -458,7 +622,15 @@ export default function CharacterSheetPage() {
 
           {activeTab === 'notes' && <PersonalityNotesPanel c={c} />}
 
-          {activeTab === 'magic' && isMageUser && <SpellsPanel c={c} spellSlots={c.spell_slots ?? null} />}
+          {activeTab === 'magic' && isMageUser && (
+            <SpellsPanel
+              c={c}
+              spellSlots={c.spell_slots ?? null}
+              slotUsed={resourceValues}
+              onSpendSlot={onSpendSlot}
+              onRestoreSlot={onRestoreSlot}
+            />
+          )}
         </div>
 
         {/* RIGHT COLUMN — roll log always visible */}

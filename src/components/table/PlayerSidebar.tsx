@@ -1,12 +1,21 @@
 
 'use client'
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import type { CharacterSheetData } from '@/components/character-sheet/types'
 import { HandoutsPanel } from '@/components/table/HandoutsPanel'
 import TableChat from '@/components/table/TableChat'
+import { CLASS_ACTIONS, SUBCLASS_ACTIONS, DND721_ACTIONS } from '@/lib/actions/registry'
+import { canUseAction } from '@/lib/actions/canUseAction'
+import { getClassResources, CLASS_HIT_DIE } from '@/lib/classResources'
+import type { ClassKey } from '@/lib/subclasses'
+import type { ActionType, SheetAction } from '@/lib/actions/types'
+import { roll as rollDice } from '@/lib/dice'
+import { SKILLS, DIE_TYPES, type DieSides, DIE_CONFIG } from '@/lib/dnd5e'
+import { getActiveConditionMechanics, CONDITIONS as CONDITION_DEFS, type ConditionKey } from '@/lib/conditions'
+import { DiceShape } from '@/components/dice/DiceShape'
 
 type AbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
 
@@ -86,6 +95,11 @@ type SheetPreview = Pick<
   | 'speed_ft'
   | 'spell_save_dc'
   | 'spell_attack_bonus'
+  | 'resource_state'
+  | 'saving_throw_profs'
+  | 'skill_proficiencies'
+  | 'spell_slots'
+  | 'temp_hp'
 >
 
 export function PlayerSidebar({
@@ -109,6 +123,37 @@ export function PlayerSidebar({
   const [activeTab, setActiveTab] = useState<PlayerTabKey>('character')
   const [collapsed, setCollapsed] = useState(false)
 
+  // Resizable panel
+  const [panelHeight, setPanelHeight] = useState(176)
+  const dragStartY = useRef(0)
+  const dragStartHeight = useRef(0)
+
+  const handleDragMove = useCallback((e: MouseEvent | TouchEvent) => {
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
+    const delta = dragStartY.current - clientY
+    const next = Math.max(80, Math.min(window.innerHeight * 0.75, dragStartHeight.current + delta))
+    setPanelHeight(next)
+  }, [])
+
+  const handleDragEnd = useCallback(() => {
+    document.removeEventListener('mousemove', handleDragMove)
+    document.removeEventListener('mouseup', handleDragEnd)
+    document.removeEventListener('touchmove', handleDragMove)
+    document.removeEventListener('touchend', handleDragEnd)
+  }, [handleDragMove])
+
+  const handleDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
+    dragStartY.current = clientY
+    dragStartHeight.current = panelHeight
+    document.addEventListener('mousemove', handleDragMove)
+    document.addEventListener('mouseup', handleDragEnd)
+    document.addEventListener('touchmove', handleDragMove)
+    document.addEventListener('touchend', handleDragEnd)
+  }, [panelHeight, handleDragMove, handleDragEnd])
+
+  useEffect(() => () => handleDragEnd(), [handleDragEnd])
+
   const [activeWalletLower, setActiveWalletLower] = useState<string | null>(null)
   const [activeName, setActiveName] = useState<string | null>(null)
 
@@ -119,15 +164,28 @@ export function PlayerSidebar({
   const [sheetError, setSheetError] = useState<string | null>(null)
   const [hpSaving, setHpSaving] = useState(false)
 
+  // Short rest hit dice modal
+  const [shortRestModal, setShortRestModal] = useState(false)
+  const [hitDieRollResult, setHitDieRollResult] = useState<number | null>(null)
+
   const moveUsedFt = useMemo(() => {
     const n = Number(actionState.move_used_ft ?? 0)
     return Number.isFinite(n) && n >= 0 ? n : 0
   }, [actionState.move_used_ft])
 
+  const activeConditions = useMemo<string[]>(() => {
+    const c = (actionState as any)?.active_conditions
+    return Array.isArray(c) ? c : []
+  }, [actionState])
+
+  const condMechanics = useMemo(() => getActiveConditionMechanics(activeConditions), [activeConditions])
+
   const effectiveSpeedFeet = useMemo(() => {
-    if (sheet?.speed_ft != null) return clampSpeedFeet(sheet.speed_ft)
-    return clampSpeedFeet(speedFeet)
-  }, [sheet?.speed_ft, speedFeet])
+    const base = sheet?.speed_ft != null ? clampSpeedFeet(sheet.speed_ft) : clampSpeedFeet(speedFeet)
+    if (condMechanics.zeroMovement) return 0
+    if (condMechanics.halfMovement) return Math.floor(base / 10) * 5
+    return base
+  }, [sheet?.speed_ft, speedFeet, condMechanics])
 
   const remainingMoveFt = useMemo(() => {
     return Math.max(0, effectiveSpeedFeet - moveUsedFt)
@@ -141,8 +199,33 @@ export function PlayerSidebar({
 
   const [lastAttackHit, setLastAttackHit] = useState<boolean | null>(null)
 
-  function rollD20VsACWithResult(label: string, bonus: number) {
-    const d20 = Math.floor(Math.random() * 20) + 1
+  // Custom roll picker state
+  const [customSides, setCustomSides] = useState<DieSides>(20)
+  const [customCount, setCustomCount] = useState(1)
+  const [customMod, setCustomMod] = useState(0)
+
+  // Advantage / disadvantage toggle
+  const [rollMode, setRollMode] = useState<'normal' | 'adv' | 'dis'>('normal')
+
+  function rollD20VsACWithResult(label: string, bonus: number, mode: 'normal' | 'adv' | 'dis' = 'normal') {
+    let d20: number
+    let modeNote = ''
+    let formulaPrefix = '1d20'
+    if (mode === 'adv') {
+      const r1 = Math.floor(Math.random() * 20) + 1
+      const r2 = Math.floor(Math.random() * 20) + 1
+      d20 = Math.max(r1, r2)
+      modeNote = ' (Adv)'
+      formulaPrefix = '2d20kh1'
+    } else if (mode === 'dis') {
+      const r1 = Math.floor(Math.random() * 20) + 1
+      const r2 = Math.floor(Math.random() * 20) + 1
+      d20 = Math.min(r1, r2)
+      modeNote = ' (Dis)'
+      formulaPrefix = '2d20kl1'
+    } else {
+      d20 = Math.floor(Math.random() * 20) + 1
+    }
     const total = d20 + bonus
 
     let outcome: string | null = null
@@ -156,11 +239,34 @@ export function PlayerSidebar({
 
     const sign = bonus >= 0 ? '+' : ''
     onRoll?.({
-      label: `${label}${(target as any)?.label ? ` → ${(target as any).label}` : ''}`,
-      formula: `1d20${sign}${bonus}`,
+      label: `${label}${modeNote}${(target as any)?.label ? ` → ${(target as any).label}` : ''}`,
+      formula: `${formulaPrefix}${sign}${bonus}`,
       result: total,
       outcome,
     })
+  }
+
+  function getAttackRollMode(): 'normal' | 'adv' | 'dis' {
+    const hasDis = !!condMechanics.attackDisadvantage || rollMode === 'dis'
+    const hasAdv = rollMode === 'adv' || !!actionState.has_inspiration
+    // disadvantage always wins
+    if (hasDis) return 'dis'
+    if (hasAdv) return 'adv'
+    return 'normal'
+  }
+
+  function rollD20WithMode(mod: number, label: string) {
+    const r1 = Math.floor(Math.random() * 20) + 1
+    const r2 = Math.floor(Math.random() * 20) + 1
+    let d20: number
+    let formulaPrefix = '1d20'
+    let modeNote = ''
+    if (rollMode === 'adv') { d20 = Math.max(r1, r2); formulaPrefix = '2d20kh1'; modeNote = ' (Adv)' }
+    else if (rollMode === 'dis') { d20 = Math.min(r1, r2); formulaPrefix = '2d20kl1'; modeNote = ' (Dis)' }
+    else { d20 = r1 }
+    const total = d20 + mod
+    const sign = mod >= 0 ? '+' : ''
+    onRoll?.({ label: `${label}${modeNote}`, formula: `${formulaPrefix}${sign}${mod}`, result: total, outcome: null })
   }
 
   function doWeaponAttack() {
@@ -169,13 +275,22 @@ export function PlayerSidebar({
     const dex = Number(sheet.abilities?.dex ?? 10)
     const mod = Math.max(abilityMod(str), abilityMod(dex))
     const pb = proficiencyBonus(sheet.level)
-    rollD20VsACWithResult('Weapon Attack', mod + pb)
+    const mode = getAttackRollMode()
+    rollD20VsACWithResult('Weapon Attack', mod + pb, mode)
+    // Inspiration is a one-time benefit — consume it after use
+    if (actionState.has_inspiration && mode === 'adv') {
+      updateActionState({ has_inspiration: false })
+    }
   }
 
   function doSpellAttack() {
     if (!sheet) return
     const bonus = Number(sheet.spell_attack_bonus ?? 0)
-    rollD20VsACWithResult('Spell Attack', Number.isFinite(bonus) ? bonus : 0)
+    const mode = getAttackRollMode()
+    rollD20VsACWithResult('Spell Attack', Number.isFinite(bonus) ? bonus : 0, mode)
+    if (actionState.has_inspiration && mode === 'adv') {
+      updateActionState({ has_inspiration: false })
+    }
   }
 
   function doWeaponDamage() {
@@ -193,6 +308,20 @@ export function PlayerSidebar({
       outcome: null,
     })
     setLastAttackHit(null)
+  }
+
+  function executeEffects(action: SheetAction) {
+    if (!action.effects?.length) return
+    for (const fx of action.effects) {
+      if (fx.type === 'rollFormula') {
+        const r = rollDice(fx.formula)
+        onRoll?.({ label: fx.label, formula: fx.formula, result: r.total, outcome: null })
+      } else if (fx.type === 'rollAttack') {
+        doWeaponAttack()
+      } else if (fx.type === 'rollDamage') {
+        doWeaponDamage()
+      }
+    }
   }
 
   const [rollFlip, setRollFlip] = useState(false)
@@ -267,6 +396,24 @@ export function PlayerSidebar({
     return () => window.removeEventListener('dnd721-active-initiative', handler as any)
   }, [])
 
+  // Reset reaction at the start of each new round
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const handler = () => updateActionState({ reaction_used_round: false })
+    window.addEventListener('dnd721-new-round', handler)
+    return () => window.removeEventListener('dnd721-new-round', handler)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCharacterId, actionState])
+
+  // GM can grant inspiration via window event (same-device)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const handler = () => updateActionState({ has_inspiration: true })
+    window.addEventListener('dnd721-grant-inspiration', handler)
+    return () => window.removeEventListener('dnd721-grant-inspiration', handler)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCharacterId, actionState])
+
   useEffect(() => {
     if (!selectedCharacterId) {
       setActionState({})
@@ -301,6 +448,13 @@ export function PlayerSidebar({
     }
   }, [selectedCharacterId])
 
+  async function updateTempHP(value: number) {
+    if (!selectedCharacterId || !sheet) return
+    const next = Math.max(0, value)
+    setSheet({ ...sheet, temp_hp: next })
+    await supabase.from('characters').update({ temp_hp: next }).eq('id', selectedCharacterId)
+  }
+
   async function updateHP(delta: number) {
     if (!selectedCharacterId) return
     if (!sheet) return
@@ -310,15 +464,57 @@ export function PlayerSidebar({
     const safeCur = Number.isFinite(cur) ? cur : 0
     const safeMax = Number.isFinite(max) ? max : 0
 
-    const upper = safeMax > 0 ? safeMax : Math.max(1, safeCur + Math.abs(delta) + 9999)
-    const next = Math.max(0, Math.min(upper, safeCur + delta))
+    // Absorb damage into temp HP first
+    let effectiveDelta = delta
+    let nextTempHP = Number(sheet.temp_hp ?? 0)
+    if (delta < 0 && nextTempHP > 0) {
+      const absorbed = Math.min(nextTempHP, Math.abs(delta))
+      nextTempHP -= absorbed
+      effectiveDelta = delta + absorbed
+    }
 
-    setSheet({ ...sheet, hit_points_current: next })
+    const upper = safeMax > 0 ? safeMax : Math.max(1, safeCur + Math.abs(delta) + 9999)
+    const next = Math.max(0, Math.min(upper, safeCur + effectiveDelta))
+
+    // Concentration check: taking damage while concentrating
+    if (delta < 0 && condMechanics.concentrationRisk) {
+      const damageTaken = Math.abs(delta)
+      const dc = Math.max(10, Math.floor(damageTaken / 2))
+      const con = Number((sheet as any).abilities?.con ?? 10)
+      const baseMod = abilityMod(con)
+      const pb = proficiencyBonus(sheet.level)
+      const hasConProf = Array.isArray(sheet.saving_throw_profs) && sheet.saving_throw_profs.includes('con')
+      const totalMod = baseMod + (hasConProf ? pb : 0)
+      const d20 = Math.floor(Math.random() * 20) + 1
+      const total = d20 + totalMod
+      const sign = totalMod >= 0 ? '+' : ''
+      const maintained = total >= dc
+      onRoll?.({
+        label: `Concentration Save (DC ${dc})`,
+        formula: `1d20${sign}${totalMod}`,
+        result: total,
+        outcome: maintained ? `MAINTAINED (vs DC ${dc})` : `BROKEN (vs DC ${dc})`,
+      })
+      if (!maintained) {
+        // Remove concentration condition from player's own state
+        const nextConditions = activeConditions.filter((c) => c !== 'concentration')
+        updateActionState({ active_conditions: nextConditions })
+        // Notify InitiativeTracker to clear the visual condition ring
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('dnd721-concentration-broken', { detail: { wallet: addressLower } }))
+        }
+      }
+    }
+
+    setSheet({ ...sheet, hit_points_current: next, temp_hp: nextTempHP })
     setHpSaving(true)
+
+    const updatePayload: Record<string, number> = { hit_points_current: next }
+    if (nextTempHP !== Number(sheet.temp_hp ?? 0)) updatePayload.temp_hp = nextTempHP
 
     const { error } = await supabase
       .from('characters')
-      .update({ hit_points_current: next })
+      .update(updatePayload)
       .eq('id', selectedCharacterId)
 
     setHpSaving(false)
@@ -344,7 +540,7 @@ export function PlayerSidebar({
 
       const { data, error } = await supabase
         .from('characters')
-        .select(['id', 'name', 'level', 'main_job', 'subclass', 'race', 'background', 'abilities', 'hit_points_current', 'hit_points_max', 'armor_class', 'speed_ft', 'spell_save_dc', 'spell_attack_bonus'].join(','))
+        .select(['id', 'name', 'level', 'main_job', 'subclass', 'race', 'background', 'abilities', 'hit_points_current', 'hit_points_max', 'armor_class', 'speed_ft', 'spell_save_dc', 'spell_attack_bonus', 'resource_state', 'saving_throw_profs', 'skill_proficiencies', 'spell_slots', 'temp_hp'].join(','))
         .eq('id', selectedCharacterId)
         .maybeSingle()
 
@@ -380,6 +576,21 @@ export function PlayerSidebar({
       .update({ action_state: next })
       .eq('id', selectedCharacterId)
     if (error) console.error('PlayerSidebar update action_state error', error)
+    // Broadcast reaction-used so InitiativeTracker can badge the row
+    if (patch.reaction_used_round === true && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dnd721-reaction-used', { detail: { wallet: address?.toLowerCase() ?? null } }))
+    }
+  }
+
+  async function updateResourceState(patch: Record<string, number>) {
+    if (!selectedCharacterId || !sheet) return
+    const next = { ...(sheet.resource_state ?? {}), ...patch }
+    setSheet({ ...sheet, resource_state: next })
+    const { error } = await supabase
+      .from('characters')
+      .update({ resource_state: next })
+      .eq('id', selectedCharacterId)
+    if (error) console.error('PlayerSidebar update resource_state error', error)
   }
 
   const actionUsed = Boolean(actionState.action_used_turn)
@@ -431,7 +642,72 @@ export function PlayerSidebar({
       </div>
     )}
 
+    {/* Short Rest — hit dice modal */}
+    {shortRestModal && sheet && (() => {
+      const classKey = (sheet.main_job ?? '').toLowerCase() as any
+      const hitDie = (CLASS_HIT_DIE as Record<string, string>)[classKey] ?? 'd8'
+      const dieSides = Number(hitDie.replace('d', ''))
+      const con = Number(sheet.abilities?.con ?? 10)
+      const conMod = Math.floor((con - 10) / 2)
+      const conModStr = conMod >= 0 ? `+${conMod}` : `${conMod}`
+      const resources = getClassResources(classKey, Number(sheet.level ?? 1))
+      const hitDieRes = resources.find((r) => r.key === 'hit_die')
+      const hitDieCurrent = hitDieRes ? Number(sheet.resource_state?.['hit_die'] ?? hitDieRes.max) : 0
+      return (
+        <div className="pointer-events-auto fixed inset-0 z-[95] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="mx-4 w-full max-w-xs rounded-2xl border border-emerald-700/60 bg-slate-950/95 p-5 shadow-2xl">
+            <h3 className="mb-1 text-base font-bold text-emerald-300">Short Rest</h3>
+            <p className="mb-3 text-[11px] text-slate-400">Spend hit dice to recover HP. You have <span className="text-slate-200 font-semibold">{hitDieCurrent}</span> {hitDie} remaining.</p>
+            {hitDieRollResult != null && (
+              <p className="mb-2 text-center text-sm font-bold text-emerald-200">Healed +{hitDieRollResult} HP</p>
+            )}
+            <button
+              type="button"
+              disabled={hitDieCurrent <= 0 || hpSaving}
+              onClick={() => {
+                const roll = Math.floor(Math.random() * dieSides) + 1
+                const heal = Math.max(1, roll + conMod)
+                setHitDieRollResult(heal)
+                updateHP(+heal)
+                updateResourceState({ hit_die: Math.max(0, hitDieCurrent - 1) })
+                onRoll?.({ label: `Hit Die (${hitDie}${conModStr})`, formula: `1${hitDie}${conModStr}`, result: heal, outcome: null })
+              }}
+              className="mb-2 w-full rounded-xl border border-emerald-700/60 bg-emerald-600/20 py-2.5 text-sm font-bold text-emerald-200 hover:bg-emerald-600/30 disabled:opacity-40"
+            >
+              Roll 1{hitDie}{conModStr}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                // Reset short-rest class resources
+                if (sheet.main_job) {
+                  const res = getClassResources(sheet.main_job as any, Number(sheet.level ?? 1))
+                  const patch: Record<string, number> = {}
+                  res.filter((r) => r.recharge === 'short_rest' && r.key !== 'hit_die').forEach((r) => { patch[r.key] = r.max })
+                  if (Object.keys(patch).length > 0) updateResourceState(patch)
+                }
+                setHitDieRollResult(null)
+                setShortRestModal(false)
+              }}
+              className="w-full rounded-xl border border-slate-700 bg-slate-900 py-2 text-sm text-slate-300 hover:bg-slate-800"
+            >
+              Done resting
+            </button>
+          </div>
+        </div>
+      )
+    })()}
+
     <aside className="pointer-events-auto flex flex-col rounded-t-xl border border-b-0 border-yellow-800/40 bg-slate-950/90 backdrop-blur-md text-xs">
+
+      {/* Drag handle */}
+      <div
+        className="flex h-4 shrink-0 cursor-ns-resize items-center justify-center"
+        onMouseDown={handleDragStart}
+        onTouchStart={handleDragStart}
+      >
+        <div className="h-1.5 w-12 rounded-full bg-slate-600 hover:bg-yellow-500/60 transition-colors" />
+      </div>
 
       {/* Single-row header: badge + tabs + DND721 */}
       <div className="flex shrink-0 items-center gap-2 border-b border-yellow-800/50 bg-gradient-to-r from-slate-950 via-slate-900/95 to-slate-950 px-3 py-2">
@@ -471,7 +747,7 @@ export function PlayerSidebar({
       </div>
 
       {/* Tab content area */}
-      {!collapsed && <div className="h-44 overflow-hidden p-2">
+      {!collapsed && <div className="overflow-hidden p-2" style={{ height: panelHeight }}>
 
       {/* ─── CHARACTER TAB ─── */}
       {activeTab === 'character' && (
@@ -576,11 +852,20 @@ export function PlayerSidebar({
                           {Number.isFinite(Number(sheet?.hit_points_current)) ? Number(sheet?.hit_points_current) : 0}
                           <span className="text-[10px] text-slate-400">/{Number.isFinite(Number(sheet?.hit_points_max)) ? Number(sheet?.hit_points_max) : 0}</span>
                         </p>
+                        {(sheet?.temp_hp ?? 0) > 0 && (
+                          <p className="text-[9px] font-semibold text-teal-400 leading-tight">+{sheet!.temp_hp} tmp</p>
+                        )}
                         <div className="mt-1 flex gap-0.5">
                           <button type="button" disabled={hpSaving} onClick={() => updateHP(-5)} className="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[9px] text-slate-200 hover:border-yellow-500/60 disabled:opacity-40">-5</button>
                           <button type="button" disabled={hpSaving} onClick={() => updateHP(-1)} className="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[9px] text-slate-200 hover:border-yellow-500/60 disabled:opacity-40">-1</button>
                           <button type="button" disabled={hpSaving} onClick={() => updateHP(+1)} className="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[9px] text-slate-200 hover:border-yellow-500/60 disabled:opacity-40">+1</button>
                           <button type="button" disabled={hpSaving} onClick={() => updateHP(+5)} className="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[9px] text-slate-200 hover:border-yellow-500/60 disabled:opacity-40">+5</button>
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-0.5">
+                          <span className="text-[8px] text-teal-400/70">TMP</span>
+                          <button type="button" disabled={hpSaving} onClick={() => updateTempHP((sheet?.temp_hp ?? 0) - 1)} className="rounded border border-teal-900/50 bg-slate-950 px-1 py-0 text-[9px] text-teal-300 hover:border-teal-500/50 disabled:opacity-40">-</button>
+                          <span className="w-4 text-center text-[9px] font-mono text-teal-300">{sheet?.temp_hp ?? 0}</span>
+                          <button type="button" disabled={hpSaving} onClick={() => updateTempHP((sheet?.temp_hp ?? 0) + 1)} className="rounded border border-teal-900/50 bg-slate-950 px-1 py-0 text-[9px] text-teal-300 hover:border-teal-500/50 disabled:opacity-40">+</button>
                         </div>
                       </div>
                       <div className="rounded-md border border-yellow-900/30 bg-slate-900/40 p-1.5">
@@ -601,20 +886,32 @@ export function PlayerSidebar({
                         {(['str', 'dex', 'con', 'int', 'wis', 'cha'] as AbilityKey[]).map((key) => {
                           const label = key.toUpperCase()
                           const score = Number((sheet.abilities as any)?.[key] ?? 10)
+                          const saveAutoFail =
+                            (key === 'str' && condMechanics.autoFailStr) ||
+                            (key === 'dex' && condMechanics.autoFailDex)
                           return (
                             <div
                               key={key}
                               role="button"
                               tabIndex={0}
-                              onClick={() => onAbilityCheck(key, `${label} Check`)}
+                              onClick={() => {
+                                if (saveAutoFail) {
+                                  onRoll?.({ label: `${label} Save — AUTO FAIL`, formula: '0', result: 0, outcome: 'AUTO FAIL' })
+                                } else {
+                                  onAbilityCheck(key, `${label} Check`)
+                                }
+                              }}
                               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onAbilityCheck(key, `${label} Check`) }}
-                              className="cursor-pointer rounded-md border border-yellow-900/30 bg-slate-900/20 p-1 hover:border-yellow-500/50 hover:bg-slate-900/30"
+                              className={`cursor-pointer rounded-md border p-1 ${saveAutoFail ? 'border-red-700/60 bg-red-950/30 hover:bg-red-900/30' : 'border-yellow-900/30 bg-slate-900/20 hover:border-yellow-500/50 hover:bg-slate-900/30'}`}
+                              title={saveAutoFail ? 'Auto-fail (condition)' : undefined}
                             >
                               <div className="flex items-center justify-between">
-                                <span className="text-[9px] font-semibold text-slate-300">{label}</span>
+                                <span className={`text-[9px] font-semibold ${saveAutoFail ? 'text-red-300' : 'text-slate-300'}`}>{label}</span>
                                 <span className="font-mono text-[9px] text-slate-400">{score}</span>
                               </div>
-                              <div className="text-center text-xs font-semibold text-slate-100">{fmtMod(abilityMod(score))}</div>
+                              <div className={`text-center text-xs font-semibold ${saveAutoFail ? 'text-red-400' : 'text-slate-100'}`}>
+                                {saveAutoFail ? '✗' : fmtMod(abilityMod(score))}
+                              </div>
                             </div>
                           )
                         })}
@@ -624,11 +921,42 @@ export function PlayerSidebar({
                 )}
               </div>
 
-              {/* RIGHT: Turn + action economy + movement */}
+              {/* RIGHT: Turn + action economy + class resources */}
               <div className="flex flex-col gap-2 overflow-y-auto">
-                <div className="rounded-lg border border-yellow-900/30 bg-slate-900/50 p-2 space-y-2">
+
+                {/* Active condition banner */}
+                {activeConditions.length > 0 && (
+                  <div className="rounded-lg border border-red-800/50 bg-red-950/30 p-2 space-y-1">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-red-300/90">Conditions</p>
+                    {activeConditions.map(key => {
+                      const cond = CONDITION_DEFS[key as ConditionKey]
+                      if (!cond) return null
+                      return (
+                        <div key={key} className="text-[10px]">
+                          <span className="font-semibold text-red-200">{cond.name}</span>
+                          {cond.bullets?.[0] && (
+                            <span className="text-slate-400"> — {cond.bullets[0]}</span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* Turn indicator + movement */}
+                <div className="rounded-lg border border-yellow-900/30 bg-slate-900/50 p-2 space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <p className="text-[11px] font-semibold text-yellow-300/70">Turn</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-yellow-300/70">Turn</p>
+                    <div className="flex items-center gap-1">
+                      {/* Inspiration toggle */}
+                      <button
+                        type="button"
+                        title={actionState.has_inspiration ? 'Inspiration active — click to use/clear' : 'No inspiration'}
+                        onClick={() => updateActionState({ has_inspiration: !actionState.has_inspiration })}
+                        className={`rounded px-1.5 py-0.5 text-[9px] font-bold transition ${actionState.has_inspiration ? 'bg-amber-500/80 text-amber-950 shadow-[0_0_6px_rgba(245,158,11,0.7)]' : 'border border-slate-700 bg-slate-950 text-slate-500 hover:text-amber-400'}`}
+                      >
+                        {actionState.has_inspiration ? '★ Inspired' : '☆'}
+                      </button>
                     {activeWalletLower ? (
                       isMyTurn ? (
                         <span className="rounded bg-emerald-700/40 px-2 py-0.5 text-[10px] font-semibold text-emerald-100">Your turn</span>
@@ -638,26 +966,288 @@ export function PlayerSidebar({
                     ) : (
                       <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">Not started</span>
                     )}
+                    </div>
                   </div>
-
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-slate-300">Movement</span>
+                  <div className="space-y-0.5">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="text-slate-400">Move</span>
                       <span className="font-mono text-slate-200">{remainingMoveFt}/{effectiveSpeedFeet} ft</span>
                     </div>
-                    <div className="h-2 w-full overflow-hidden rounded bg-slate-800">
-                      <div className="h-full bg-amber-600/70" style={{ width: `${Math.max(0, Math.min(100, (remainingMoveFt / Math.max(1, effectiveSpeedFeet)) * 100))}%` }} />
+                    <div className="h-1.5 w-full overflow-hidden rounded bg-slate-800">
+                      <div className="h-full bg-amber-600/70 transition-all" style={{ width: `${Math.max(0, Math.min(100, (remainingMoveFt / Math.max(1, effectiveSpeedFeet)) * 100))}%` }} />
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-3 gap-1">
-                    <button type="button" disabled={!isMyTurn || !activeWalletLower || actionUsed} onClick={() => updateActionState({ action_used_turn: true })} className="rounded-md border border-yellow-900/30 bg-slate-900 px-1.5 py-1 text-[10px] text-slate-100 hover:border-yellow-500/50 disabled:opacity-40">{actionUsed ? 'Action ✓' : 'Action'}</button>
-                    <button type="button" disabled={!isMyTurn || !activeWalletLower || bonusUsed} onClick={() => updateActionState({ bonus_used_turn: true })} className="rounded-md border border-yellow-900/30 bg-slate-900 px-1.5 py-1 text-[10px] text-slate-100 hover:border-yellow-500/50 disabled:opacity-40">{bonusUsed ? 'Bonus ✓' : 'Bonus'}</button>
-                    <button type="button" disabled={!activeWalletLower || reactionUsed} onClick={() => updateActionState({ reaction_used_round: true })} className="rounded-md border border-yellow-900/30 bg-slate-900 px-1.5 py-1 text-[10px] text-slate-100 hover:border-yellow-500/50 disabled:opacity-40">{reactionUsed ? 'React ✓' : 'React'}</button>
-                  </div>
-
-                  <button type="button" disabled={!activeWalletLower || !isMyTurn} onClick={() => updateActionState({ move_used_ft: 0, action_used_turn: false, bonus_used_turn: false, reaction_used_round: false })} className="w-full rounded-md border border-yellow-900/30 bg-slate-950 px-2 py-1 text-[10px] text-slate-200 hover:border-yellow-500/50 disabled:opacity-40">Reset turn</button>
                 </div>
+
+                {/* Class resources (Ki, Rage, etc.) */}
+                {sheet?.main_job && (() => {
+                  const resources = getClassResources(sheet.main_job as ClassKey, Number(sheet.level ?? 1))
+                  if (resources.length === 0) return null
+                  return (
+                    <div className="rounded-lg border border-yellow-900/30 bg-slate-900/50 p-2">
+                      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-yellow-300/70">Resources</p>
+                      <div className="space-y-1">
+                        {resources.map((res) => {
+                          const current = Number(sheet.resource_state?.[res.key] ?? res.max)
+                          return (
+                            <div key={res.key} className="flex items-center justify-between gap-1">
+                              <span className="min-w-0 truncate text-[10px] text-slate-300">{res.name}</span>
+                              <div className="flex shrink-0 items-center gap-1">
+                                <button type="button" onClick={() => updateResourceState({ [res.key]: Math.max(0, current - 1) })} disabled={current <= 0} className="flex h-5 w-5 items-center justify-center rounded border border-slate-700 bg-slate-950 text-[10px] text-slate-200 hover:border-yellow-500/50 disabled:opacity-30">−</button>
+                                <span className="w-10 text-center font-mono text-[10px] text-slate-100">{current}/{res.max}</span>
+                                <button type="button" onClick={() => updateResourceState({ [res.key]: Math.min(res.max, current + 1) })} disabled={current >= res.max} className="flex h-5 w-5 items-center justify-center rounded border border-slate-700 bg-slate-950 text-[10px] text-slate-200 hover:border-yellow-500/50 disabled:opacity-30">+</button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* Spell Slots (Warlock uses Pact Magic; others use level slots) */}
+                {(() => {
+                  const isWarlock = (sheet?.main_job ?? '').toLowerCase() === 'warlock'
+                  if (isWarlock) {
+                    // Pact Magic: single slot pool that recharges on short rest
+                    const resources = getClassResources('warlock', Number(sheet?.level ?? 1))
+                    const pactRes = resources.find((r) => r.key === 'warlock.pact_magic')
+                    if (!pactRes) return null
+                    const maxSlots = pactRes.max
+                    const curSlots = Number(sheet?.resource_state?.['warlock.pact_magic'] ?? maxSlots)
+                    const pactLevel = Number(sheet?.level ?? 1) >= 9 ? 5 : Number(sheet?.level ?? 1) >= 7 ? 4 : Number(sheet?.level ?? 1) >= 5 ? 3 : Number(sheet?.level ?? 1) >= 3 ? 2 : 1
+                    return (
+                      <div className="rounded-lg border border-violet-900/30 bg-slate-900/50 p-2">
+                        <div className="mb-1 flex items-center justify-between">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-300/70">Pact Magic</p>
+                          <span className="text-[9px] text-slate-500">Lv {pactLevel} slots · Short Rest</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <div className="flex gap-0.5">
+                            {Array.from({ length: maxSlots }).map((_, i) => (
+                              <div key={i} className={`h-2.5 w-2.5 rounded-full border ${i < curSlots ? 'border-violet-500/60 bg-violet-600/50' : 'border-slate-700 bg-slate-900'}`} />
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={curSlots <= 0}
+                            onClick={() => updateResourceState({ 'warlock.pact_magic': Math.max(0, curSlots - 1) })}
+                            className="ml-auto shrink-0 rounded border border-violet-800/50 bg-violet-950/40 px-1.5 py-0.5 text-[9px] text-violet-300 hover:border-violet-500/60 disabled:opacity-30"
+                          >
+                            Cast
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  }
+                  if (!sheet?.spell_slots || Object.keys(sheet.spell_slots).length === 0) return null
+                  return (
+                    <div className="rounded-lg border border-violet-900/30 bg-slate-900/50 p-2">
+                      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-violet-300/70">Spell Slots</p>
+                      <div className="space-y-0.5">
+                        {Object.entries(sheet.spell_slots).map(([lvl, maxCount]) => {
+                          const usedKey = `spell_slot_${lvl}`
+                          const used = Math.min(Number(sheet.resource_state?.[usedKey] ?? 0), Number(maxCount))
+                          const remaining = Number(maxCount) - used
+                          return (
+                            <div key={lvl} className="flex items-center gap-1.5">
+                              <span className="w-10 shrink-0 text-[9px] text-slate-400">Lv {lvl}</span>
+                              <div className="flex gap-0.5">
+                                {Array.from({ length: Number(maxCount) }).map((_, i) => (
+                                  <div key={i} className={`h-2.5 w-2.5 rounded-full border ${i < remaining ? 'border-violet-500/60 bg-violet-600/50' : 'border-slate-700 bg-slate-900'}`} />
+                                ))}
+                              </div>
+                              <button
+                                type="button"
+                                disabled={remaining <= 0}
+                                onClick={() => updateResourceState({ [usedKey]: used + 1 })}
+                                className="ml-auto shrink-0 rounded border border-violet-800/50 bg-violet-950/40 px-1.5 py-0.5 text-[9px] text-violet-300 hover:border-violet-500/60 disabled:opacity-30"
+                              >
+                                Cast
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* Weapon attack quick roll */}
+                {sheet?.abilities && (
+                  <div className="rounded-lg border border-yellow-900/30 bg-slate-900/50 p-1.5">
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-yellow-300/70">Attack</p>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={doWeaponAttack}
+                        className="flex-1 rounded-md border border-emerald-800/50 bg-emerald-900/20 px-1 py-1 text-[10px] font-semibold text-emerald-200 hover:bg-emerald-900/40"
+                        title="Weapon attack roll"
+                      >
+                        ⚔ Attack {fmtMod(Math.max(abilityMod(Number(sheet.abilities.str ?? 10)), abilityMod(Number(sheet.abilities.dex ?? 10))) + proficiencyBonus(sheet.level))}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={doWeaponDamage}
+                        className="flex-1 rounded-md border border-orange-800/50 bg-orange-900/20 px-1 py-1 text-[10px] font-semibold text-orange-200 hover:bg-orange-900/40"
+                        title="Weapon damage roll"
+                      >
+                        💥 Damage
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Action economy — grouped by slot type */}
+                {(() => {
+                  const classKey = (sheet?.main_job ?? '').toLowerCase()
+                  const subKey = (sheet?.subclass ?? '').toLowerCase()
+                  const resState = sheet?.resource_state ?? {}
+                  const allClassActions = [...CLASS_ACTIONS, ...SUBCLASS_ACTIONS, ...DND721_ACTIONS]
+                  // Show only actions whose gate passes for this character's class/subclass
+                  const available = allClassActions.filter((a) => {
+                    const g = a.gates
+                    if (g.kind === 'class') return g.classKey.toLowerCase() === classKey
+                    if (g.kind === 'subclass') return g.subclassKey.toLowerCase() === subKey
+                    return false
+                  })
+
+                  type SlotGroup = { label: string; emoji: string; slotUsed: boolean; onMarkSlot: () => void; actionType: ActionType }
+                  const groups: SlotGroup[] = [
+                    { label: 'Action', emoji: '⚔', slotUsed: actionUsed, onMarkSlot: () => updateActionState({ action_used_turn: true }), actionType: 'action' },
+                    { label: 'Bonus Action', emoji: '↩', slotUsed: bonusUsed, onMarkSlot: () => updateActionState({ bonus_used_turn: true }), actionType: 'bonus_action' },
+                    { label: 'Reaction', emoji: '⚡', slotUsed: reactionUsed, onMarkSlot: () => updateActionState({ reaction_used_round: true }), actionType: 'reaction' },
+                  ]
+
+                  return (
+                    <div className="space-y-1.5">
+                      {groups.map((grp) => {
+                        const grpActions = available.filter((a) => a.actionType === grp.actionType)
+                        const freeActions = available.filter((a) => a.actionType === 'free' && grp.actionType === 'action')
+                        const condBlocked =
+                          (grp.actionType === 'action' || grp.actionType === 'bonus_action') && !!condMechanics.blockActions ||
+                          grp.actionType === 'reaction' && !!condMechanics.blockReactions
+                        const condBlockLabel = activeConditions
+                          .map(k => CONDITION_DEFS[k as ConditionKey]?.name)
+                          .filter(Boolean)
+                          .join(', ')
+                        return (
+                          <div key={grp.label} className={`rounded-lg border p-1.5 ${condBlocked ? 'border-red-800/50 bg-red-950/20' : 'border-yellow-900/30 bg-slate-900/50'}`}>
+                            <div className="mb-1 flex items-center justify-between">
+                              <span className={`text-[10px] font-semibold ${condBlocked ? 'text-red-400/80' : 'text-yellow-300/70'}`}>{grp.emoji} {grp.label}</span>
+                              <button
+                                type="button"
+                                onClick={grp.onMarkSlot}
+                                disabled={grp.slotUsed || condBlocked}
+                                title={condBlocked ? `Blocked by condition (${condBlockLabel})` : undefined}
+                                className={`rounded px-1.5 py-0.5 text-[9px] font-medium transition ${
+                                  condBlocked ? 'bg-red-900/60 text-red-300 cursor-not-allowed' :
+                                  grp.slotUsed ? 'bg-slate-800 text-slate-500' :
+                                  'bg-slate-800 text-slate-300 hover:border-yellow-500/50'
+                                }`}
+                              >
+                                {condBlocked ? `Blocked` : grp.slotUsed ? 'Used ✓' : 'Free'}
+                              </button>
+                            </div>
+                            {(grpActions.length > 0 || freeActions.length > 0) && (
+                              <div className="flex flex-wrap gap-1">
+                                {grpActions.map((a) => {
+                                  const usable = canUseAction({ action: a, classKey, subclassKey: subKey, actionState, resourceState: resState })
+                                  const isSlotBlocked = grp.slotUsed && grp.actionType !== 'reaction' // reaction can be used anytime
+                                  return (
+                                    <button
+                                      key={a.id}
+                                      type="button"
+                                      disabled={!usable.ok || isSlotBlocked}
+                                      title={a.description ?? a.name}
+                                      onClick={() => {
+                                        // Mark the slot
+                                        if (grp.actionType === 'action') updateActionState({ action_used_turn: true })
+                                        else if (grp.actionType === 'bonus_action') updateActionState({ bonus_used_turn: true })
+                                        else if (grp.actionType === 'reaction') updateActionState({ reaction_used_round: true })
+                                        // Spend resource or set flag
+                                        if (a.cost.type === 'resource') {
+                                          const cur = Number(resState[a.cost.key] ?? 0)
+                                          updateResourceState({ [a.cost.key]: Math.max(0, cur - a.cost.amount) })
+                                        } else if (a.cost.type === 'perTurnFlag' || a.cost.type === 'perRestFlag') {
+                                          updateActionState({ [a.cost.flag]: true })
+                                        }
+                                        // Execute any roll effects
+                                        executeEffects(a)
+                                      }}
+                                      className="rounded-md border border-yellow-900/30 bg-slate-950 px-2 py-1 text-[10px] text-slate-200 hover:border-yellow-500/50 disabled:cursor-not-allowed disabled:opacity-35"
+                                    >
+                                      {a.name}
+                                    </button>
+                                  )
+                                })}
+                                {freeActions.map((a) => {
+                                  const usable = canUseAction({ action: a, classKey, subclassKey: subKey, actionState, resourceState: resState })
+                                  return (
+                                    <button
+                                      key={a.id}
+                                      type="button"
+                                      disabled={!usable.ok}
+                                      title={`${a.description ?? a.name} (Free)`}
+                                      onClick={() => {
+                                        if (a.cost.type === 'resource') {
+                                          const cur = Number(resState[a.cost.key] ?? 0)
+                                          updateResourceState({ [a.cost.key]: Math.max(0, cur - a.cost.amount) })
+                                        } else if (a.cost.type === 'perTurnFlag' || a.cost.type === 'perRestFlag') {
+                                          updateActionState({ [a.cost.flag]: true })
+                                        }
+                                      }}
+                                      className="rounded-md border border-slate-700/50 bg-slate-950 px-2 py-1 text-[10px] text-slate-400 hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-35"
+                                    >
+                                      {a.name} <span className="text-[9px] text-slate-500">(free)</span>
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
+
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    disabled={!activeWalletLower || !isMyTurn}
+                    onClick={() => updateActionState({ move_used_ft: 0, action_used_turn: false, bonus_used_turn: false, reaction_used_round: false })}
+                    className="flex-1 rounded-md border border-yellow-900/30 bg-slate-950 px-2 py-1 text-[10px] text-slate-200 hover:border-yellow-500/50 disabled:opacity-40"
+                  >
+                    Reset turn
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setHitDieRollResult(null); setShortRestModal(true) }}
+                    className="shrink-0 rounded-md border border-emerald-900/50 bg-slate-950 px-2 py-1 text-[10px] text-emerald-300/70 hover:border-emerald-500/60"
+                    title="Short Rest — spend hit dice to heal"
+                  >
+                    Short Rest
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Reset ALL resources (short + long rest) and all spell slots
+                      if (sheet?.main_job) {
+                        const res = getClassResources(sheet.main_job as any, Number(sheet.level ?? 1))
+                        const patch: Record<string, number> = {}
+                        res.forEach((r) => { patch[r.key] = r.max })
+                        if (sheet.spell_slots) Object.keys(sheet.spell_slots).forEach((lvl) => { patch[`spell_slot_${lvl}`] = 0 })
+                        updateResourceState(patch)
+                      }
+                    }}
+                    className="shrink-0 rounded-md border border-indigo-900/50 bg-slate-950 px-2 py-1 text-[10px] text-indigo-300/70 hover:border-indigo-500/60"
+                    title="Long Rest — restore all resources and spell slots"
+                  >
+                    Long Rest
+                  </button>
+                </div>
+
               </div>
 
             </div>
@@ -673,36 +1263,110 @@ export function PlayerSidebar({
           ) : (
             <div className="grid h-full grid-cols-2 gap-2">
 
-              {/* LEFT: Ability checks + Initiative + dice log */}
-              <div className="flex flex-col gap-2 overflow-y-auto">
+              {/* LEFT: Ability checks + Saving Throws + Skills + Initiative + Recent Rolls */}
+              <div className="flex flex-col gap-2 overflow-y-auto pr-0.5">
+
+                {/* Ability Checks */}
                 <div className="rounded-lg border border-yellow-900/30 bg-slate-950/60 p-2">
                   <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-300/60">Ability Checks</p>
-                  <div className="grid grid-cols-2 gap-1">
-                    {(['str', 'dex', 'con', 'int', 'wis', 'cha'] as AbilityKey[]).map((key) => (
-                      <button key={key} type="button" onClick={() => onAbilityCheck(key, `${key.toUpperCase()} Check`)} className="rounded-md border border-yellow-900/30 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-200 hover:border-yellow-500/50 hover:text-yellow-100">
-                        {key.toUpperCase()}
-                      </button>
-                    ))}
+                  <div className="grid grid-cols-3 gap-1">
+                    {(['str', 'dex', 'con', 'int', 'wis', 'cha'] as AbilityKey[]).map((key) => {
+                      const score = Number(sheet?.abilities?.[key] ?? 10)
+                      const mod = abilityMod(score)
+                      return (
+                        <button key={key} type="button" onClick={() => rollD20WithMode(mod, `${key.toUpperCase()} Check`)}
+                          className="rounded-md border border-yellow-900/30 bg-slate-900 px-1 py-1.5 text-center hover:border-yellow-500/50 hover:bg-slate-900/80">
+                          <div className="text-[10px] font-semibold text-slate-200">{key.toUpperCase()}</div>
+                          <div className="text-[9px] font-mono text-slate-400">{fmtMod(mod)}</div>
+                        </button>
+                      )
+                    })}
                   </div>
-                  <button type="button" onClick={onInitiative} className="mt-1.5 w-full rounded-md border border-yellow-900/30 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-200 hover:border-yellow-500/50 hover:text-yellow-100">
-                    Initiative
+                  <button type="button" onClick={onInitiative}
+                    className="mt-1.5 w-full rounded-md border border-yellow-900/30 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-200 hover:border-yellow-500/50 hover:text-yellow-100">
+                    ⚡ Initiative {sheet?.abilities ? fmtMod(abilityMod(Number(sheet.abilities.dex ?? 10))) : ''}
                   </button>
                 </div>
 
-                {/* Recent rolls */}
+                {/* Saving Throws */}
+                <div className="rounded-lg border border-yellow-900/30 bg-slate-950/60 p-2">
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-300/60">Saving Throws</p>
+                  <div className="grid grid-cols-3 gap-1">
+                    {(['str', 'dex', 'con', 'int', 'wis', 'cha'] as AbilityKey[]).map((key) => {
+                      const score = Number(sheet?.abilities?.[key] ?? 10)
+                      const base = abilityMod(score)
+                      const pb = proficiencyBonus(sheet?.level)
+                      const hasSaveProf = Array.isArray(sheet?.saving_throw_profs) && sheet.saving_throw_profs.includes(key)
+                      const saveMod = base + (hasSaveProf ? pb : 0)
+                      return (
+                        <button key={key} type="button"
+                          onClick={() => rollD20WithMode(saveMod, `${key.toUpperCase()} Save`)}
+                          className="rounded-md border border-blue-900/30 bg-slate-900 px-1 py-1.5 text-center hover:border-blue-500/50 hover:bg-slate-900/80">
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span className="text-[10px] font-semibold text-blue-200">{key.toUpperCase()}</span>
+                            {hasSaveProf && <span className="text-[8px] text-blue-400 leading-none">●</span>}
+                          </div>
+                          <div className="text-[9px] font-mono text-slate-400">{fmtMod(saveMod)}</div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {/* Death Save */}
+                  <button type="button"
+                    onClick={() => {
+                      const d20 = Math.floor(Math.random() * 20) + 1
+                      const outcome = d20 === 20 ? 'NAT 20 — Regain 1 HP!'
+                        : d20 === 1 ? 'NAT 1 — Two failures!'
+                        : d20 >= 10 ? 'SUCCESS'
+                        : 'FAIL'
+                      onRoll?.({ label: 'Death Save', formula: '1d20', result: d20, outcome })
+                    }}
+                    className="mt-1.5 w-full rounded-md border border-red-900/40 bg-red-950/20 px-2 py-1.5 text-[11px] font-semibold text-red-300 hover:border-red-600/50 hover:bg-red-950/30">
+                    ☠ Death Save
+                  </button>
+                </div>
+
+                {/* Skill Checks */}
+                <div className="rounded-lg border border-yellow-900/30 bg-slate-950/60 p-2">
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-300/60">Skill Checks</p>
+                  <div className="grid grid-cols-2 gap-1">
+                    {SKILLS.map((skill) => {
+                      const score = Number(sheet?.abilities?.[skill.ability] ?? 10)
+                      const base = abilityMod(score)
+                      const pb = proficiencyBonus(sheet?.level)
+                      const profState = (sheet?.skill_proficiencies as any)?.[skill.key] ?? 'none'
+                      const skillMod = profState === 'expertise' ? base + pb * 2 : profState === 'proficient' ? base + pb : base
+                      const skillMark = profState === 'expertise' ? '◉' : profState === 'proficient' ? '●' : ''
+                      return (
+                        <button key={skill.key} type="button"
+                          onClick={() => rollD20WithMode(skillMod, skill.name)}
+                          className="rounded-md border border-yellow-900/30 bg-slate-900 px-1.5 py-1.5 text-left hover:border-yellow-500/50 hover:bg-slate-900/80">
+                          <div className="flex items-center justify-between gap-0.5">
+                            <span className="truncate text-[10px] text-slate-200">{skill.name}</span>
+                            {skillMark && <span className="shrink-0 text-[8px] text-yellow-400 leading-none">{skillMark}</span>}
+                          </div>
+                          <div className="text-[9px] font-mono text-slate-500">{skill.ability.toUpperCase()} {fmtMod(skillMod)}</div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Recent Rolls */}
                 <div className="rounded-lg border border-yellow-900/30 bg-slate-950/60 p-2">
                   <div className="mb-1.5 flex items-center justify-between">
                     <span className="text-[10px] font-semibold uppercase tracking-wide text-yellow-300/60">Recent Rolls</span>
-                    <button type="button" onClick={onOpenDiceLog} disabled={!onOpenDiceLog} className="rounded border border-yellow-800/50 bg-slate-900 px-1.5 py-0.5 text-[9px] text-yellow-300/70 hover:border-yellow-500/60 disabled:opacity-40">
+                    <button type="button" onClick={onOpenDiceLog} disabled={!onOpenDiceLog}
+                      className="rounded border border-yellow-800/50 bg-slate-900 px-1.5 py-0.5 text-[9px] text-yellow-300/70 hover:border-yellow-500/60 disabled:opacity-40">
                       Full log
                     </button>
                   </div>
                   <div className="space-y-1">
-                    {(diceLog || []).slice(0, 6).map((r) => (
+                    {(diceLog || []).slice(0, 4).map((r) => (
                       <div key={r.id} className="flex items-center justify-between rounded-md bg-slate-900/60 px-2 py-1">
                         <div className="min-w-0">
                           <div className="truncate text-[10px] text-slate-200">{r.label}</div>
-                          <div className="truncate text-[9px] text-slate-500">{r.formula}</div>
+                          <div className="truncate text-[9px] text-slate-500 font-mono">{r.formula}</div>
                         </div>
                         <div className="ml-1.5 shrink-0 rounded bg-slate-950 px-1.5 py-0.5 text-[11px] font-bold text-yellow-300">{r.result}</div>
                       </div>
@@ -714,8 +1378,10 @@ export function PlayerSidebar({
                 </div>
               </div>
 
-              {/* RIGHT: Target + attack/spell buttons */}
-              <div className="flex flex-col gap-2 overflow-y-auto">
+              {/* RIGHT: Target + Quick Dice + Custom Roll */}
+              <div className="flex flex-col gap-2 overflow-y-auto pr-0.5">
+
+                {/* Target + attack */}
                 <div className="rounded-lg border border-yellow-900/30 bg-slate-950/60 p-2">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
@@ -770,12 +1436,126 @@ export function PlayerSidebar({
                       )}
                     </>
                   ) : (
-                    <div className="py-4 text-center text-[11px] text-slate-500">Click an enemy token on the map to target it</div>
+                    <div className="py-2 text-center text-[11px] text-slate-500">Click an enemy token on the map to target it</div>
                   )}
                 </div>
-                <p className="text-[10px] text-slate-500">All rolls logged to Dice Log.</p>
-              </div>
 
+                {/* Roll Mode toggle */}
+                <div className="rounded-lg border border-yellow-900/30 bg-slate-950/60 p-2">
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-300/60">Roll Mode</p>
+                  <div className="flex gap-0.5 rounded-lg bg-slate-900/80 p-0.5">
+                    {(['adv', 'normal', 'dis'] as const).map((mode) => {
+                      const labels = { adv: 'Adv', normal: 'Normal', dis: 'Dis' }
+                      const isActive = rollMode === mode
+                      const cls = {
+                        adv: isActive ? 'bg-emerald-700/80 text-emerald-100 shadow-[0_0_6px_rgba(16,185,129,0.5)]' : 'text-slate-400 hover:text-emerald-300',
+                        normal: isActive ? 'bg-slate-600 text-slate-100' : 'text-slate-400 hover:text-slate-200',
+                        dis: isActive ? 'bg-red-800/80 text-red-100 shadow-[0_0_6px_rgba(220,38,38,0.5)]' : 'text-slate-400 hover:text-red-300',
+                      }
+                      return (
+                        <button key={mode} type="button" onClick={() => setRollMode(mode)}
+                          className={`flex-1 rounded-md px-1 py-1 text-[10px] font-semibold transition ${cls[mode]}`}>
+                          {labels[mode]}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Quick Dice */}
+                <div className="rounded-lg border border-yellow-900/30 bg-slate-950/60 p-2">
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-300/60">Quick Dice</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {([4, 6, 8, 10, 12, 20] as DieSides[]).map((s) => {
+                      const dcfg = DIE_CONFIG[s]
+                      return (
+                        <button key={s} type="button"
+                          onClick={() => {
+                            const result = Math.floor(Math.random() * s) + 1
+                            onRoll?.({ label: `d${s}`, formula: `1d${s}`, result, outcome: null })
+                          }}
+                          className="flex flex-col items-center gap-0.5 rounded-md border bg-slate-900/80 p-1 transition hover:scale-105 active:scale-95"
+                          style={{ borderColor: dcfg.highlight + '55' }}
+                        >
+                          <DiceShape sides={s} size={22} theme="icon" />
+                          <span className="text-[8px] font-semibold" style={{ color: dcfg.highlight }}>d{s}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Custom Roll */}
+                <div className="rounded-lg border border-yellow-900/30 bg-slate-950/60 p-2">
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-300/60">Custom Roll</p>
+
+                  {/* Die type picker */}
+                  <div className="mb-2 flex flex-wrap gap-1">
+                    {(DIE_TYPES as unknown as DieSides[]).map((s) => {
+                      const dcfg = DIE_CONFIG[s]
+                      const isSelected = customSides === s
+                      return (
+                        <button key={s} type="button" onClick={() => setCustomSides(s)}
+                          className="flex flex-col items-center rounded-md border p-1 transition"
+                          style={{
+                            borderColor: isSelected ? dcfg.highlight : dcfg.highlight + '33',
+                            background: isSelected ? dcfg.color + '55' : 'transparent',
+                            boxShadow: isSelected ? `0 0 8px ${dcfg.glow}` : 'none',
+                          }}
+                        >
+                          <DiceShape sides={s} size={20} theme="icon" />
+                          <span className="text-[8px]" style={{ color: isSelected ? dcfg.highlight : '#64748b' }}>d{s}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  {/* Count + Modifier */}
+                  <div className="mb-2 flex items-center gap-3">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[9px] text-slate-400">Qty</span>
+                      <button type="button" onClick={() => setCustomCount(c => Math.max(1, c - 1))}
+                        className="h-5 w-5 rounded border border-slate-700 bg-slate-900 text-[11px] text-slate-200 hover:border-yellow-500/50 leading-none">−</button>
+                      <span className="w-5 text-center text-[11px] font-bold text-slate-100">{customCount}</span>
+                      <button type="button" onClick={() => setCustomCount(c => Math.min(10, c + 1))}
+                        className="h-5 w-5 rounded border border-slate-700 bg-slate-900 text-[11px] text-slate-200 hover:border-yellow-500/50 leading-none">+</button>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[9px] text-slate-400">Mod</span>
+                      <button type="button" onClick={() => setCustomMod(m => m - 1)}
+                        className="h-5 w-5 rounded border border-slate-700 bg-slate-900 text-[11px] text-slate-200 hover:border-yellow-500/50 leading-none">−</button>
+                      <span className="w-8 text-center text-[11px] font-mono font-bold text-slate-100">{fmtMod(customMod)}</span>
+                      <button type="button" onClick={() => setCustomMod(m => m + 1)}
+                        className="h-5 w-5 rounded border border-slate-700 bg-slate-900 text-[11px] text-slate-200 hover:border-yellow-500/50 leading-none">+</button>
+                    </div>
+                  </div>
+
+                  {/* Roll button */}
+                  {(() => {
+                    const dcfg = DIE_CONFIG[customSides]
+                    const modStr = customMod !== 0 ? fmtMod(customMod) : ''
+                    const formula = `${customCount}d${customSides}${modStr}`
+                    return (
+                      <button type="button"
+                        onClick={() => {
+                          const r = rollDice(formula)
+                          onRoll?.({ label: formula, formula, result: r.total, outcome: null })
+                        }}
+                        className="w-full rounded-lg border py-1.5 text-[11px] font-bold transition hover:opacity-90 active:scale-95"
+                        style={{
+                          borderColor: dcfg.highlight + '88',
+                          background: dcfg.color + '40',
+                          color: dcfg.highlight,
+                          boxShadow: `0 0 10px ${dcfg.glow.replace('0.8', '0.3')}`,
+                        }}
+                      >
+                        Roll {formula}
+                      </button>
+                    )
+                  })()}
+                </div>
+
+              </div>
             </div>
           )}
         </>

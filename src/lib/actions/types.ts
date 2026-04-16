@@ -1,5 +1,7 @@
 export type RestKind = 'short' | 'long'
 
+export type ActionType = 'action' | 'bonus_action' | 'reaction' | 'free' | 'special'
+
 export type ActionGate =
   | { kind: 'always' }
   | { kind: 'class'; classKey: string }
@@ -24,6 +26,7 @@ export type SheetAction = {
   id: string
   name: string
   category: 'Core' | 'Class' | 'Subclass' | 'DND721'
+  actionType: ActionType
   description?: string
 
   gates: ActionGate

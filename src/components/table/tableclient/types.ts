@@ -10,6 +10,9 @@ export type SessionWithCampaign = {
   gm_wallet: string | null
   map_image_url: string | null
   current_map_id: string | null
+  session_type: 'set_level' | 'caya' | null
+  required_level: number | null
+  xp_award: number | null
   campaigns?:
     | {
         livekit_room_name: string | null

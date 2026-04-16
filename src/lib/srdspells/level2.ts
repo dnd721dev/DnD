@@ -569,6 +569,8 @@ export const LEVEL2_SPELLS: SrdSpell[] = [
     attackRoll: true,
     damage: '2d6',
     notes: 'Three ranged spell attack rays, each dealing 2d6 fire damage on hit.',
+    upcastDamage: '2d6',
+    upcastNotes: 'Adds one additional ray per slot level above 2nd.',
     classes: ['sorcerer', 'wizard'],
   },
   {
@@ -593,6 +595,7 @@ export const LEVEL2_SPELLS: SrdSpell[] = [
     saveAbility: 'con',
     damage: '3d8',
     notes: 'Con save for thunder damage in 10-ft radius. Inorganic material automatically fails.',
+    upcastDamage: '1d8',
     classes: ['bard', 'sorcerer', 'warlock', 'wizard'],
   },
   {

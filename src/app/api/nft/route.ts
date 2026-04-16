@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server'
 
 const OPENSEA_API_KEY = process.env.OPENSEA_API_KEY
-const CHAIN = 'base'
-
-// Your DND721 contract on Base (from your logs)
-const DND721_CONTRACT = '0xcc734d328ae06a7014eeebe5f214d421aa633eed'
+const CHAIN = process.env.DND721_CHAIN ?? 'base'
+const DND721_CONTRACT = process.env.DND721_CONTRACT_ADDRESS ?? '0xcc734d328ae06a7014eeebe5f214d421aa633eed'
 
 export async function GET(req: Request) {
   try {

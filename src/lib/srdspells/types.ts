@@ -25,5 +25,9 @@ export type SrdSpell = {
   saveAbility?: SpellSaveAbility
   damage?: string // formula e.g. "2d8+3"
   notes?: string
-  classes?: SpellClass[] // NEW: which class spell lists this belongs to
+  classes?: SpellClass[] // which class spell lists this belongs to
+  /** Extra damage added per spell slot level above the spell's base level (e.g. "1d6") */
+  upcastDamage?: string
+  /** If true, the base damage already scales — show upcast table instead of +upcastDamage */
+  upcastNotes?: string
 }

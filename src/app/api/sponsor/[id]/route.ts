@@ -10,6 +10,7 @@ const PatchSponsorSchema = z.object({
     errorMap: () => ({ message: 'status must be approved or rejected' }),
   }),
   gm_notes: z.string().max(1000).optional(),
+  gmWallet: z.string().min(1),
 })
 
 /** PATCH /api/sponsor/[id]  — GM approves or rejects a sponsored monster */
@@ -31,9 +32,30 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
   }
 
-  const { status, gm_notes } = parsed.data
+  const { status, gm_notes, gmWallet } = parsed.data
+  const wallet = gmWallet.toLowerCase()
 
   const db = supabaseAdmin()
+
+  // Fetch the sponsor record to get session_id, then verify GM
+  const { data: sponsor } = await db
+    .from('sponsored_monsters')
+    .select('session_id')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (!sponsor) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  const { data: session } = await db
+    .from('sessions')
+    .select('gm_wallet')
+    .eq('id', sponsor.session_id)
+    .maybeSingle()
+
+  if (!session || session.gm_wallet?.toLowerCase() !== wallet) {
+    return NextResponse.json({ error: 'Only the session GM can approve or reject sponsors' }, { status: 403 })
+  }
+
   const { data, error } = await db
     .from('sponsored_monsters')
     .update({ status, gm_notes: gm_notes ?? null })

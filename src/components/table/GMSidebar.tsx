@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import MonsterLibrary from '@/components/table/MonsterLibrary';
 import InitiativeTracker from '@/components/table/InitiativeTracker';
@@ -17,6 +17,9 @@ type GMSidebarProps = {
   activeMapId?: string | null;
   onRoll: (entry: any) => void;
   spawnMonsterToken: (monster: { id: string; name: string }) => void | Promise<void>;
+  sessionType?: 'set_level' | 'caya' | null;
+  sessionStatus?: string | null;
+  xpAwardedAlready?: number | null;
 };
 
 type InitiativeEntry = {
@@ -39,9 +42,44 @@ export default function GMSidebar({
   activeMapId,
   onRoll,
   spawnMonsterToken,
+  sessionType,
+  sessionStatus,
+  xpAwardedAlready,
 }: GMSidebarProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('combat');
   const [collapsed, setCollapsed] = useState(false);
+  const [combatRound, setCombatRound] = useState(1);
+
+  // Resizable panel
+  const [panelHeight, setPanelHeight] = useState(192);
+  const dragStartY = useRef(0);
+  const dragStartHeight = useRef(0);
+
+  const handleDragMove = useCallback((e: MouseEvent | TouchEvent) => {
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const delta = dragStartY.current - clientY;
+    const next = Math.max(80, Math.min(window.innerHeight * 0.75, dragStartHeight.current + delta));
+    setPanelHeight(next);
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    document.removeEventListener('mousemove', handleDragMove);
+    document.removeEventListener('mouseup', handleDragEnd);
+    document.removeEventListener('touchmove', handleDragMove);
+    document.removeEventListener('touchend', handleDragEnd);
+  }, [handleDragMove]);
+
+  const handleDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    dragStartY.current = clientY;
+    dragStartHeight.current = panelHeight;
+    document.addEventListener('mousemove', handleDragMove);
+    document.addEventListener('mouseup', handleDragEnd);
+    document.addEventListener('touchmove', handleDragMove);
+    document.addEventListener('touchend', handleDragEnd);
+  }, [panelHeight, handleDragMove, handleDragEnd]);
+
+  useEffect(() => () => handleDragEnd(), [handleDragEnd]);
 
   // Footer: initiative strip
   const [entries, setEntries] = useState<InitiativeEntry[]>([]);
@@ -164,6 +202,14 @@ export default function GMSidebar({
 
   return (
     <div className="pointer-events-auto flex flex-col rounded-t-xl border border-b-0 border-yellow-700/40 bg-slate-950/90 backdrop-blur-md shadow-[0_-4px_24px_rgba(0,0,0,0.7)]">
+      {/* Drag handle */}
+      <div
+        className="flex h-4 shrink-0 cursor-ns-resize items-center justify-center"
+        onMouseDown={handleDragStart}
+        onTouchStart={handleDragStart}
+      >
+        <div className="h-1.5 w-12 rounded-full bg-slate-600 hover:bg-yellow-500/60 transition-colors" />
+      </div>
       {/* Header + Tabs */}
       {/* Single-row header: badge + tabs + DND721 */}
       <div className="flex shrink-0 items-center gap-2 border-b border-yellow-800/50 bg-gradient-to-r from-slate-950 via-slate-900/95 to-slate-950 px-3 py-2">
@@ -202,18 +248,18 @@ export default function GMSidebar({
         </div>
       </div>
 
-      {/* Body — 2-column grid per tab */}
-      {!collapsed && <div className="h-48 overflow-hidden p-2 text-xs">
+      {/* Body — 2-column grid per tab; always rendered to preserve InitiativeTracker state */}
+      <div className={`overflow-hidden p-2 text-xs${collapsed ? ' hidden' : ''}`} style={{ height: panelHeight }}>
 
         {/* ⚔ Combat: InitiativeTracker (left) + MonsterLibrary (right) */}
         {activeTab === 'combat' && (
           <div className="grid h-full grid-cols-2 gap-2">
             <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
-              <InitiativeTracker encounterId={encounterId ?? null} />
+              <InitiativeTracker encounterId={encounterId ?? null} onRoundChange={setCombatRound} />
             </div>
             <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
               {encounterId ? (
-                <MonsterLibrary ownerWallet={address ?? null} onSpawnMonster={spawnMonsterToken} />
+                <MonsterLibrary onSpawnMonster={spawnMonsterToken} />
               ) : (
                 <p className="text-[11px] text-slate-400">Start an encounter to spawn monsters from the library.</p>
               )}
@@ -226,7 +272,17 @@ export default function GMSidebar({
           <div className="grid h-full grid-cols-2 gap-2">
             <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
               {encounterId ? (
-                <DMPanel encounterId={encounterId} onRoll={onRoll} />
+                <DMPanel
+                  encounterId={encounterId}
+                  round={combatRound}
+                  onRoll={onRoll}
+                  onGrantInspiration={() => window.dispatchEvent(new CustomEvent('dnd721-grant-inspiration'))}
+                  sessionId={sessionId}
+                  sessionType={sessionType}
+                  sessionStatus={sessionStatus}
+                  xpAwardedAlready={xpAwardedAlready}
+                  gmWallet={address}
+                />
               ) : (
                 <p className="text-[11px] text-slate-400">Create or join an encounter to use GM tools.</p>
               )}
@@ -287,10 +343,10 @@ export default function GMSidebar({
           </div>
         )}
 
-      </div>}
+      </div>
 
-      {/* Footer: initiative strip */}
-      {!collapsed && <div className="border-t border-yellow-800/60 bg-slate-950/95 px-2.5 py-1.5">
+      {/* Footer: initiative strip; always rendered to preserve state */}
+      <div className={`border-t border-yellow-800/60 bg-slate-950/95 px-2.5 py-1.5${collapsed ? ' hidden' : ''}`}>
         <div className="mb-1 flex items-center justify-between text-[10px] text-slate-400">
           <span className="font-semibold uppercase tracking-wide text-yellow-300/90">
             Turn Order
@@ -348,7 +404,7 @@ export default function GMSidebar({
             </span>
           )}
         </div>
-      </div>}
+      </div>
     </div>
   );
 }

@@ -42,6 +42,32 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ marker: data }, { status: 201 })
 }
 
+const UpdateMarkerSchema = z.object({
+  id:         z.string().uuid(),
+  label:      z.string().min(1).max(100).optional(),
+  offset_sec: z.number().int().min(0).optional(),
+})
+
+/** PATCH /api/recording-markers — update label or offset of a marker */
+export async function PATCH(req: NextRequest) {
+  const parsed = UpdateMarkerSchema.safeParse(await req.json().catch(() => ({})))
+  if (!parsed.success) return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
+
+  const { id, ...updates } = parsed.data
+  if (!Object.keys(updates).length) return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
+
+  const db = supabaseAdmin()
+  const { data, error } = await db
+    .from('recording_markers')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .maybeSingle()
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ marker: data })
+}
+
 /** DELETE /api/recording-markers?id=<uuid> */
 export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get('id')

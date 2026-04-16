@@ -7,6 +7,7 @@ import ProfileNavButton from '@/components/profile/ProfileNavButton'
 
 const NAV_LINKS = [
   { href: '/campaigns', label: 'Games' },
+  { href: '/homebrew',  label: 'Homebrew' },
   { href: '/shop',      label: 'Shop'  },
   { href: '/sponsor',   label: 'Sponsor' },
 ]

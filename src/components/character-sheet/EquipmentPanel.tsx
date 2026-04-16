@@ -26,7 +26,7 @@ function parseInventory(raw: any): InventoryItem[] {
     const name = String(it?.name ?? key ?? '').trim()
     const qty = Number(it?.qty ?? 0)
     if (!key) continue
-    out.push({ key, name: name || key, qty: Number.isFinite(qty) ? qty : 0, category: it?.category } as any)
+    out.push({ key, name: name || key, qty: Number.isFinite(qty) ? qty : 0, category: it?.category, attuned: Boolean(it?.attuned) } as any)
   }
   return out
 }
@@ -41,8 +41,17 @@ function inventoryToOwnedKeys(inv: InventoryItem[]): Set<string> {
   return s
 }
 
-type LibItemKind = 'weapon' | 'armor' | 'gear' | 'custom'
+type LibItemKind = 'weapon' | 'armor' | 'gear' | 'custom' | 'homebrew'
 type LibOption = { key: string; name: string; kind: LibItemKind }
+
+// Homebrew item types (minimal shape from DB)
+type HbWeapon = { id: string; name: string; damage_dice: string | null; damage_type: string | null }
+type HbArmor  = { id: string; name: string; base_ac: number | null; category: string | null }
+type HbItem   = { id: string; name: string; category: string | null }
+
+function hbwKey(id: string) { return `hbw_${id}` }
+function hbaKey(id: string) { return `hba_${id}` }
+function hbiKey(id: string) { return `hbi_${id}` }
 
 function buildLibOptions(): LibOption[] {
   const out: LibOption[] = []
@@ -102,26 +111,52 @@ export function EquipmentPanel({
 
   const ownedKeys = useMemo(() => inventoryToOwnedKeys(inventoryDraft), [inventoryDraft])
 
+  // Homebrew content loaded from DB
+  const [hbWeapons, setHbWeapons] = useState<HbWeapon[]>([])
+  const [hbArmors, setHbArmors] = useState<HbArmor[]>([])
+  const [hbItems, setHbItems] = useState<HbItem[]>([])
+
+  useEffect(() => {
+    supabase.from('homebrew_weapons').select('id, name, damage_dice, damage_type').order('name')
+      .then(({ data }) => { if (data) setHbWeapons(data as HbWeapon[]) })
+    supabase.from('homebrew_armor').select('id, name, base_ac, category').order('name')
+      .then(({ data }) => { if (data) setHbArmors(data as HbArmor[]) })
+    supabase.from('homebrew_items').select('id, name, category').order('name')
+      .then(({ data }) => { if (data) setHbItems(data as HbItem[]) })
+  }, [])
+
   const inventoryWeaponOptions = useMemo(() => {
     const list: { key: string; label: string }[] = []
     for (const k of ownedKeys) {
       const w = (WEAPONS as any)[k]
-      if (!w?.name) continue
-      list.push({ key: k, label: w.name })
+      if (w?.name) { list.push({ key: k, label: w.name }); continue }
+      // Check homebrew weapons
+      if (k.startsWith('hbw_')) {
+        const id = k.slice(4)
+        const hw = hbWeapons.find((w) => w.id === id)
+        if (hw) list.push({ key: k, label: `${hw.name} ✦` })
+      }
     }
     return list.sort((a, b) => a.label.localeCompare(b.label))
-  }, [ownedKeys])
+  }, [ownedKeys, hbWeapons])
 
   const inventoryArmorOptions = useMemo(() => {
     const list: { key: string; label: string }[] = []
     for (const k of ownedKeys) {
       const a = (ARMORS as any)[k]
-      if (!a?.name) continue
-      if (String(a.category).toLowerCase() === 'shield') continue
-      list.push({ key: k, label: a.name })
+      if (a?.name) {
+        if (String(a.category).toLowerCase() === 'shield') continue
+        list.push({ key: k, label: a.name }); continue
+      }
+      // Check homebrew armor
+      if (k.startsWith('hba_')) {
+        const id = k.slice(4)
+        const ha = hbArmors.find((a) => a.id === id)
+        if (ha) list.push({ key: k, label: `${ha.name} ✦` })
+      }
     }
     return list.sort((a, b) => a.label.localeCompare(b.label))
-  }, [ownedKeys])
+  }, [ownedKeys, hbArmors])
 
   const shieldOwned = useMemo(() => ownedKeys.has('shield'), [ownedKeys])
 
@@ -158,10 +193,20 @@ export function EquipmentPanel({
 
   // Add item state
   const allLibOptions = useMemo(() => buildLibOptions(), [])
+  const homebrewLibOptions = useMemo<LibOption[]>(() => {
+    const out: LibOption[] = []
+    for (const w of hbWeapons) out.push({ key: hbwKey(w.id), name: `${w.name} (weapon)`, kind: 'homebrew' })
+    for (const a of hbArmors) out.push({ key: hbaKey(a.id), name: `${a.name} (armor)`, kind: 'homebrew' })
+    for (const i of hbItems)  out.push({ key: hbiKey(i.id), name: `${i.name} (${i.category ?? 'item'})`, kind: 'homebrew' })
+    return out.sort((a, b) => a.name.localeCompare(b.name))
+  }, [hbWeapons, hbArmors, hbItems])
+
   const [addKind, setAddKind] = useState<LibItemKind>('weapon')
   const addOptions = useMemo(
-    () => allLibOptions.filter((x) => x.kind === addKind && x.kind !== 'custom'),
-    [allLibOptions, addKind],
+    () => addKind === 'homebrew'
+      ? homebrewLibOptions
+      : allLibOptions.filter((x) => x.kind === addKind && x.kind !== 'custom'),
+    [allLibOptions, homebrewLibOptions, addKind],
   )
   const [addKey, setAddKey] = useState<string>(() => addOptions[0]?.key ?? 'club')
   const [customName, setCustomName] = useState<string>('')
@@ -188,6 +233,24 @@ export function EquipmentPanel({
         else next[idx] = { ...cur, key: k, name: cur.name || nameOverride || getNiceNameForKey(k), qty }
       }
       next.sort((a: any, b: any) => String(a.name ?? a.key).localeCompare(String(b.name ?? b.key)))
+      return next
+    })
+  }
+
+  function toggleAttuned(key: string) {
+    const k = norm(key)
+    setInventoryDraft((prev) => {
+      const next = [...prev]
+      const idx = next.findIndex((x: any) => norm(x.key ?? '') === k)
+      if (idx === -1) return prev
+      const cur: any = next[idx]
+      const wasAttuned = Boolean(cur.attuned)
+      // Enforce max 3 attunement slots
+      if (!wasAttuned) {
+        const attunedCount = next.filter((x: any) => x.attuned).length
+        if (attunedCount >= 3) return prev
+      }
+      next[idx] = { ...cur, attuned: !wasAttuned }
       return next
     })
   }
@@ -236,13 +299,21 @@ export function EquipmentPanel({
 
     // Derive the new AC so PlayerSidebar's cached armor_class field stays in sync
     const abilities: Abilities = (c as any).abilities ?? { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }
-    const simulatedC = {
-      ...c,
-      armor_key: safeArmor || null,
-      equipment_items: buildEquipmentItems(safeShieldEquipped),
-      inventory_items: next.inventory,
+    let ac: number
+    if (safeArmor.startsWith('hba_')) {
+      // Homebrew armor: use base_ac + dex mod + shield
+      const hba = hbArmors.find((a) => hbaKey(a.id) === safeArmor)
+      const dexMod = Math.floor(((abilities.dex ?? 10) - 10) / 2)
+      ac = (hba?.base_ac ?? 10) + dexMod + (safeShieldEquipped ? 2 : 0)
+    } else {
+      const simulatedC = {
+        ...c,
+        armor_key: safeArmor || null,
+        equipment_items: buildEquipmentItems(safeShieldEquipped),
+        inventory_items: next.inventory,
+      }
+      ac = computeArmorClass(simulatedC as any, abilities).ac
     }
-    const { ac } = computeArmorClass(simulatedC as any, abilities)
 
     const patch: Partial<CharacterSheetData> = {
       main_weapon_key: safeWeapon || null,
@@ -362,6 +433,7 @@ export function EquipmentPanel({
                 <option value="weapon">Weapon</option>
                 <option value="armor">Armor</option>
                 <option value="gear">Gear</option>
+                <option value="homebrew">Homebrew ✦</option>
                 <option value="custom">Custom</option>
               </select>
 
@@ -387,7 +459,8 @@ export function EquipmentPanel({
                   if (addKind === 'custom') {
                     addCustomItem()
                   } else if (addKey) {
-                    upsertInventoryItem(addKey, 1)
+                    const nameOverride = addOptions.find((o) => o.key === addKey)?.name
+                    upsertInventoryItem(addKey, 1, nameOverride)
                   }
                 }}
                 className="rounded-md bg-indigo-600/30 px-3 py-2 text-[12px] font-semibold text-indigo-100 hover:bg-indigo-600/50 transition"
@@ -413,6 +486,16 @@ export function EquipmentPanel({
             )}
           </div>
 
+          {/* Attunement counter */}
+          {inventoryDraft.some((x: any) => x.attuned) && (
+            <div className="mt-2 text-[10px] text-slate-400">
+              Attuned: {inventoryDraft.filter((x: any) => x.attuned).length} / 3
+              {inventoryDraft.filter((x: any) => x.attuned).length >= 3 && (
+                <span className="ml-1 text-amber-400">(max)</span>
+              )}
+            </div>
+          )}
+
           {/* Inventory list */}
           <div className="mt-3 space-y-2">
             {inventoryDraft.length === 0 ? (
@@ -423,6 +506,9 @@ export function EquipmentPanel({
                   norm(it.key) === norm(weaponKey) ||
                   norm(it.key) === norm(armorKey) ||
                   (norm(it.key) === 'shield' && shieldEquipped)
+                const isAttuned = Boolean(it.attuned)
+                const attunedCount = inventoryDraft.filter((x: any) => x.attuned).length
+                const canAttune = !isAttuned && attunedCount < 3
                 return (
                   <div
                     key={String(it.key)}
@@ -438,9 +524,29 @@ export function EquipmentPanel({
                         {isEquipped && (
                           <span className="ml-1.5 text-[10px] text-indigo-400">equipped</span>
                         )}
+                        {isAttuned && (
+                          <span className="ml-1.5 text-[10px] text-amber-300">attuned</span>
+                        )}
                       </div>
                       <div className="text-[10px] text-slate-500">{String(it.key)}</div>
                     </div>
+
+                    {/* Attunement toggle */}
+                    <button
+                      type="button"
+                      onClick={() => toggleAttuned(it.key)}
+                      disabled={!isAttuned && !canAttune}
+                      title={isAttuned ? 'Remove attunement' : canAttune ? 'Attune item' : 'Max 3 attuned items'}
+                      className={`text-lg leading-none transition ${
+                        isAttuned
+                          ? 'text-amber-400 hover:text-amber-300'
+                          : canAttune
+                            ? 'text-slate-600 hover:text-amber-400'
+                            : 'cursor-not-allowed text-slate-700'
+                      }`}
+                    >
+                      ✦
+                    </button>
 
                     <button
                       type="button"

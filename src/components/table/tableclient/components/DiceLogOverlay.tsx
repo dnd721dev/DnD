@@ -1,5 +1,7 @@
 'use client'
 
+import { useState } from 'react'
+import { CoinFlip } from '@/components/dice/CoinFlip'
 import type { DiceEntry } from '../types'
 
 export function DiceLogOverlay(props: {
@@ -7,10 +9,62 @@ export function DiceLogOverlay(props: {
   diceLog: DiceEntry[]
   onTestRoll: () => void
   onClose: () => void
+  sessionId?: string
+  rollerName?: string
+  rollerWallet?: string
+  onRollEntry?: (entry: DiceEntry) => void
 }) {
-  const { show, diceLog, onTestRoll, onClose } = props
+  const { show, diceLog, onTestRoll, onClose, sessionId, rollerName, rollerWallet, onRollEntry } = props
+  const [coinResult, setCoinResult] = useState<'heads' | 'tails' | null>(null)
+  const [coinFlipping, setCoinFlipping] = useState(false)
 
   if (!show) return null
+
+  async function handleCoinFlip() {
+    if (coinFlipping || !sessionId) return
+    setCoinFlipping(true)
+    setCoinResult(null)
+
+    try {
+      const res = await fetch('/api/roll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notation: '1d2',
+          sessionId,
+          rollType: 'coin_flip',
+          label: 'Coin Flip',
+          rollerName: rollerName ?? 'Adventurer',
+          rollerWallet: rollerWallet,
+        }),
+      })
+
+      const json = await res.json()
+      if (!res.ok) { console.error('coin flip failed', json); return }
+
+      const result: 'heads' | 'tails' = json.outcome?.toLowerCase() === 'heads' ? 'heads' : 'tails'
+      setCoinResult(result)
+
+      // Push to dice log
+      if (json.rollId && onRollEntry) {
+        const entry: DiceEntry = {
+          id: json.rollId,
+          roller: rollerName ?? 'Adventurer',
+          label: 'Coin Flip',
+          formula: '1d2',
+          result: json.total,
+          timestamp: new Date().toLocaleTimeString(),
+          outcome: json.outcome ?? null,
+        }
+        onRollEntry(entry)
+      }
+    } catch (e) {
+      console.error('coin flip error', e)
+    } finally {
+      // Allow another flip after animation completes (4.3 s)
+      setTimeout(() => setCoinFlipping(false), 4400)
+    }
+  }
 
   return (
     <div className="pointer-events-none absolute inset-y-0 right-0 z-20 flex items-stretch justify-end p-4">
@@ -18,9 +72,17 @@ export function DiceLogOverlay(props: {
         <div className="flex items-center justify-between border-b border-slate-800 px-3 py-2">
           <div className="flex items-center gap-2">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-100">Dice Log</h2>
-            <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">Synced (Session)</span>
+            <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">
+              Synced (Session)
+            </span>
           </div>
           <div className="flex items-center gap-2">
+            <CoinFlip
+              onFlipRequest={handleCoinFlip}
+              serverResult={coinResult}
+              rollerName={rollerName}
+              disabled={coinFlipping || !sessionId}
+            />
             <button
               type="button"
               onClick={onTestRoll}
@@ -45,23 +107,37 @@ export function DiceLogOverlay(props: {
             </p>
           )}
 
-          {diceLog.map(entry => (
-            <div
-              key={entry.id}
-              className="flex items-center justify-between border-b border-slate-800/60 py-1 last:border-b-0"
-            >
-              <div className="flex flex-col">
-                <span className="font-medium text-slate-100">{entry.roller}</span>
-                <span className="text-[10px] text-slate-400">
-                  {entry.label} · {entry.formula}
-                </span>
+          {diceLog.map((entry) => {
+            const isCoin = entry.label === 'Coin Flip'
+            const isHeads = isCoin && (entry.result === 1 || entry.outcome?.toLowerCase() === 'heads')
+
+            return (
+              <div
+                key={entry.id}
+                className="flex items-center justify-between border-b border-slate-800/60 py-1 last:border-b-0"
+              >
+                <div className="flex flex-col">
+                  <span className="font-medium text-slate-100">{entry.roller}</span>
+                  <span className="text-[10px] text-slate-400">
+                    {entry.label} · {entry.formula}
+                  </span>
+                </div>
+                <div className="text-right">
+                  {isCoin ? (
+                    <span className={`text-sm font-bold ${isHeads ? 'text-amber-300' : 'text-violet-300'}`}>
+                      {isHeads ? '⚔ Heads' : '🛡 Tails'}
+                    </span>
+                  ) : (
+                    <span className="text-sm font-bold text-sky-300">{entry.result}</span>
+                  )}
+                  {entry.outcome && !isCoin && (
+                    <div className="text-[10px] font-semibold text-emerald-400">{entry.outcome}</div>
+                  )}
+                  <div className="text-[10px] text-slate-500">{entry.timestamp}</div>
+                </div>
               </div>
-              <div className="text-right">
-                <span className="text-sm font-bold text-sky-300">{entry.result}</span>
-                <div className="text-[10px] text-slate-500">{entry.timestamp}</div>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
     </div>
