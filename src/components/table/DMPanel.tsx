@@ -5,6 +5,7 @@ import { roll as rollDice } from '@/lib/dice'
 import { DIE_CONFIG, DIE_TYPES, type DieSides } from '@/lib/dnd5e'
 import { DiceShape } from '@/components/dice/DiceShape'
 import { calculateEncounterDifficulty, CR_OPTIONS, type CRKey, type Difficulty } from '@/lib/encounter'
+import { PlaceCharactersPanel } from '@/components/table/PlaceCharactersPanel'
 
 type ExternalRoll = {
   label: string
@@ -144,6 +145,14 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
           </div>
         )}
       </header>
+
+      {/* Place Characters */}
+      {sessionId && (
+        <section className="rounded-lg border border-sky-900/40 bg-slate-900/60 p-2">
+          <p className="mb-2 text-xs font-semibold text-slate-100">Place Characters</p>
+          <PlaceCharactersPanel sessionId={sessionId} encounterId={encounterId} />
+        </section>
+      )}
 
       {/* Grant Inspiration */}
       {onGrantInspiration && (

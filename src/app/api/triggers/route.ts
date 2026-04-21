@@ -4,15 +4,19 @@ import { z } from 'zod'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 
 const CreateSchema = z.object({
-  sessionId: z.string().uuid(),
-  gmWallet: z.string().min(1),
-  mapId: z.string().uuid().nullable().optional(),
-  tileX: z.number().int(),
-  tileY: z.number().int(),
-  name: z.string().min(1).max(80).default('Trap'),
-  saveType: z.enum(['DEX', 'STR', 'CON', 'INT', 'WIS', 'CHA']).default('DEX'),
-  dc: z.number().int().min(1).max(30).default(15),
-  description: z.string().max(500).optional(),
+  sessionId:        z.string().uuid(),
+  gmWallet:         z.string().min(1),
+  mapId:            z.string().uuid().nullable().optional(),
+  tileX:            z.number().int(),
+  tileY:            z.number().int(),
+  name:             z.string().min(1).max(80).default('Trap'),
+  saveType:         z.enum(['DEX', 'STR', 'CON', 'INT', 'WIS', 'CHA']).default('DEX'),
+  dc:               z.number().int().min(1).max(30).default(15),
+  description:      z.string().max(500).optional(),
+  triggerType:      z.string().max(30).optional(),
+  damageDice:       z.string().max(20).optional(),
+  damageType:       z.string().max(30).optional(),
+  conditionApplied: z.string().max(30).optional(),
 })
 
 const PatchSchema = z.object({
@@ -79,7 +83,8 @@ export async function POST(req: NextRequest) {
   const parsed = CreateSchema.safeParse(await req.json().catch(() => ({})))
   if (!parsed.success) return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
 
-  const { sessionId, gmWallet, mapId, tileX, tileY, name, saveType, dc, description } = parsed.data
+  const { sessionId, gmWallet, mapId, tileX, tileY, name, saveType, dc, description,
+          triggerType, damageDice, damageType, conditionApplied } = parsed.data
   const db = supabaseAdmin()
 
   if (!(await verifyGm(db, sessionId, gmWallet))) {
@@ -89,14 +94,18 @@ export async function POST(req: NextRequest) {
   const { data, error } = await db
     .from('map_triggers')
     .insert({
-      session_id: sessionId,
-      map_id: mapId ?? null,
-      tile_x: tileX,
-      tile_y: tileY,
+      session_id:        sessionId,
+      map_id:            mapId ?? null,
+      tile_x:            tileX,
+      tile_y:            tileY,
       name,
-      save_type: saveType,
+      save_type:         saveType,
       dc,
-      description: description ?? null,
+      description:       description        ?? null,
+      trigger_type:      triggerType        ?? 'custom',
+      damage_dice:       damageDice         ?? null,
+      damage_type:       damageType         ?? null,
+      condition_applied: conditionApplied   ?? null,
     })
     .select()
     .maybeSingle()

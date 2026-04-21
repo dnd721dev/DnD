@@ -19,6 +19,15 @@ type Token = {
   monster_id?: string | null;
 };
 
+type TriggerIcon = {
+  id: string;
+  tile_x: number;
+  tile_y: number;
+  name: string;
+  trigger_type?: string | null;
+  is_active: boolean;
+};
+
 type MapBoardProps = {
   encounterId: string;
   mapImageUrl?: string;
@@ -77,7 +86,15 @@ const MapBoard: React.FC<MapBoardProps> = ({
   const [measureFrozen, setMeasureFrozen] = useState(false);
 
   // Token placement mode — triggered by GM clicking "📍 Place" in InitiativeTracker
-  type PlacementPayload = { label: string; hp: number | null; ac: number | null; ownerWallet: string | null; initiativeEntryId: string };
+  type PlacementPayload = {
+    label: string;
+    hp: number | null;
+    ac: number | null;
+    ownerWallet: string | null;
+    initiativeEntryId: string;
+    characterId?: string | null;
+    tokenImageUrl?: string | null;
+  };
   const [placementPending, setPlacementPending] = useState<PlacementPayload | null>(null);
   const [ghostPos, setGhostPos] = useState<Point | null>(null);
 
@@ -89,6 +106,11 @@ const MapBoard: React.FC<MapBoardProps> = ({
   const [fogToolActive, setFogToolActive] = useState(false);
   const [fogRevealSet, setFogRevealSet] = useState<Set<string>>(new Set());
   const isFogPaintingRef = useRef(false);
+
+  // Trigger placement mode
+  const [triggerMode, setTriggerMode] = useState(false);
+  const [hoveredTile, setHoveredTile] = useState<{ x: number; y: number } | null>(null);
+  const [mapTriggers, setMapTriggers] = useState<TriggerIcon[]>([]);
 
   const activeHudToken =
     hudTokenId ? tokens.find((t) => t.id === hudTokenId) ?? null : null;
@@ -162,6 +184,33 @@ const MapBoard: React.FC<MapBoardProps> = ({
     return () => window.removeEventListener('dnd721-place-token', handler);
   }, []);
 
+  /** Enter trigger placement mode */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => { setTriggerMode(true); setHoveredTile(null); };
+    window.addEventListener('dnd721-place-trigger', handler);
+    return () => window.removeEventListener('dnd721-place-trigger', handler);
+  }, []);
+
+  /** Cancel trigger placement mode from TriggersPanel */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => { setTriggerMode(false); setHoveredTile(null); };
+    window.addEventListener('dnd721-trigger-placement-cancel', handler);
+    return () => window.removeEventListener('dnd721-trigger-placement-cancel', handler);
+  }, []);
+
+  /** Receive updated trigger list from TriggersPanel */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (event: Event) => {
+      const custom = event as CustomEvent<TriggerIcon[]>;
+      setMapTriggers(custom.detail ?? []);
+    };
+    window.addEventListener('dnd721-triggers-updated', handler);
+    return () => window.removeEventListener('dnd721-triggers-updated', handler);
+  }, []);
+
   /** Sync condition rings from InitiativeTracker */
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -178,6 +227,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (fogToolActive) { setFogToolActive(false); isFogPaintingRef.current = false; }
+        if (triggerMode) { setTriggerMode(false); setHoveredTile(null); }
         if (placementPending) { setPlacementPending(null); setGhostPos(null); }
         if (rulerActive) { setRulerActive(false); setMeasureStart(null); setMeasureEnd(null); setMeasureFrozen(false); }
       }
@@ -420,7 +470,24 @@ const MapBoard: React.FC<MapBoardProps> = ({
         }
       }
     });
-  }, [tokens, canvasSize, gridSize, highlightTokenId, activeInitiativeName, tokenConditions, tokenResistances, tokenImmunities]);
+    // Draw trigger icons in the top-left corner of each trigger tile (GM only)
+    mapTriggers.forEach((trigger) => {
+      const iconX = trigger.tile_x * gridSize + gridSize * 0.18;
+      const iconY = trigger.tile_y * gridSize + gridSize * 0.18;
+      const iconR = Math.max(5, gridSize * 0.14);
+      ctx.save();
+      ctx.beginPath();
+      ctx.fillStyle = trigger.is_active ? 'rgba(239,68,68,0.9)' : 'rgba(100,116,139,0.6)';
+      ctx.arc(iconX, iconY, iconR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = `bold ${Math.max(8, Math.floor(gridSize * 0.15))}px system-ui,sans-serif`;
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('!', iconX, iconY);
+      ctx.restore();
+    });
+  }, [tokens, canvasSize, gridSize, highlightTokenId, activeInitiativeName, tokenConditions, tokenResistances, tokenImmunities, mapTriggers]);
 
   /** Draw fog overlay (GM view: dark = unrevealed, slight green tint = revealed) */
   useEffect(() => {
@@ -535,6 +602,22 @@ const MapBoard: React.FC<MapBoardProps> = ({
   const onDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
 
+    // Trigger placement mode — click a tile to place or edit a trigger
+    if (triggerMode) {
+      const world = getWorldPoint(e);
+      const tileX = Math.floor(world.x / gridSize);
+      const tileY = Math.floor(world.y / gridSize);
+      const existing = mapTriggers.find((t) => t.tile_x === tileX && t.tile_y === tileY);
+      if (existing) {
+        window.dispatchEvent(new CustomEvent('dnd721-trigger-edit', { detail: { trigger: existing } }));
+      } else {
+        window.dispatchEvent(new CustomEvent('dnd721-trigger-tile-selected', { detail: { tileX, tileY } }));
+      }
+      setTriggerMode(false);
+      setHoveredTile(null);
+      return;
+    }
+
     // Fog brush mode
     if (fogToolActive) {
       isFogPaintingRef.current = true;
@@ -563,16 +646,18 @@ const MapBoard: React.FC<MapBoardProps> = ({
       setGhostPos(null);
 
       supabase.from('tokens').insert({
-        encounter_id: encounterId,
-        type: 'pc',
-        label: payload.label,
+        encounter_id:    encounterId,
+        type:            'pc',
+        label:           payload.label,
         x,
         y,
-        owner_wallet: payload.ownerWallet,
-        hp: payload.hp,
-        current_hp: payload.hp,
-        ac: payload.ac,
-        map_id: mapId ?? null,
+        owner_wallet:    payload.ownerWallet,
+        hp:              payload.hp,
+        current_hp:      payload.hp,
+        ac:              payload.ac,
+        map_id:          mapId ?? null,
+        character_id:    payload.characterId    ?? null,
+        token_image_url: payload.tokenImageUrl  ?? null,
       }).then(async ({ data, error }) => {
         if (error) { console.error('Failed to place PC token', error); return; }
         // Update initiative entry token_id if we have one
@@ -617,6 +702,13 @@ const MapBoard: React.FC<MapBoardProps> = ({
   };
 
   const onMove = (e: React.MouseEvent) => {
+    // In trigger mode, track which tile the cursor is over for the highlight overlay
+    if (triggerMode) {
+      const world = getWorldPoint(e);
+      setHoveredTile({ x: Math.floor(world.x / gridSize), y: Math.floor(world.y / gridSize) });
+      return;
+    }
+
     if (fogToolActive && isFogPaintingRef.current) {
       void paintFogAt(getWorldPoint(e));
       return;
@@ -748,7 +840,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
     <div
       ref={containerRef}
       className="relative h-full w-full overflow-hidden overscroll-none rounded-xl border border-slate-800 bg-slate-950/80"
-      style={{ cursor: fogToolActive ? 'cell' : rulerActive ? 'crosshair' : placementPending ? 'crosshair' : undefined }}
+      style={{ cursor: fogToolActive ? 'cell' : triggerMode ? 'crosshair' : rulerActive ? 'crosshair' : placementPending ? 'crosshair' : undefined }}
       onMouseDown={onDown}
       onMouseMove={onMove}
       onMouseUp={onUp}
@@ -866,6 +958,33 @@ const MapBoard: React.FC<MapBoardProps> = ({
         <svg className="pointer-events-none absolute inset-0 z-10 h-full w-full" style={{ overflow: 'visible' }}>
           <circle cx={rulerScreenStart.x} cy={rulerScreenStart.y} r="5" fill="#f59e0b" />
         </svg>
+      )}
+
+      {/* Trigger placement hover highlight */}
+      {triggerMode && hoveredTile && (
+        <div
+          className="pointer-events-none absolute border-2 border-orange-500 bg-orange-500/20"
+          style={{
+            left:   translate.x + hoveredTile.x * gridSize * zoom,
+            top:    translate.y + hoveredTile.y * gridSize * zoom,
+            width:  gridSize * zoom,
+            height: gridSize * zoom,
+          }}
+        />
+      )}
+
+      {/* Trigger placement mode banner */}
+      {triggerMode && (
+        <div className="pointer-events-auto absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-orange-600/60 bg-slate-950/90 px-3 py-1.5 text-xs text-orange-200 shadow-lg">
+          <span>☠ Click a tile to place a trigger</span>
+          <button
+            type="button"
+            onClick={() => { setTriggerMode(false); setHoveredTile(null); }}
+            className="rounded bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300 hover:bg-slate-700"
+          >
+            Cancel (Esc)
+          </button>
+        </div>
       )}
 
       {/* Placement mode banner */}
