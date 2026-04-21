@@ -7,8 +7,8 @@ type CharacterRow = {
   id: string
   name: string
   level: number | null
-  class_key: string | null
-  race_key: string | null
+  main_job: string | null
+  race: string | null
   wallet_address?: string | null
 }
 
@@ -59,7 +59,7 @@ export function useCampaignCharacter(args: { campaignId: string | null; walletAd
 
       const charRes = await supabase
         .from('characters')
-        .select('id, name, level, class_key, race_key, wallet_address')
+        .select('id, name, level, main_job, race, wallet_address')
         .eq('id', cid)
         .limit(1)
         .maybeSingle()

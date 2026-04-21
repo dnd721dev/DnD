@@ -35,8 +35,8 @@ type CharacterRow = {
   id: string
   name: string
   level: number | null
-  class_key: string | null
-  race_key: string | null
+  main_job: string | null
+  race: string | null
   abilities?: any
   hit_points_max?: number | null
   hp?: number | null
@@ -214,7 +214,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
       return Math.max(5, Math.min(240, Math.floor(n)))
     }
 
-    const race = String(selectedCharacter.race_key ?? '').trim().toLowerCase()
+    const race = String(selectedCharacter.race ?? '').trim().toLowerCase()
     const darkvisionRaces = new Set([
       'elf',
       'dwarf',
@@ -290,7 +290,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
       const charsRes = await supabase
         .from('characters')
-        .select('id, name, level, class_key, race_key, abilities, hit_points_max, hp, ac, speed, vision')
+        .select('id, name, level, main_job, race, abilities, hit_points_max, hp, ac, speed, vision')
         .eq('wallet_address', walletLower)
         .order('created_at', { ascending: true })
 

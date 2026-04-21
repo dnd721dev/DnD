@@ -28,8 +28,8 @@ type CharacterRow = {
   id: string
   name: string
   level: number | null
-  class_key: string | null
-  race_key: string | null
+  main_job: string | null
+  race: string | null
 }
 
 function shortWallet(w: string) {
@@ -124,7 +124,7 @@ export default function CampaignPage() {
       const [charsRes, selRes] = await Promise.all([
         supabase
           .from('characters')
-          .select('id, name, level, class_key, race_key')
+          .select('id, name, level, main_job, race')
           .eq('wallet_address', (myAddress ?? '').toLowerCase())
           .order('created_at', { ascending: true }),
         supabase
@@ -459,8 +459,8 @@ export default function CampaignPage() {
                       {characters.map(c => {
                         const parts: string[] = []
                         if (c.level != null) parts.push(`Lv ${c.level}`)
-                        if (c.race_key) parts.push(c.race_key)
-                        if (c.class_key) parts.push(c.class_key)
+                        if (c.race) parts.push(c.race)
+                        if (c.main_job) parts.push(c.main_job)
                         const label = parts.join(' • ')
                         const isSelected = selectedCharacterId === c.id
 
