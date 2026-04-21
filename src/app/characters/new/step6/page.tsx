@@ -310,7 +310,7 @@ export default function NewCharacterStep6Page() {
       // ✅ PRE-CHECK: make sure profile mapping exists (prevents vague RLS errors)
       const { data: prof, error: profErr } = await supabase
         .from('profiles')
-        .select('wallet_address, user_id')
+        .select('wallet_address')
         .eq('wallet_address', walletLower)
         .maybeSingle()
 

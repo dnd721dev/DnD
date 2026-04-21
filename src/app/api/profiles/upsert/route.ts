@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { ethers } from 'ethers'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY! // SERVER ONLY
+const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY! // SERVER ONLY
 
 if (!SUPABASE_URL || !SERVICE_KEY) {
   throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY')
@@ -20,27 +20,6 @@ function verifyEvmSignature(params: { wallet: string; message: string; signature
   return normalizeAddr(recovered) === normalizeAddr(params.wallet)
 }
 
-async function getOrCreateAuthUserIdForWallet(wallet: string) {
-  const w = normalizeAddr(wallet)
-  const email = `${w}@wallet.local`
-
-  // Try to look up by email first (avoids fetching all users)
-  const { data: existing } = await supabaseAdmin.auth.admin.getUserByEmail(email)
-  if (existing?.user?.id) return existing.user.id
-
-  // Create auth user if missing
-  const created = await supabaseAdmin.auth.admin.createUser({
-    email,
-    email_confirm: true,
-    user_metadata: { wallet_address: w },
-  })
-
-  if (created.error) throw new Error(created.error.message)
-  if (!created.data?.user?.id) throw new Error('Failed to create auth user')
-
-  return created.data.user.id
-}
-
 export async function POST(req: Request) {
   try {
     const body = await req.json()
@@ -50,17 +29,17 @@ export async function POST(req: Request) {
       signature, message,
     } = body as {
       wallet_address: string
-      username: string
-      bio?: string
-      display_name?: string
-      avatar_url?: string
-      location?: string
-      timezone?: string
-      twitter?: string
-      discord?: string
-      twitch?: string
-      signature: string
-      message: string
+      username:       string
+      bio?:           string
+      display_name?:  string
+      avatar_url?:    string
+      location?:      string
+      timezone?:      string
+      twitter?:       string
+      discord?:       string
+      twitch?:        string
+      signature:      string
+      message:        string
     }
 
     if (!wallet_address || !username || !signature || !message) {
@@ -75,37 +54,21 @@ export async function POST(req: Request) {
 
     const wallet = normalizeAddr(wallet_address)
 
-    // Get or create auth user
-    const user_id = await getOrCreateAuthUserIdForWallet(wallet)
-
-    // If this user_id was previously linked to a different wallet, clear it first
-    // so the UNIQUE(user_id) constraint never fires.
-    const clear = await supabaseAdmin
-      .from('profiles')
-      .update({ user_id: null })
-      .eq('user_id', user_id)
-      .neq('wallet_address', wallet)
-
-    if (clear.error) {
-      return NextResponse.json({ ok: false, error: clear.error.message }, { status: 400 })
-    }
-
-    // Upsert all profile fields
+    // Upsert profile — wallet_address is the PK, no auth.users dependency
     const { data, error } = await supabaseAdmin
       .from('profiles')
       .upsert(
         {
-          user_id,
           wallet_address: wallet,
           username,
-          bio: bio ?? null,
+          bio:          bio          ?? null,
           display_name: display_name ?? null,
-          avatar_url: avatar_url ?? null,
-          location: location ?? null,
-          timezone: timezone ?? null,
-          twitter: twitter ?? null,
-          discord: discord ?? null,
-          twitch: twitch ?? null,
+          avatar_url:   avatar_url   ?? null,
+          location:     location     ?? null,
+          timezone:     timezone     ?? null,
+          twitter:      twitter      ?? null,
+          discord:      discord      ?? null,
+          twitch:       twitch       ?? null,
         },
         { onConflict: 'wallet_address' }
       )
