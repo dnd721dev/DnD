@@ -246,6 +246,29 @@ export default function NewCharacterStep4Page() {
     return out
   })()
 
+  // slot progression for non-warlocks
+  const spellSlots = (() => {
+    if (classKey === 'warlock') return null
+    if (isThirdCasterSubclass) return getSlotsForCasterType('third', level)
+    if (SPELLCASTING_CLASSES.includes(classKey)) return getSpellSlotsForClass(classKey as any, level)
+    return null
+  })()
+
+  // warlock pact data
+  const pact = classKey === 'warlock'
+    ? getWarlockPactRow(level)
+    : null
+
+  // Max spell level accessible at this class+level
+  const maxSpellLevel = (() => {
+    if (classKey === 'warlock') return pact?.pactSlotLevel ?? 1
+    if (spellSlots) {
+      const keys = Object.keys(spellSlots).map(Number).filter(k => spellSlots[k] > 0)
+      return keys.length > 0 ? Math.max(...keys) : 0
+    }
+    return 0 // racial magic only, no class slots
+  })()
+
   // Filter spells (no hooks)
   // Only show class spells if the character has a spellcasting class/subclass
   const showClassSpells = Boolean(spellClass)
@@ -306,29 +329,6 @@ export default function NewCharacterStep4Page() {
     spellSaveDC = 8 + proficiencyBonus + mod
     spellAttackBonus = proficiencyBonus + mod
   }
-
-  // slot progression for non-warlocks
-  const spellSlots = (() => {
-    if (classKey === 'warlock') return null
-    if (isThirdCasterSubclass) return getSlotsForCasterType('third', level)
-    if (SPELLCASTING_CLASSES.includes(classKey)) return getSpellSlotsForClass(classKey as any, level)
-    return null
-  })()
-
-  // warlock pact data
-  const pact = classKey === 'warlock'
-    ? getWarlockPactRow(level)
-    : null
-
-  // Max spell level accessible at this class+level
-  const maxSpellLevel = (() => {
-    if (classKey === 'warlock') return pact?.pactSlotLevel ?? 1
-    if (spellSlots) {
-      const keys = Object.keys(spellSlots).map(Number).filter(k => spellSlots[k] > 0)
-      return keys.length > 0 ? Math.max(...keys) : 0
-    }
-    return 0 // racial magic only, no class slots
-  })()
 
   const knownSpells = draft.knownSpells ?? []
   const preparedSpells = draft.preparedSpells ?? []
