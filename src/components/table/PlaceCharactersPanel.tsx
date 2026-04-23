@@ -39,16 +39,37 @@ export function PlaceCharactersPanel({
   const [loading, setLoading]           = useState(true)
 
   // Load session players + their characters
-  useEffect(() => {
+  // Re-used both for initial load and realtime updates.
+  const loadPlayers = () =>
     supabase
       .from('session_players')
       .select('wallet_address, character_id, characters(id, name, main_job, level, hit_points_max, hp, ac, speed, avatar_url)')
       .eq('session_id', sessionId)
       .eq('role', 'player')
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('PlaceCharactersPanel: failed to load session_players:', error)
+        }
         setPlayers((data ?? []) as any)
         setLoading(false)
       })
+
+  useEffect(() => {
+    loadPlayers()
+
+    // Realtime: update the player list whenever session_players changes
+    // (player joins, selects character, or leaves).
+    const ch = supabase
+      .channel(`place-chars-players-${sessionId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'session_players', filter: `session_id=eq.${sessionId}` },
+        () => { void loadPlayers() }
+      )
+      .subscribe()
+
+    return () => { supabase.removeChannel(ch) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId])
 
   // Load existing PC tokens + subscribe to changes
@@ -59,12 +80,17 @@ export function PlaceCharactersPanel({
         .select('id, owner_wallet, character_id')
         .eq('encounter_id', encounterId)
         .eq('type', 'pc')
-        .then(({ data }) => setPlacedTokens((data ?? []) as any))
+        .then(({ data, error }) => {
+          if (error) {
+            console.error('PlaceCharactersPanel: failed to load tokens:', error)
+          }
+          setPlacedTokens((data ?? []) as any)
+        })
 
     loadTokens()
 
     const ch = supabase
-      .channel(`place-chars-${encounterId}`)
+      .channel(`place-chars-tokens-${encounterId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'tokens', filter: `encounter_id=eq.${encounterId}` },
@@ -82,13 +108,13 @@ export function PlaceCharactersPanel({
     window.dispatchEvent(
       new CustomEvent('dnd721-place-token', {
         detail: {
-          label:          char.name,
-          hp:             char.hit_points_max ?? char.hp ?? null,
-          ac:             char.ac             ?? null,
-          ownerWallet:    player.wallet_address,
+          label:             char.name,
+          hp:                char.hit_points_max ?? char.hp ?? null,
+          ac:                char.ac             ?? null,
+          ownerWallet:       player.wallet_address,
           initiativeEntryId: '',
-          characterId:    char.id,
-          tokenImageUrl:  char.avatar_url     ?? null,
+          characterId:       char.id,
+          tokenImageUrl:     char.avatar_url     ?? null,
         },
       })
     )
@@ -99,7 +125,8 @@ export function PlaceCharactersPanel({
       (t) => t.owner_wallet?.toLowerCase() === wallet.toLowerCase()
     )
     if (!tok) return
-    await supabase.from('tokens').delete().eq('id', tok.id)
+    const { error } = await supabase.from('tokens').delete().eq('id', tok.id)
+    if (error) console.error('PlaceCharactersPanel: failed to remove token:', error)
   }
 
   if (loading) {

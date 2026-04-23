@@ -547,8 +547,8 @@ export function PlayerSidebar({
       if (!mounted) return
       setSheetLoading(false)
       if (error) {
-        console.error('PlayerSidebar sheet preview load error', error)
-        setSheetError('Could not load character preview.')
+        console.error('PlayerSidebar sheet preview load error:', error)
+        setSheetError(`Could not load character preview. (${error.message})`)
         return
       }
       setSheet((data as any) ?? null)
