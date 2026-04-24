@@ -349,62 +349,61 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     }
   }, [encounterId, ownerLower, mapId])
 
-  // Persist “eraser trail” reveals
+  // Reveal fog around a canvas-pixel center point.
   async function revealAround(center: Point) {
     if (!ownerLower) return
-
-    // Guard: token position must be a valid, non-zero-origin coordinate.
-    // A null DB value coerces to 0 in JS, which would produce a circle at
-    // the map's top-left corner instead of around the token.
+    // Guard against NaN/Infinity (don't guard (0,0) — top-left is a valid position)
     if (!Number.isFinite(center.x) || !Number.isFinite(center.y)) return
-    if (center.x === 0 && center.y === 0) return
 
-    // Token positions are stored as grid-intersection pixels (multiples of
-    // gridSize).  Using that raw pixel as the circle origin means the token
-    // sits at the LEFT/TOP edge of its tile, which biases the circle toward
-    // lower tile indices (the map's top-left).
-    //
-    // Fix: snap the origin to the CENTER of the token's tile so every
-    // candidate tile is measured from tile-center to tile-center.  This
-    // produces a perfectly symmetric circle in all four directions.
+    // Snap the origin to the center of the token's tile (not the raw pixel
+    // position which sits at a grid-line intersection).  Tile-center to
+    // tile-center distances produce a perfectly symmetric circle.
     const cx = Math.floor(center.x / gridSize)
     const cy = Math.floor(center.y / gridSize)
     const originX = (cx + 0.5) * gridSize
     const originY = (cy + 0.5) * gridSize
 
-    // Add 1 extra tile ring so we never clip tiles that sit exactly at
-    // the vision boundary (tile-center distance == visionPx).
+    // +1 so tiles exactly at the boundary distance are always included
     const rTiles = Math.ceil(visionPx / gridSize) + 1
 
-    const toInsert: FogReveal[] = []
-    const nextSet = new Set(revealSet)
+    console.log('[fog] revealAround', { center, visionPx, rTiles, originX, originY })
 
+    // Collect every tile whose center falls within the vision radius.
+    // We do NOT filter against the current revealSet closure here because
+    // revealSet may be a stale snapshot from an earlier render — filtering
+    // happens inside the functional state updater which always receives the
+    // latest state value.
+    const circleTiles: FogReveal[] = []
     for (let dx = -rTiles; dx <= rTiles; dx++) {
       for (let dy = -rTiles; dy <= rTiles; dy++) {
         const tx = cx + dx
         const ty = cy + dy
-
-        // Measure from origin tile center to candidate tile center.
         const px = (tx + 0.5) * gridSize
         const py = (ty + 0.5) * gridSize
         if (dist({ x: originX, y: originY }, { x: px, y: py }) <= visionPx) {
-          const k = keyTile(tx, ty)
-          if (!nextSet.has(k)) {
-            nextSet.add(k)
-            toInsert.push({ tile_x: tx, tile_y: ty })
-          }
+          circleTiles.push({ tile_x: tx, tile_y: ty })
         }
       }
     }
 
-    if (toInsert.length === 0) return
+    console.log('[fog] circleTiles count:', circleTiles.length)
 
-    // update local immediately
-    setRevealSet(nextSet)
-    setReveals((prev) => [...prev, ...toInsert])
+    // CRITICAL: use functional state updates so that two concurrent
+    // revealAround calls (e.g. fast left→right→left) merge their tiles
+    // rather than the later call's direct-value overwrite wiping the
+    // earlier call's newly-revealed tiles.
+    setRevealSet(prev => {
+      const next = new Set(prev)
+      for (const t of circleTiles) next.add(keyTile(t.tile_x, t.tile_y))
+      return next
+    })
+    // Append all circle tiles; the fog draw is idempotent (destination-out
+    // on an already-cleared pixel is a no-op), and loadReveals() will
+    // periodically replace this array with a deduped DB snapshot.
+    setReveals(prev => [...prev, ...circleTiles])
 
-    // IMPORTANT: use UPSERT to avoid duplicate constraint errors
-    const payload = toInsert.map((t) => ({
+    // Persist to DB — upsert with ignoreDuplicates handles server-side dedup
+    const payload = circleTiles.map((t) => ({
       encounter_id: encounterId,
       viewer_wallet: ownerLower,
       map_id: mapId ?? null,
@@ -418,6 +417,8 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
 
     if (error) {
       logSupabaseError('Failed to persist fog reveals:', error)
+    } else {
+      console.log('[fog] upserted', payload.length, 'tiles to DB')
     }
   }
 
@@ -429,9 +430,11 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     if (!myPc) return
     // Skip if position hasn't been set yet — a null DB value coerces to 0 and
     // would reveal a spurious circle at the map's top-left corner.
+    // Check for null/undefined first (before Number() coerces them to 0).
+    if (myPc.x == null || myPc.y == null) return
     const px = Number(myPc.x)
     const py = Number(myPc.y)
-    if (!Number.isFinite(px) || !Number.isFinite(py) || (px === 0 && py === 0)) return
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return
     void revealAround({ x: px, y: py })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ownerLower, tokens.length])
