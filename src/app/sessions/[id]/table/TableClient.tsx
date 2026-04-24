@@ -48,6 +48,7 @@ type CharacterRow = {
 type SessionPlayerRow = {
   wallet_address: string
   character_id: string | null
+  display_name?: string | null
 }
 
 export default function TableClient({ sessionId }: TableClientProps) {
@@ -170,6 +171,19 @@ export default function TableClient({ sessionId }: TableClientProps) {
   const [sessionPlayers, setSessionPlayers] = useState<SessionPlayerRow[]>([])
   const [gmViewWallet, setGmViewWallet] = useState<string | null>(null)
 
+  // Current user's profile display_name (shown instead of raw wallet)
+  const [myDisplayName, setMyDisplayName] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!walletLower) { setMyDisplayName(null); return }
+    supabase
+      .from('profiles')
+      .select('display_name')
+      .eq('wallet_address', walletLower)
+      .maybeSingle()
+      .then(({ data }) => { setMyDisplayName((data as any)?.display_name ?? null) })
+  }, [walletLower])
+
   // ✅ Multi-map management (GM only)
   const { maps, createImageMap, createTileMap, updateTileMap, deleteMap, setCurrentMap } = useMapManager(session?.id ?? null)
 
@@ -249,7 +263,23 @@ export default function TableClient({ sessionId }: TableClientProps) {
         return
       }
 
-      setSessionPlayers((data ?? []) as any)
+      const rows = (data ?? []) as SessionPlayerRow[]
+
+      // Batch-fetch display names for all wallets
+      if (rows.length > 0) {
+        const wallets = rows.map((p) => p.wallet_address)
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('wallet_address, display_name')
+          .in('wallet_address', wallets)
+        if (!mounted) return
+        const profileMap = new Map(
+          (profiles ?? []).map((p: any) => [p.wallet_address as string, p.display_name as string | null])
+        )
+        setSessionPlayers(rows.map((p) => ({ ...p, display_name: profileMap.get(p.wallet_address) ?? null })))
+      } else {
+        setSessionPlayers([])
+      }
     }
 
     void loadPlayers()
@@ -434,7 +464,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
   }
 
   async function handleExternalRoll(roll: ExternalRoll) {
-    const rollerName = buildRollerName({ selectedCharacter, address })
+    const rollerName = buildRollerName({ selectedCharacter, address, displayName: myDisplayName })
     const fallbackId = `local-${Date.now()}`
 
     const persisted = await persistRollToSupabase({
@@ -463,7 +493,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
   async function handleTestRoll() {
     const d20 = Math.floor(Math.random() * 20) + 1
-    const rollerName = buildRollerName({ selectedCharacter, address })
+    const rollerName = buildRollerName({ selectedCharacter, address, displayName: myDisplayName })
     const fallbackId = `local-${Date.now()}`
 
     const persisted = await persistRollToSupabase({
@@ -496,7 +526,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
     const d20 = Math.floor(Math.random() * 20) + 1
     const total = d20 + mod
 
-    const rollerName = buildRollerName({ selectedCharacter, address })
+    const rollerName = buildRollerName({ selectedCharacter, address, displayName: myDisplayName })
     const modSign = mod >= 0 ? '+' : ''
     const formula = `1d20${modSign}${mod}`
     const fallbackId = `local-${Date.now()}`
@@ -536,7 +566,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
     const d20 = Math.floor(Math.random() * 20) + 1
     const total = d20 + mod
 
-    const rollerName = buildRollerName({ selectedCharacter, address })
+    const rollerName = buildRollerName({ selectedCharacter, address, displayName: myDisplayName })
     const modSign = mod >= 0 ? '+' : ''
     const formula = `1d20${modSign}${mod}`
     const fallbackId = `local-${Date.now()}`
@@ -798,6 +828,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
       session={session as any}
       isGm={isGm}
       address={address}
+      displayName={myDisplayName}
       roomName={roomName}
       showDiceLog={showDiceLog}
       onToggleDiceLog={() => setShowDiceLog((v) => !v)}
@@ -821,7 +852,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
       onCloseDiceLog={() => setShowDiceLog(false)}
       onRollEntry={(entry) => { pushRollLocal(entry); setShowDiceLog(true) }}
       sessionId={sessionId}
-      rollerName={buildRollerName({ selectedCharacter, address })}
+      rollerName={buildRollerName({ selectedCharacter, address, displayName: myDisplayName })}
       rollerWallet={walletLower ?? undefined}
       rollOverlay={rollOverlay}
       visionFeet={visionFeet}
@@ -963,7 +994,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
                 <option value="">GM Free View</option>
                 {sessionPlayers.map((p) => (
                   <option key={p.wallet_address} value={p.wallet_address}>
-                    {p.wallet_address.slice(0, 6)}...
+                    {p.display_name?.trim() || `${p.wallet_address.slice(0, 6)}…${p.wallet_address.slice(-4)}`}
                   </option>
                 ))}
               </select>

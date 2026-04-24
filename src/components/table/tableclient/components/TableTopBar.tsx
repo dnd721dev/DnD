@@ -11,11 +11,13 @@ export function TableTopBar(props: {
   session: SessionWithCampaign
   isGm: boolean
   address: string | undefined
+  /** Profile display_name for the current user — falls back to shortened wallet if absent */
+  displayName?: string | null
   roomName: string
   showDiceLog: boolean
   onToggleDiceLog: () => void
 }) {
-  const { session, isGm, address, roomName, showDiceLog, onToggleDiceLog } = props
+  const { session, isGm, address, displayName, roomName, showDiceLog, onToggleDiceLog } = props
   const [srdOpen, setSrdOpen] = useState(false)
   const identity = address?.toLowerCase()
   const campaignMeta = session.campaigns?.[0]
@@ -71,8 +73,14 @@ export function TableTopBar(props: {
             {session.status}
           </span>
           {address ? (
-            <p className="font-mono text-slate-400">
-              You: {address.slice(0, 6)}…{address.slice(-4)}{' '}
+            <p
+              className="text-slate-400"
+              title={address}
+            >
+              You:{' '}
+              <span className={displayName?.trim() ? 'text-slate-200' : 'font-mono'}>
+                {displayName?.trim() || `${address.slice(0, 6)}…${address.slice(-4)}`}
+              </span>{' '}
               {isGm && <span className="text-emerald-400">(GM)</span>}
             </p>
           ) : (

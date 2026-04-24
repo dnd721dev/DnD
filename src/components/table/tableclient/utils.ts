@@ -64,14 +64,20 @@ export function getCharacterAC(char: CharacterSummary | null): number | null {
 export function buildRollerName(params: {
   selectedCharacter: CharacterSummary | null
   address: string | undefined
+  /** Profile display_name — preferred over raw wallet when character name is absent */
+  displayName?: string | null
 }): string {
-  const { selectedCharacter, address } = params
+  const { selectedCharacter, address, displayName } = params
+  // 1. In-game character name (highest priority)
   if (
     selectedCharacter?.name &&
     String(selectedCharacter.name).trim().length > 0
   ) {
     return String(selectedCharacter.name)
   }
+  // 2. User's display_name from profiles
+  if (displayName?.trim()) return displayName.trim()
+  // 3. Shortened wallet address (last resort)
   if (address) {
     return `${address.slice(0, 6)}…${address.slice(-4)}`
   }

@@ -353,9 +353,28 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   async function revealAround(center: Point) {
     if (!ownerLower) return
 
-    const rTiles = Math.ceil(visionPx / gridSize)
+    // Guard: token position must be a valid, non-zero-origin coordinate.
+    // A null DB value coerces to 0 in JS, which would produce a circle at
+    // the map's top-left corner instead of around the token.
+    if (!Number.isFinite(center.x) || !Number.isFinite(center.y)) return
+    if (center.x === 0 && center.y === 0) return
+
+    // Token positions are stored as grid-intersection pixels (multiples of
+    // gridSize).  Using that raw pixel as the circle origin means the token
+    // sits at the LEFT/TOP edge of its tile, which biases the circle toward
+    // lower tile indices (the map's top-left).
+    //
+    // Fix: snap the origin to the CENTER of the token's tile so every
+    // candidate tile is measured from tile-center to tile-center.  This
+    // produces a perfectly symmetric circle in all four directions.
     const cx = Math.floor(center.x / gridSize)
     const cy = Math.floor(center.y / gridSize)
+    const originX = (cx + 0.5) * gridSize
+    const originY = (cy + 0.5) * gridSize
+
+    // Add 1 extra tile ring so we never clip tiles that sit exactly at
+    // the vision boundary (tile-center distance == visionPx).
+    const rTiles = Math.ceil(visionPx / gridSize) + 1
 
     const toInsert: FogReveal[] = []
     const nextSet = new Set(revealSet)
@@ -365,10 +384,10 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
         const tx = cx + dx
         const ty = cy + dy
 
-        // distance check vs tile center
+        // Measure from origin tile center to candidate tile center.
         const px = (tx + 0.5) * gridSize
         const py = (ty + 0.5) * gridSize
-        if (dist(center, { x: px, y: py }) <= visionPx) {
+        if (dist({ x: originX, y: originY }, { x: px, y: py }) <= visionPx) {
           const k = keyTile(tx, ty)
           if (!nextSet.has(k)) {
             nextSet.add(k)
@@ -402,12 +421,18 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     }
   }
 
-  // Reveal around player once on load
+  // Reveal around player whenever their token appears or the token list changes.
+  // Fires on initial load (after loadTokens) and when the GM places the token.
   useEffect(() => {
     if (!ownerLower) return
     const myPc = tokens.find((t) => t.type === 'pc' && t.owner_wallet?.toLowerCase() === ownerLower)
     if (!myPc) return
-    void revealAround({ x: myPc.x, y: myPc.y })
+    // Skip if position hasn't been set yet — a null DB value coerces to 0 and
+    // would reveal a spurious circle at the map's top-left corner.
+    const px = Number(myPc.x)
+    const py = Number(myPc.y)
+    if (!Number.isFinite(px) || !Number.isFinite(py) || (px === 0 && py === 0)) return
+    void revealAround({ x: px, y: py })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ownerLower, tokens.length])
 

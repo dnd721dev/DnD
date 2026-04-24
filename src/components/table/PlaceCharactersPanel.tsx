@@ -19,6 +19,7 @@ type SessionPlayerRow = {
   wallet_address: string
   character_id: string | null
   characters: CharRow | null
+  display_name?: string | null
 }
 
 type PlacedToken = {
@@ -38,21 +39,43 @@ export function PlaceCharactersPanel({
   const [placedTokens, setPlacedTokens] = useState<PlacedToken[]>([])
   const [loading, setLoading]           = useState(true)
 
-  // Load session players + their characters
+  // Load session players + their characters + profile display names.
   // Re-used both for initial load and realtime updates.
-  const loadPlayers = () =>
-    supabase
+  const loadPlayers = async () => {
+    const { data, error } = await supabase
       .from('session_players')
       .select('wallet_address, character_id, characters(id, name, main_job, level, hit_points_max, hp, ac, speed, avatar_url)')
       .eq('session_id', sessionId)
       .eq('role', 'player')
-      .then(({ data, error }) => {
-        if (error) {
-          console.error('PlaceCharactersPanel: failed to load session_players:', error)
-        }
-        setPlayers((data ?? []) as any)
-        setLoading(false)
-      })
+
+    if (error) {
+      console.error('PlaceCharactersPanel: failed to load session_players:', error)
+      setLoading(false)
+      return
+    }
+
+    const players = (data ?? []) as SessionPlayerRow[]
+
+    // Batch-fetch display names for all wallets in one query
+    if (players.length > 0) {
+      const wallets = players.map((p) => p.wallet_address)
+      const { data: profiles, error: profErr } = await supabase
+        .from('profiles')
+        .select('wallet_address, display_name')
+        .in('wallet_address', wallets)
+
+      if (profErr) console.error('PlaceCharactersPanel: failed to load profiles:', profErr)
+
+      const profileMap = new Map(
+        (profiles ?? []).map((p: any) => [p.wallet_address as string, p.display_name as string | null])
+      )
+      setPlayers(players.map((p) => ({ ...p, display_name: profileMap.get(p.wallet_address) ?? null })))
+    } else {
+      setPlayers([])
+    }
+
+    setLoading(false)
+  }
 
   useEffect(() => {
     loadPlayers()
@@ -182,8 +205,13 @@ export function PlaceCharactersPanel({
                   ) : (
                     <div className="text-[10px] text-slate-500">No character selected</div>
                   )}
-                  <div className="text-[9px] text-slate-600">
-                    {p.wallet_address.slice(0, 6)}…{p.wallet_address.slice(-4)}
+                  <div
+                    className="text-[9px] text-slate-600"
+                    title={p.wallet_address}
+                  >
+                    {p.display_name?.trim()
+                      ? p.display_name.trim()
+                      : `${p.wallet_address.slice(0, 6)}…${p.wallet_address.slice(-4)}`}
                   </div>
                 </div>
               </div>
