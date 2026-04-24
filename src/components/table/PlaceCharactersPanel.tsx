@@ -54,7 +54,7 @@ export function PlaceCharactersPanel({
       return
     }
 
-    const players = (data ?? []) as SessionPlayerRow[]
+    const players = (data ?? []) as unknown as SessionPlayerRow[]
 
     // Batch-fetch display names for all wallets in one query
     if (players.length > 0) {
