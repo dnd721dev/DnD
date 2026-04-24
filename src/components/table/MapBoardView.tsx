@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { renderTilesToCanvas, type TileData } from '@/lib/tilemap'
 
@@ -350,9 +350,12 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   }, [encounterId, ownerLower, mapId])
 
   // Reveal fog around a canvas-pixel center point.
-  async function revealAround(center: Point) {
+  // useCallback gives a stable reference so the initial-reveal effect below
+  // can list it as a proper dependency — it only changes when vision/map/
+  // encounter actually change, not on every render.
+  const revealAround = useCallback(async function(center: Point) {
     if (!ownerLower) return
-    // Guard against NaN/Infinity (don't guard (0,0) — top-left is a valid position)
+    // Guard against NaN/Infinity
     if (!Number.isFinite(center.x) || !Number.isFinite(center.y)) return
 
     // Snap the origin to the center of the token's tile (not the raw pixel
@@ -420,24 +423,31 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     } else {
       console.log('[fog] upserted', payload.length, 'tiles to DB')
     }
-  }
+  // setRevealSet / setReveals are stable React dispatch functions — no dep needed.
+  // supabase is a module singleton — no dep needed.
+  }, [ownerLower, visionPx, gridSize, encounterId, mapId])
 
-  // Reveal around player whenever their token appears or the token list changes.
-  // Fires on initial load (after loadTokens) and when the GM places the token.
+  // Reveal around player whenever their token appears, the map changes, or
+  // vision range changes.  revealAround is a useCallback whose reference only
+  // changes when encounterId / mapId / visionPx / ownerLower / gridSize change,
+  // so listing it here is safe and eliminates stale-closure bugs.
   useEffect(() => {
     if (!ownerLower) return
     const myPc = tokens.find((t) => t.type === 'pc' && t.owner_wallet?.toLowerCase() === ownerLower)
     if (!myPc) return
-    // Skip if position hasn't been set yet — a null DB value coerces to 0 and
-    // would reveal a spurious circle at the map's top-left corner.
-    // Check for null/undefined first (before Number() coerces them to 0).
+    // null DB value coerces to 0 via Number() — check for null/undefined first
     if (myPc.x == null || myPc.y == null) return
     const px = Number(myPc.x)
     const py = Number(myPc.y)
     if (!Number.isFinite(px) || !Number.isFinite(py)) return
+    // Skip unpositioned tokens: snap() always produces multiples of gridSize,
+    // so (0, 0) means "not yet placed" in almost all cases.
+    // If the token was legitimately dragged to (0,0), handleMouseUp calls
+    // revealAround directly so the player still gets their reveal.
+    if (px === 0 && py === 0) return
+    console.log('[fog] initial reveal myPc=', { x: px, y: py }, 'ownerLower=', ownerLower)
     void revealAround({ x: px, y: py })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ownerLower, tokens.length])
+  }, [ownerLower, tokens.length, revealAround])
 
   // Draw map + grid
   useEffect(() => {
