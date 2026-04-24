@@ -110,28 +110,78 @@ export function DiceLogOverlay(props: {
           {diceLog.map((entry) => {
             const isCoin = entry.label === 'Coin Flip'
             const isHeads = isCoin && (entry.result === 1 || entry.outcome?.toLowerCase() === 'heads')
+            const isCrit = entry.outcome === 'crit'
+            const isFumble = entry.outcome === 'crit_miss'
+
+            // Parse modifier from formula (e.g. "2d6+3" → "+3", "1d20-1" → "-1")
+            const modMatch = entry.formula.match(/([+-]\d+)$/)
+            const modDisplay = modMatch ? modMatch[1] : null
 
             return (
               <div
                 key={entry.id}
-                className="flex items-center justify-between border-b border-slate-800/60 py-1 last:border-b-0"
+                className="flex items-start justify-between gap-2 border-b border-slate-800/60 py-1.5 last:border-b-0"
               >
-                <div className="flex flex-col">
+                <div className="flex min-w-0 flex-col gap-0.5">
                   <span className="font-medium text-slate-100">{entry.roller}</span>
                   <span className="text-[10px] text-slate-400">
                     {entry.label} · {entry.formula}
                   </span>
+                  {/* Individual dice breakdown */}
+                  {!isCoin && entry.individual_dice && entry.individual_dice.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                      {entry.individual_dice.map((d, i) => {
+                        const sides = parseInt(d.die.replace('d', ''), 10)
+                        const isMax = d.value === sides
+                        const isMin = d.value === 1
+                        return (
+                          <span
+                            key={i}
+                            title={`${d.die}: ${d.value}${d.dropped ? ' (dropped)' : ''}`}
+                            className={`rounded px-1 py-0.5 font-mono text-[9px] font-semibold transition ${
+                              d.dropped
+                                ? 'bg-slate-800/40 text-slate-600 line-through'
+                                : isMax
+                                ? 'bg-amber-800/70 text-amber-200'
+                                : isMin
+                                ? 'bg-red-900/70 text-red-300'
+                                : 'bg-slate-800 text-slate-300'
+                            }`}
+                          >
+                            {d.value}
+                          </span>
+                        )
+                      })}
+                      {modDisplay && modDisplay !== '+0' && modDisplay !== '-0' && (
+                        <span className="text-[9px] text-slate-400">{modDisplay}</span>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="text-right">
+                <div className="shrink-0 text-right">
                   {isCoin ? (
                     <span className={`text-sm font-bold ${isHeads ? 'text-amber-300' : 'text-violet-300'}`}>
                       {isHeads ? '⚔ Heads' : '🛡 Tails'}
                     </span>
                   ) : (
-                    <span className="text-sm font-bold text-sky-300">{entry.result}</span>
+                    <span
+                      className={`text-sm font-bold ${
+                        isCrit ? 'text-amber-300' : isFumble ? 'text-red-400' : 'text-sky-300'
+                      }`}
+                    >
+                      {entry.result}
+                      {isCrit && ' ✨'}
+                      {isFumble && ' 💀'}
+                    </span>
                   )}
-                  {entry.outcome && !isCoin && (
+                  {entry.outcome && !isCoin && !isCrit && !isFumble && (
                     <div className="text-[10px] font-semibold text-emerald-400">{entry.outcome}</div>
+                  )}
+                  {isCrit && (
+                    <div className="text-[10px] font-semibold text-amber-400">CRITICAL</div>
+                  )}
+                  {isFumble && (
+                    <div className="text-[10px] font-semibold text-red-400">FUMBLE</div>
                   )}
                   <div className="text-[10px] text-slate-500">{entry.timestamp}</div>
                 </div>

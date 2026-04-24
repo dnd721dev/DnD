@@ -255,7 +255,7 @@ export default function GMSidebar({
         {activeTab === 'combat' && (
           <div className="grid h-full grid-cols-2 gap-2">
             <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
-              <InitiativeTracker encounterId={encounterId ?? null} onRoundChange={setCombatRound} />
+              <InitiativeTracker encounterId={encounterId ?? null} sessionId={sessionId ?? null} onRoundChange={setCombatRound} />
             </div>
             <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
               {encounterId ? (

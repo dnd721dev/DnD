@@ -427,11 +427,37 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   // supabase is a module singleton — no dep needed.
   }, [ownerLower, visionPx, gridSize, encounterId, mapId])
 
-  // Reveal around player whenever their token appears, the map changes, or
-  // vision range changes.  revealAround is a useCallback whose reference only
-  // changes when encounterId / mapId / visionPx / ownerLower / gridSize change,
-  // so listing it here is safe and eliminates stale-closure bugs.
+  // Track whether the initial reveal has fired for this component mount.
+  // Using a ref (not state) so setting it doesn't schedule a re-render.
+  const revealedOnceRef = React.useRef(false)
+
+  // Bug 1: listen for placement events dispatched by MapBoard.tsx so that the
+  // placement reveal and the movement reveal use the EXACT same code path
+  // (both call revealAround with confirmed snap() coordinates).
   useEffect(() => {
+    if (typeof window === 'undefined') return
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ ownerWallet: string; x: number; y: number }>).detail
+      if (!detail || !ownerLower) return
+      if (detail.ownerWallet.toLowerCase() !== ownerLower) return
+      const px = Number(detail.x)
+      const py = Number(detail.y)
+      if (!Number.isFinite(px) || !Number.isFinite(py)) return
+      if (px === 0 && py === 0) return
+      console.log('[fog] placement reveal x=', px, 'y=', py, 'ownerLower=', ownerLower)
+      revealedOnceRef.current = true
+      void revealAround({ x: px, y: py })
+    }
+    window.addEventListener('dnd721-pc-token-placed', handler)
+    return () => window.removeEventListener('dnd721-pc-token-placed', handler)
+  }, [ownerLower, revealAround])
+
+  // Fallback: reveal when the component mounts with a token that already exists
+  // in the DB (e.g. player refreshes the page after the token was placed earlier).
+  // The revealedOnceRef guard prevents double-revealing when the placement event
+  // fires in the same session (same-tab GM placing a token).
+  useEffect(() => {
+    if (revealedOnceRef.current) return
     if (!ownerLower) return
     const myPc = tokens.find((t) => t.type === 'pc' && t.owner_wallet?.toLowerCase() === ownerLower)
     if (!myPc) return
@@ -442,10 +468,9 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     if (!Number.isFinite(px) || !Number.isFinite(py)) return
     // Skip unpositioned tokens: snap() always produces multiples of gridSize,
     // so (0, 0) means "not yet placed" in almost all cases.
-    // If the token was legitimately dragged to (0,0), handleMouseUp calls
-    // revealAround directly so the player still gets their reveal.
     if (px === 0 && py === 0) return
-    console.log('[fog] initial reveal myPc=', { x: px, y: py }, 'ownerLower=', ownerLower)
+    console.log('[fog] initial reveal (on load) myPc=', { x: px, y: py }, 'ownerLower=', ownerLower)
+    revealedOnceRef.current = true
     void revealAround({ x: px, y: py })
   }, [ownerLower, tokens.length, revealAround])
 

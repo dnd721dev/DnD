@@ -660,24 +660,69 @@ const MapBoard: React.FC<MapBoardProps> = ({
         token_image_url: payload.tokenImageUrl  ?? null,
       }).then(async ({ data, error }) => {
         if (error) { console.error('Failed to place PC token', error); return; }
-        // Update initiative entry token_id if we have one
+
+        // Fetch the newly-inserted token's ID (needed for initiative entry linking)
+        const { data: tokenRow } = await supabase
+          .from('tokens')
+          .select('id')
+          .eq('encounter_id', encounterId)
+          .eq('label', payload.label)
+          .eq('owner_wallet', payload.ownerWallet)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const newTokenId = tokenRow?.id ?? null;
+
         if (payload.initiativeEntryId) {
-          const { data: tokenRow } = await supabase
-            .from('tokens')
-            .select('id')
-            .eq('encounter_id', encounterId)
-            .eq('label', payload.label)
-            .eq('owner_wallet', payload.ownerWallet)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          if (tokenRow?.id) {
+          // Placement came from InitiativeTracker — link the token to the existing entry
+          if (newTokenId) {
             await supabase
               .from('initiative_entries')
-              .update({ token_id: tokenRow.id })
+              .update({ token_id: newTokenId })
               .eq('id', payload.initiativeEntryId);
           }
+        } else if (payload.ownerWallet) {
+          // Bug 3: placement came from PlaceCharactersPanel — auto-create/update the
+          // initiative entry so the player appears in the tracker without manual GM work.
+          const { data: existingEntry } = await supabase
+            .from('initiative_entries')
+            .select('id')
+            .eq('encounter_id', encounterId)
+            .eq('wallet_address', payload.ownerWallet)
+            .maybeSingle();
+
+          if (existingEntry) {
+            // Entry already exists — just link the new token
+            if (newTokenId) {
+              await supabase
+                .from('initiative_entries')
+                .update({ token_id: newTokenId })
+                .eq('id', existingEntry.id);
+            }
+          } else {
+            // No entry yet — create one (init = 0, GM or player will roll later)
+            await supabase.from('initiative_entries').insert({
+              encounter_id:  encounterId,
+              name:          payload.label,
+              init:          0,
+              hp:            payload.hp,
+              is_pc:         true,
+              character_id:  payload.characterId ?? null,
+              token_id:      newTokenId,
+              wallet_address: payload.ownerWallet,
+            });
+          }
         }
+
+        // Bug 1: tell the player's MapBoardView to reveal fog at the exact
+        // placement position so the two code paths (placement vs movement)
+        // call the exact same revealAround function with confirmed coordinates.
+        if (payload.ownerWallet) {
+          window.dispatchEvent(new CustomEvent('dnd721-pc-token-placed', {
+            detail: { ownerWallet: payload.ownerWallet, x, y },
+          }));
+        }
+
         window.dispatchEvent(new CustomEvent('dnd721-tokens-updated', { detail: { source: 'gm-place' } }));
       });
       return;

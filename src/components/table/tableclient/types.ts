@@ -29,6 +29,8 @@ export type DiceEntry = {
   formula: string
   timestamp: string
   outcome?: string | null
+  /** Individual die results as returned by the roll API and stored in session_rolls */
+  individual_dice?: { die: string; value: number; dropped?: true }[] | null
 }
 
 export type ExternalRoll = {

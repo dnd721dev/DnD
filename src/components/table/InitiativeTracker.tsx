@@ -62,10 +62,12 @@ export const CONDITION_RING_COLORS: Record<string, string> = Object.fromEntries(
 
 type InitiativeTrackerProps = {
   encounterId?: string | null;
+  /** Session ID — required for the Roll Initiative button to call /api/roll */
+  sessionId?: string | null;
   onRoundChange?: (round: number) => void;
 };
 
-export default function InitiativeTracker({ encounterId, onRoundChange }: InitiativeTrackerProps) {
+export default function InitiativeTracker({ encounterId, sessionId, onRoundChange }: InitiativeTrackerProps) {
   const [entries, setEntries] = useState<InitiativeEntry[]>([]);
   const [turnIdx, setTurnIdx] = useState(0);
   const [round, setRound] = useState(1);
@@ -344,6 +346,39 @@ export default function InitiativeTracker({ encounterId, onRoundChange }: Initia
     lastResetEntryIdRef.current = current.id;
     resetPerTurnFlagsForCharacter(current.character_id);
   }, [started, current?.id, current?.character_id]);
+
+  // Bug 4: roll 1d20 for initiative and write the result directly into the entry.
+  async function rollInitiative(entry: InitiativeEntry) {
+    if (!sessionId || !encounterId) return;
+    try {
+      const res = await fetch('/api/roll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notation: '1d20',
+          sessionId,
+          rollType: 'initiative',
+          label: `${entry.name} Initiative`,
+          rollerName: entry.name,
+          rollerWallet: entry.wallet_address ?? undefined,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        console.error('rollInitiative failed:', err);
+        return;
+      }
+      const json = await res.json();
+      const rolled: number = json.total;
+      const { error } = await supabase
+        .from('initiative_entries')
+        .update({ init: rolled })
+        .eq('id', entry.id);
+      if (error) console.error('rollInitiative update error:', error);
+    } catch (e) {
+      console.error('rollInitiative error:', e);
+    }
+  }
 
   async function addEntry(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -721,6 +756,16 @@ export default function InitiativeTracker({ encounterId, onRoundChange }: Initia
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
+                  {/* Bug 4: Roll initiative button — rolls 1d20 and sets init */}
+                  <button
+                    type="button"
+                    onClick={() => rollInitiative(e)}
+                    disabled={!sessionId}
+                    className="rounded border border-amber-700/60 bg-amber-950/60 px-1.5 py-0.5 text-[10px] text-amber-300 hover:bg-amber-900/60 disabled:opacity-40"
+                    title={sessionId ? 'Roll 1d20 for initiative' : 'Session ID required to roll'}
+                  >
+                    🎲
+                  </button>
                   {/* Place button for unplaced PCs */}
                   {e.is_pc && !e.token_id && (
                     <button
