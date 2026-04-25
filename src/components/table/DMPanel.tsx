@@ -1,11 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { roll as rollDice } from '@/lib/dice'
 import { DIE_CONFIG, DIE_TYPES, type DieSides } from '@/lib/dnd5e'
 import { DiceShape } from '@/components/dice/DiceShape'
 import { calculateEncounterDifficulty, CR_OPTIONS, type CRKey, type Difficulty } from '@/lib/encounter'
 import { PlaceCharactersPanel } from '@/components/table/PlaceCharactersPanel'
+import { supabase } from '@/lib/supabase'
 
 type ExternalRoll = {
   label: string
@@ -26,6 +27,14 @@ type DMPanelProps = {
 }
 
 type AdvMode = 'normal' | 'adv' | 'dis'
+type DmTab = 'tools' | 'combat'
+
+// Common combat conditions shown in the Combat tab
+const COMBAT_CONDITIONS = [
+  'Blinded', 'Charmed', 'Frightened', 'Grappled', 'Incapacitated',
+  'Invisible', 'Paralyzed', 'Poisoned', 'Prone', 'Restrained',
+  'Stunned', 'Unconscious',
+]
 
 const DIFF_STYLE: Record<Difficulty, { label: string; bar: string; badge: string }> = {
   trivial: { label: 'Trivial',  bar: 'bg-slate-600',  badge: 'bg-slate-700 text-slate-300' },
@@ -36,11 +45,100 @@ const DIFF_STYLE: Record<Difficulty, { label: string; bar: string; badge: string
 }
 
 export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration, sessionId, sessionType, sessionStatus, xpAwardedAlready, gmWallet }: DMPanelProps) {
+  // ── Tab state ──────────────────────────────────────────────────────────────
+  const [dmTab, setDmTab] = useState<DmTab>('tools')
+
+  // ── Combat tab: selected target token ─────────────────────────────────────
+  const [selectedToken, setSelectedToken] = useState<any | null>(null)
+  const [targetConditions, setTargetConditions] = useState<string[]>([])
+  const [hpDeltaInput, setHpDeltaInput] = useState('')
+
+  // Listen for token clicks on the map — auto-switch to Combat tab
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const handler = (ev: Event) => {
+      const tok = (ev as CustomEvent).detail?.token ?? null
+      if (!tok) return
+      setSelectedToken(tok)
+      setTargetConditions([])    // reset conditions when a new token is targeted
+      setDmTab('combat')         // jump to Combat tab so GM sees it immediately
+    }
+    window.addEventListener('dnd721-target-selected', handler)
+    return () => window.removeEventListener('dnd721-target-selected', handler)
+  }, [])
+
+  async function adjustTargetHp(delta: number) {
+    if (!selectedToken?.id) return
+    const current = Number(selectedToken.current_hp ?? selectedToken.hp ?? 0)
+    const next = Math.max(0, current + delta)
+    // Optimistic local update
+    setSelectedToken((prev: any) => prev ? { ...prev, current_hp: next } : prev)
+    await supabase.from('tokens').update({ current_hp: next }).eq('id', selectedToken.id)
+  }
+
+  async function applyHpDelta() {
+    const n = parseInt(hpDeltaInput, 10)
+    if (!Number.isFinite(n) || n === 0) return
+    await adjustTargetHp(n)
+    setHpDeltaInput('')
+  }
+
+  function toggleTargetCondition(cond: string) {
+    setTargetConditions((prev) => {
+      const has = prev.includes(cond)
+      const next = has ? prev.filter((c) => c !== cond) : [...prev, cond]
+      // Broadcast so MapBoard condition rings stay in sync
+      if (typeof window !== 'undefined' && selectedToken?.id) {
+        window.dispatchEvent(
+          new CustomEvent('dnd721-conditions-toggle', {
+            detail: { tokenId: selectedToken.id, conditions: next },
+          })
+        )
+      }
+      return next
+    })
+  }
+
+  // ── GM rolls state ─────────────────────────────────────────────────────────
   const [advMode, setAdvMode] = useState<AdvMode>('normal')
   const [xpInput, setXpInput] = useState('')
   const [awardingXp, setAwardingXp] = useState(false)
   const [awardError, setAwardError] = useState<string | null>(null)
   const [awardSuccess, setAwardSuccess] = useState<number | null>(null)
+
+  // ── Mid-session XP award ───────────────────────────────────────────────────
+  const [midXpInput, setMidXpInput] = useState('')
+  const [midAwardingXp, setMidAwardingXp] = useState(false)
+  const [midAwardError, setMidAwardError] = useState<string | null>(null)
+  const [midAwardSuccess, setMidAwardSuccess] = useState<number | null>(null)
+
+  async function handleMidAwardXp(presetAmount?: number) {
+    const xp = presetAmount ?? parseInt(midXpInput)
+    if (!xp || xp <= 0 || !sessionId || !gmWallet) return
+    setMidAwardingXp(true)
+    setMidAwardError(null)
+    setMidAwardSuccess(null)
+    try {
+      const res = await fetch('/api/sessions/award-xp-mid', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId, xp_amount: xp, gm_wallet: gmWallet }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setMidAwardError(json.error ?? 'Failed to award XP')
+      } else {
+        setMidAwardSuccess(xp)
+        setMidXpInput('')
+        // Auto-clear success message after 4 s
+        window.setTimeout(() => setMidAwardSuccess(null), 4000)
+      }
+    } catch (err: any) {
+      setMidAwardError(err.message ?? 'Network error')
+    } finally {
+      setMidAwardingXp(false)
+    }
+  }
 
   // Encounter difficulty calculator
   const [calcOpen, setCalcOpen] = useState(false)
@@ -145,6 +243,158 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
           </div>
         )}
       </header>
+
+      {/* Tab switcher */}
+      <div className="flex rounded-lg border border-slate-700 bg-slate-950 p-0.5 gap-0.5">
+        {([
+          { id: 'tools',  label: '🎲 Tools'  },
+          { id: 'combat', label: '⚔ Combat' },
+        ] as { id: DmTab; label: string }[]).map(({ id, label }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setDmTab(id)}
+            className={`flex-1 rounded-md py-1 text-[11px] font-semibold transition ${
+              dmTab === id
+                ? 'bg-indigo-700/60 text-indigo-100'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            {label}
+            {id === 'combat' && selectedToken && (
+              <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-sky-400" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* ── COMBAT TAB ─────────────────────────────────────────────────────── */}
+      {dmTab === 'combat' && (
+        <div className="flex flex-col gap-3 overflow-y-auto">
+          {!selectedToken ? (
+            <p className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-center text-[11px] text-slate-500">
+              Click any token on the map to select it as a target.
+            </p>
+          ) : (
+            <>
+              {/* Target header */}
+              <section className="rounded-lg border border-sky-900/40 bg-slate-900/60 p-2.5">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-400">Target</p>
+                    <p className="text-sm font-bold text-slate-50">{selectedToken.label || 'Unknown'}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedToken(null); setTargetConditions([]) }}
+                    className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400 hover:text-slate-200"
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                {/* HP / AC stats */}
+                <div className="mb-2 grid grid-cols-2 gap-2 rounded-md bg-slate-950/60 p-2">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-slate-400">Current HP</p>
+                    <p className="text-lg font-bold text-emerald-300">
+                      {selectedToken.current_hp ?? selectedToken.hp ?? '—'}
+                    </p>
+                    {selectedToken.hp != null && (
+                      <p className="text-[10px] text-slate-500">Max: {selectedToken.hp}</p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-slate-400">AC</p>
+                    <p className="text-lg font-bold text-slate-100">{selectedToken.ac ?? '—'}</p>
+                  </div>
+                </div>
+
+                {/* Quick HP buttons */}
+                <div className="mb-2">
+                  <p className="mb-1 text-[10px] font-semibold uppercase text-slate-400">Adjust HP</p>
+                  <div className="flex gap-1.5">
+                    {[-10, -5, -1, +1, +5, +10].map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => adjustTargetHp(d)}
+                        className={`flex-1 rounded-md border py-1 text-[11px] font-bold transition ${
+                          d < 0
+                            ? 'border-rose-700/50 bg-rose-900/20 text-rose-300 hover:bg-rose-900/40'
+                            : 'border-emerald-700/50 bg-emerald-900/20 text-emerald-300 hover:bg-emerald-900/40'
+                        }`}
+                      >
+                        {d > 0 ? `+${d}` : `${d}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Custom HP delta */}
+                <div className="flex gap-1.5">
+                  <input
+                    type="number"
+                    placeholder="±HP"
+                    value={hpDeltaInput}
+                    onChange={(e) => setHpDeltaInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void applyHpDelta() }}
+                    className="w-20 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-sky-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void applyHpDelta()}
+                    className="flex-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] font-semibold text-slate-200 hover:border-sky-500 transition"
+                  >
+                    Apply
+                  </button>
+                </div>
+              </section>
+
+              {/* Conditions */}
+              <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-2.5">
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  Conditions
+                </p>
+                {targetConditions.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-1">
+                    {targetConditions.map((c) => (
+                      <span
+                        key={c}
+                        className="rounded-full border border-rose-700 bg-rose-900/40 px-2 py-0.5 text-[10px] font-medium text-rose-200"
+                      >
+                        {c}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-1.5">
+                  {COMBAT_CONDITIONS.map((cond) => {
+                    const active = targetConditions.includes(cond)
+                    return (
+                      <button
+                        key={cond}
+                        type="button"
+                        onClick={() => toggleTargetCondition(cond)}
+                        className={`rounded-md px-2 py-0.5 text-[10px] font-medium transition ${
+                          active
+                            ? 'border border-rose-500 bg-rose-700 text-rose-50'
+                            : 'border border-slate-700 bg-slate-800 text-slate-300 hover:border-sky-500'
+                        }`}
+                      >
+                        {active ? `✓ ${cond}` : cond}
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── TOOLS TAB ──────────────────────────────────────────────────────── */}
+      {dmTab === 'tools' && <>
 
       {/* Place Characters */}
       {sessionId && (
@@ -380,6 +630,61 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
         })()}
       </section>
 
+      {/* ── Mid-session XP Award (active CAYA sessions) ───────────────────── */}
+      {sessionType === 'caya' && sessionStatus === 'active' && sessionId && gmWallet && (
+        <section className="rounded-lg border border-violet-700/50 bg-violet-950/20 p-2">
+          <p className="mb-1 text-xs font-semibold text-violet-200">Award XP</p>
+          <p className="mb-2 text-[10px] text-slate-400">
+            Grants XP to all CAYA characters in this session.
+          </p>
+
+          {/* Quick preset buttons */}
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {[25, 50, 100, 200, 500].map((amt) => (
+              <button
+                key={amt}
+                type="button"
+                disabled={midAwardingXp}
+                onClick={() => void handleMidAwardXp(amt)}
+                className="rounded-md border border-violet-700/60 bg-violet-900/30 px-2.5 py-1 text-[11px] font-semibold text-violet-200 hover:bg-violet-800/50 disabled:opacity-40 transition"
+              >
+                +{amt}
+              </button>
+            ))}
+          </div>
+
+          {/* Custom amount */}
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={1}
+              placeholder="Custom XP"
+              value={midXpInput}
+              onChange={(e) => setMidXpInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void handleMidAwardXp() }}
+              className="w-24 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 outline-none focus:border-violet-500"
+            />
+            <button
+              type="button"
+              onClick={() => void handleMidAwardXp()}
+              disabled={midAwardingXp || !midXpInput}
+              className="flex-1 rounded-lg border border-violet-700/50 bg-violet-900/30 py-1 text-[11px] font-bold text-violet-200 hover:bg-violet-800/50 disabled:opacity-40 transition"
+            >
+              {midAwardingXp ? 'Awarding…' : 'Award'}
+            </button>
+          </div>
+
+          {midAwardSuccess != null && (
+            <p className="mt-1.5 text-[10px] font-semibold text-emerald-300">
+              ✓ {midAwardSuccess} XP awarded to all CAYA players!
+            </p>
+          )}
+          {midAwardError && (
+            <p className="mt-1.5 text-[10px] text-red-400">{midAwardError}</p>
+          )}
+        </section>
+      )}
+
       {/* XP Award — only for CAYA sessions after completion */}
       {sessionType === 'caya' && sessionStatus === 'completed' && !xpAwardedAlready && !awardSuccess && (
         <section className="rounded-lg border border-amber-700/50 bg-amber-950/20 p-2">
@@ -415,6 +720,8 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
           </p>
         </section>
       )}
+
+      </> /* end tools tab */}
     </div>
   )
 }

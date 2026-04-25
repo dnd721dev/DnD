@@ -9,6 +9,7 @@ import { ARMORS, type Armor } from '@/lib/armor'
 import { GEAR, type GearItem } from '@/lib/equipment'
 import { computeArmorClass } from './equipment-calc'
 import type { Abilities } from '../../types/character'
+import { classCanUseWeapon, classCanUseArmor } from '@/lib/equipmentRules'
 
 function norm(raw: string) {
   return (raw ?? '').trim().toLowerCase()
@@ -53,15 +54,17 @@ function hbwKey(id: string) { return `hbw_${id}` }
 function hbaKey(id: string) { return `hba_${id}` }
 function hbiKey(id: string) { return `hbi_${id}` }
 
-function buildLibOptions(): LibOption[] {
+function buildLibOptions(classKey = 'fighter'): LibOption[] {
   const out: LibOption[] = []
   for (const w of valuesOf<Weapon>(WEAPONS as unknown as Record<string, Weapon>)) {
     if (!w?.key || !w?.name) continue
+    if (!classCanUseWeapon(classKey, w)) continue
     out.push({ key: norm(w.key), name: w.name, kind: 'weapon' })
   }
   for (const a of valuesOf<Armor>(ARMORS as unknown as Record<string, Armor>)) {
     if (!a?.key || !a?.name) continue
     if (String(a.category).toLowerCase() === 'shield') continue
+    if (!classCanUseArmor(classKey, a)) continue
     out.push({ key: norm(a.key), name: a.name, kind: 'armor' })
   }
   for (const g of valuesOf<GearItem>(GEAR as unknown as Record<string, GearItem>)) {
@@ -191,8 +194,11 @@ export function EquipmentPanel({
   useEffect(() => setArmorKey(enforcedArmor), [enforcedArmor])
   useEffect(() => setShieldEquipped(enforcedShieldEquipped), [enforcedShieldEquipped])
 
+  // Derive class key once — used to filter the "Add item" library by proficiency
+  const charClassKey = useMemo(() => norm((c as any).main_job ?? ''), [c])
+
   // Add item state
-  const allLibOptions = useMemo(() => buildLibOptions(), [])
+  const allLibOptions = useMemo(() => buildLibOptions(charClassKey), [charClassKey])
   const homebrewLibOptions = useMemo<LibOption[]>(() => {
     const out: LibOption[] = []
     for (const w of hbWeapons) out.push({ key: hbwKey(w.id), name: `${w.name} (weapon)`, kind: 'homebrew' })
@@ -315,15 +321,18 @@ export function EquipmentPanel({
       ac = computeArmorClass(simulatedC as any, abilities).ac
     }
 
+    // armor_class is GENERATED ALWAYS AS (ac) STORED in Postgres — never include it
+    // in an UPDATE patch or Postgres will throw "can only be updated to DEFAULT".
+    // We pass ac to onSaved() separately so the local React state reflects the new
+    // value immediately without waiting for a DB round-trip.
     const patch: Partial<CharacterSheetData> = {
       main_weapon_key: safeWeapon || null,
       armor_key: safeArmor || null,
       equipment_items: buildEquipmentItems(safeShieldEquipped),
       inventory_items: next.inventory.length ? (next.inventory as any) : null,
-      armor_class: ac,
     }
 
-    const sig = JSON.stringify(patch)
+    const sig = JSON.stringify({ ...patch, armor_class: ac })
     if (sig === lastSentRef.current) return
     if (timerRef.current) window.clearTimeout(timerRef.current)
     setStatus('Saving…')
@@ -336,7 +345,9 @@ export function EquipmentPanel({
         return
       }
       setStatus('Saved!')
-      onSaved(patch)
+      // Include armor_class in the local state update so the character header
+      // and PlayerSidebar show the new AC without a page reload.
+      onSaved({ ...patch, armor_class: ac })
       window.setTimeout(() => setStatus(''), 900)
     }, 350)
   }

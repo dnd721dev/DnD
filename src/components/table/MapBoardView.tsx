@@ -620,7 +620,9 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     y: (screen.y - translate.y) / zoom,
   })
 
-  const snapToGrid = (value: number) => Math.round(value / gridSize) * gridSize
+  // Snap to tile CENTER (not the grid-line intersection) so the fog-reveal circle
+  // is always symmetric around the token.  See MapBoard.tsx snap() for details.
+  const snapToGrid = (value: number) => Math.floor(value / gridSize) * gridSize + gridSize / 2
 
   const canMoveToken = (t: Token) => {
     if (!ownerLower) return false

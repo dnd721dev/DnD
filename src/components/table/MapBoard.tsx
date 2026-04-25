@@ -584,7 +584,13 @@ const MapBoard: React.FC<MapBoardProps> = ({
     return { x: (p.x - translate.x) / zoom, y: (p.y - translate.y) / zoom };
   };
 
-  const snap = (v: number) => Math.round(v / gridSize) * gridSize;
+  // Snap to the CENTER of whichever grid tile the coordinate falls in, not the
+  // grid-line intersection.  Corner-snap (Math.round * gridSize) puts tokens on
+  // the boundary between two tiles; when the token is near x=0 the fog-reveal
+  // circle extends from –rTiles to +rTiles, but negative-x tiles are off-screen,
+  // so only the right half of the circle is visible — "clears the left half".
+  // Tile-center snap ensures the reveal is always symmetric around the token.
+  const snap = (v: number) => Math.floor(v / gridSize) * gridSize + gridSize / 2;
 
   /** HUD positioning */
   const updateHudPosition = (token: Token | null) => {
