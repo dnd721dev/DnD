@@ -68,6 +68,9 @@ export type CharacterSheetData = {
   resource_state?: Record<string, number> | null
   action_state?: Record<string, any> | null
 
+  // ✅ Campaign-aware notes: { general?: string, [campaignId: uuid]: string }
+  notes_data?: Record<string, string> | null
+
   // Languages, tool proficiencies, feats
   languages?: string[] | null
   tool_proficiencies?: string[] | null

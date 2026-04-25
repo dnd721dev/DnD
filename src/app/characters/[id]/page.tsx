@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
 import type { Abilities } from '../../../types/character'
-import type { CharacterSheetData, RollEntry } from '@/components/character-sheet/types'
+import type { CharacterSheetData } from '@/components/character-sheet/types'
 
 import { CharacterHeader } from '@/components/character-sheet/CharacterHeader'
 import { AbilitiesPanel } from '@/components/character-sheet/AbilitiesPanel'
@@ -13,7 +13,6 @@ import { SavingThrowsPanel } from '@/components/character-sheet/SavingThrowsPane
 import { SkillsPanel } from '@/components/character-sheet/SkillsPanel'
 import { TraitsFeaturesPanel } from '@/components/character-sheet/TraitsFeaturesPanel'
 import { SpellsPanel } from '@/components/character-sheet/SpellsPanel'
-import { RollLogPanel } from '@/components/character-sheet/RollLogPanel'
 import { PersonalityNotesPanel } from '@/components/character-sheet/PersonalityNotesPanel'
 import { ResourcesPanel } from '@/components/character-sheet/ResourcesPanel'
 import { CombatStatsPanel } from '@/components/character-sheet/CombatStatsPanel'
@@ -23,7 +22,8 @@ import { ConditionsPanel } from '@/components/character-sheet/ConditionsPanel'
 
 import { abilityMod } from '@/components/character-sheet/utils'
 import { deriveStats } from '@/components/character-sheet/calc'
-import { roll, rollD20WithCrit, rollDamageWithCrit } from '@/lib/dice'
+import { rollD20WithCrit, rollDamageWithCrit } from '@/lib/dice'
+import { useCharacterRoll } from '@/hooks/useCharacterRoll'
 import { levelForXp, xpForLevel } from '@/lib/rules'
 
 import { canUseAction, type SheetAction } from '@/lib/actions'
@@ -180,7 +180,10 @@ export default function CharacterSheetPage() {
     }
   }, [resourceValues, actionState, c, loading])
 
-  const [rollLog, setRollLog] = useState<RollEntry[]>([])
+  const { roll: charRoll } = useCharacterRoll({
+    characterId: c?.id ?? null,
+    rollerName: c?.name ?? 'Adventurer',
+  })
 
   const [activeTab, setActiveTab] = useState<
     'overview' | 'skills_traits' | 'gear' | 'magic' | 'notes'
@@ -218,17 +221,12 @@ export default function CharacterSheetPage() {
     await supabase.from('characters').update({ hit_points_current: next }).eq('id', c.id)
   }
 
-  function showRoll(label: string, formula: string, result: number) {
-    setRollLog((prev) => [{ label, formula: formula.trim(), result }, ...prev.slice(0, 14)])
-  }
-
   function rollAbilityCheck(abilityKey: string | number | symbol) {
     if (!c) return
     const k = String(abilityKey).toLowerCase() as keyof Abilities
     if (!(k in abilities)) return
     const mod = abilityMod(abilities[k])
-    const r = roll(`1d20+${mod}`)
-    showRoll(`${String(k).toUpperCase()} check`, `1d20+${mod}`, r.total)
+    charRoll({ label: `${String(k).toUpperCase()} check`, formula: `1d20+${mod}`, rollType: 'ability_check' })
   }
 
   function rollSavingThrow(abilityKey: string | number | symbol) {
@@ -238,8 +236,7 @@ export default function CharacterSheetPage() {
     const base = abilityMod(abilities[k])
     const hasProf = savingThrowSet.has(String(k).toLowerCase())
     const mod = base + (hasProf ? d.profBonus : 0)
-    const r = roll(`1d20+${mod}`)
-    showRoll(`${String(k).toUpperCase()} save`, `1d20+${mod}`, r.total)
+    charRoll({ label: `${String(k).toUpperCase()} save`, formula: `1d20+${mod}`, rollType: 'save' })
   }
 
   function rollMainAttack() {
@@ -252,7 +249,7 @@ export default function CharacterSheetPage() {
     const label = r.isCrit
       ? `CRIT Attack — ${d.weaponName ?? 'Unarmed'}`
       : `Attack — ${d.weaponName ?? 'Unarmed'}`
-    showRoll(label, d.attackFormula, r.total)
+    charRoll({ label, formula: d.attackFormula, rollType: 'attack' })
   }
 
   function rollMainDamage() {
@@ -278,13 +275,17 @@ export default function CharacterSheetPage() {
       setActionState((prev) => ({ ...prev, sneak_used_turn: true }))
       setSneakArmed(false)
 
-      showRoll(lastAttackWasCrit ? 'CRIT Sneak Attack' : 'Sneak Attack', sneak.formula, sneak.total)
+      charRoll({
+        label: lastAttackWasCrit ? 'CRIT Sneak Attack' : 'Sneak Attack',
+        formula: sneak.formula,
+        rollType: 'damage',
+      })
     }
 
     const label = lastAttackWasCrit
       ? `CRIT Damage — ${d.weaponName ?? 'Unarmed'}`
       : `Damage — ${d.weaponName ?? 'Unarmed'}`
-    showRoll(label, formula, total)
+    charRoll({ label, formula, rollType: 'damage' })
 
     // reset crit once spent
     setLastAttackWasCrit(false)
@@ -384,11 +385,9 @@ export default function CharacterSheetPage() {
         case 'setFlag':
           setActionState((prev) => ({ ...(prev ?? {}), [effect.flag]: effect.value }))
           break
-        case 'rollFormula': {
-          const r = roll(effect.formula)
-          showRoll(effect.label || action.name, effect.formula, r.total)
+        case 'rollFormula':
+          charRoll({ label: effect.label || action.name, formula: effect.formula, rollType: 'sheet' })
           break
-        }
         case 'rollAttack':
           rollMainAttack()
           break
@@ -396,7 +395,7 @@ export default function CharacterSheetPage() {
           rollMainDamage()
           break
         case 'logNote':
-          showRoll(action.name, effect.text, 0)
+          // logNote is purely informational — no dice roll, skip
           break
       }
     }
@@ -540,7 +539,7 @@ export default function CharacterSheetPage() {
         )}
       </div>
 
-      <div className="grid gap-4 items-start md:grid-cols-[1.4fr,2fr,1.2fr]">
+      <div className="grid gap-4 items-start md:grid-cols-[1.4fr,2fr]">
         {/* LEFT COLUMN — always visible core stats */}
         <div className="space-y-3">
           <AbilitiesPanel abilities={abilities} onRollAbilityCheck={rollAbilityCheck} />
@@ -588,7 +587,7 @@ export default function CharacterSheetPage() {
                 onShortRest={onShortRest}
                 onLongRest={onLongRest}
                 conMod={abilityMod(abilities.con)}
-                onRoll={({ label, formula, result }) => showRoll(label, formula, result)}
+                onRoll={({ label, formula }) => charRoll({ label, formula, rollType: 'sheet' })}
                 currentHp={Number(c.hit_points_current ?? d.hpMax)}
                 maxHp={d.hpMax}
                 onHpChange={(newHp) => {
@@ -633,10 +632,6 @@ export default function CharacterSheetPage() {
           )}
         </div>
 
-        {/* RIGHT COLUMN — roll log always visible */}
-        <div className="space-y-3">
-          <RollLogPanel rollLog={rollLog} />
-        </div>
       </div>
     </div>
   )

@@ -112,6 +112,7 @@ export function DiceLogOverlay(props: {
             const isHeads = isCoin && (entry.result === 1 || entry.outcome?.toLowerCase() === 'heads')
             const isCrit = entry.outcome === 'crit'
             const isFumble = entry.outcome === 'crit_miss'
+            const isSheet = entry.roll_type === 'sheet'
 
             // Parse modifier from formula (e.g. "2d6+3" → "+3", "1d20-1" → "-1")
             const modMatch = entry.formula.match(/([+-]\d+)$/)
@@ -127,6 +128,9 @@ export function DiceLogOverlay(props: {
                   <span className="text-[10px] text-slate-400">
                     {entry.label} · {entry.formula}
                   </span>
+                  {isSheet && (
+                    <span className="text-[9px] text-indigo-400/80">📋 Character Sheet</span>
+                  )}
                   {/* Individual dice breakdown */}
                   {!isCoin && entry.individual_dice && entry.individual_dice.length > 0 && (
                     <div className="flex flex-wrap items-center gap-1 pt-0.5">

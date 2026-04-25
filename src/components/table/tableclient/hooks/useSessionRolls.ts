@@ -14,6 +14,7 @@ function rowToEntry(row: any): DiceEntry {
     timestamp: new Date(row.created_at as string).toLocaleTimeString(),
     outcome: (row.outcome as string | null) ?? null,
     individual_dice: (row.individual_dice as DiceEntry['individual_dice']) ?? null,
+    roll_type: (row.roll_type as string | null) ?? null,
   }
 }
 
@@ -29,7 +30,7 @@ export function useSessionRolls(params: { sessionId: string; hasMounted: boolean
       const { data, error } = await supabase
         .from('session_rolls')
         .select(
-          'id, label, formula, result_total, created_at, roller_name, outcome, individual_dice'
+          'id, label, formula, result_total, created_at, roller_name, outcome, individual_dice, roll_type'
         )
         .eq('session_id', sessionId)
         .order('created_at', { ascending: false })

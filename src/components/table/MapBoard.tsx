@@ -720,15 +720,8 @@ const MapBoard: React.FC<MapBoardProps> = ({
           }
         }
 
-        // Bug 1: tell the player's MapBoardView to reveal fog at the exact
-        // placement position so the two code paths (placement vs movement)
-        // call the exact same revealAround function with confirmed coordinates.
-        if (payload.ownerWallet) {
-          window.dispatchEvent(new CustomEvent('dnd721-pc-token-placed', {
-            detail: { ownerWallet: payload.ownerWallet, x, y },
-          }));
-        }
-
+        // Realtime subscription in MapBoardView will pick up the new token and
+        // trigger revealAround automatically — no window event needed.
         window.dispatchEvent(new CustomEvent('dnd721-tokens-updated', { detail: { source: 'gm-place' } }));
       });
       return;

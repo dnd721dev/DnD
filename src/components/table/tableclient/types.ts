@@ -31,6 +31,8 @@ export type DiceEntry = {
   outcome?: string | null
   /** Individual die results as returned by the roll API and stored in session_rolls */
   individual_dice?: { die: string; value: number; dropped?: true }[] | null
+  /** Source of the roll — 'sheet' means it came from the character sheet UI */
+  roll_type?: string | null
 }
 
 export type ExternalRoll = {

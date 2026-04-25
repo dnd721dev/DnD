@@ -84,6 +84,9 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   const [tokens, setTokens] = useState<Token[]>([])
   const [reveals, setReveals] = useState<FogReveal[]>([])
   const [revealSet, setRevealSet] = useState<Set<string>>(new Set())
+  // Hidden until the first loadReveals() resolves to prevent a flash of
+  // fully-revealed map (or all-black fog) during the async DB fetch.
+  const [fogsLoaded, setFogsLoaded] = useState(false)
 
   // NOTE: Token-level condition overlays were removed (canvas sync was fragile).
   // Conditions remain available in Initiative + Monster panel.
@@ -296,8 +299,10 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     if (!ownerLower) {
       setReveals([])
       setRevealSet(new Set())
+      setFogsLoaded(false)
       return
     }
+    setFogsLoaded(false)
 
     let mounted = true
 
@@ -330,6 +335,7 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       const s = new Set<string>()
       for (const r of rows) s.add(keyTile(r.tile_x, r.tile_y))
       setRevealSet(s)
+      setFogsLoaded(true)
     }
 
     loadReveals()
@@ -371,6 +377,10 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
 
     console.log('[fog] revealAround', { center, visionPx, rTiles, originX, originY })
 
+    // Map bounds in tiles — clamp to avoid negative coords or off-map DB rows.
+    const maxTileX = canvasSize ? Math.floor(canvasSize.width  / gridSize) - 1 : Infinity
+    const maxTileY = canvasSize ? Math.floor(canvasSize.height / gridSize) - 1 : Infinity
+
     // Collect every tile whose center falls within the vision radius.
     // We do NOT filter against the current revealSet closure here because
     // revealSet may be a stale snapshot from an earlier render — filtering
@@ -381,6 +391,9 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       for (let dy = -rTiles; dy <= rTiles; dy++) {
         const tx = cx + dx
         const ty = cy + dy
+        // Skip tiles outside the map canvas — they'd be stored as negative or
+        // off-canvas coords (wasted DB rows, never drawn).
+        if (tx < 0 || ty < 0 || tx > maxTileX || ty > maxTileY) continue
         const px = (tx + 0.5) * gridSize
         const py = (ty + 0.5) * gridSize
         if (dist({ x: originX, y: originY }, { x: px, y: py }) <= visionPx) {
@@ -400,10 +413,14 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       for (const t of circleTiles) next.add(keyTile(t.tile_x, t.tile_y))
       return next
     })
-    // Append all circle tiles; the fog draw is idempotent (destination-out
-    // on an already-cleared pixel is a no-op), and loadReveals() will
-    // periodically replace this array with a deduped DB snapshot.
-    setReveals(prev => [...prev, ...circleTiles])
+    // Append only NEW tiles to keep the array bounded over a long session.
+    // The functional updater receives the latest state, so the key-set check
+    // is always accurate even for concurrent reveals.
+    setReveals(prev => {
+      const existing = new Set(prev.map((t) => keyTile(t.tile_x, t.tile_y)))
+      const incoming = circleTiles.filter((t) => !existing.has(keyTile(t.tile_x, t.tile_y)))
+      return incoming.length ? [...prev, ...incoming] : prev
+    })
 
     // Persist to DB — upsert with ignoreDuplicates handles server-side dedup
     const payload = circleTiles.map((t) => ({
@@ -425,39 +442,14 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     }
   // setRevealSet / setReveals are stable React dispatch functions — no dep needed.
   // supabase is a module singleton — no dep needed.
-  }, [ownerLower, visionPx, gridSize, encounterId, mapId])
+  }, [ownerLower, visionPx, gridSize, encounterId, mapId, canvasSize])
 
-  // Track whether the initial reveal has fired for this component mount.
-  // Using a ref (not state) so setting it doesn't schedule a re-render.
-  const revealedOnceRef = React.useRef(false)
-
-  // Bug 1: listen for placement events dispatched by MapBoard.tsx so that the
-  // placement reveal and the movement reveal use the EXACT same code path
-  // (both call revealAround with confirmed snap() coordinates).
+  // Reveal fog whenever the player's token appears or is replaced.
+  // revealAround upserts with ON CONFLICT DO NOTHING, so re-running it for the
+  // same position is safe and cheap. Tracking the full token-ID list (not just
+  // count) ensures a replacement at the same list-length also triggers a reveal.
+  const tokenIds = tokens.map((t) => t.id).join(',')
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ ownerWallet: string; x: number; y: number }>).detail
-      if (!detail || !ownerLower) return
-      if (detail.ownerWallet.toLowerCase() !== ownerLower) return
-      const px = Number(detail.x)
-      const py = Number(detail.y)
-      if (!Number.isFinite(px) || !Number.isFinite(py)) return
-      if (px === 0 && py === 0) return
-      console.log('[fog] placement reveal x=', px, 'y=', py, 'ownerLower=', ownerLower)
-      revealedOnceRef.current = true
-      void revealAround({ x: px, y: py })
-    }
-    window.addEventListener('dnd721-pc-token-placed', handler)
-    return () => window.removeEventListener('dnd721-pc-token-placed', handler)
-  }, [ownerLower, revealAround])
-
-  // Fallback: reveal when the component mounts with a token that already exists
-  // in the DB (e.g. player refreshes the page after the token was placed earlier).
-  // The revealedOnceRef guard prevents double-revealing when the placement event
-  // fires in the same session (same-tab GM placing a token).
-  useEffect(() => {
-    if (revealedOnceRef.current) return
     if (!ownerLower) return
     const myPc = tokens.find((t) => t.type === 'pc' && t.owner_wallet?.toLowerCase() === ownerLower)
     if (!myPc) return
@@ -469,10 +461,10 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     // Skip unpositioned tokens: snap() always produces multiples of gridSize,
     // so (0, 0) means "not yet placed" in almost all cases.
     if (px === 0 && py === 0) return
-    console.log('[fog] initial reveal (on load) myPc=', { x: px, y: py }, 'ownerLower=', ownerLower)
-    revealedOnceRef.current = true
+    console.log('[fog] token reveal x=', px, 'y=', py, 'ownerLower=', ownerLower)
     void revealAround({ x: px, y: py })
-  }, [ownerLower, tokens.length, revealAround])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownerLower, tokenIds, revealAround])
 
   // Draw map + grid
   useEffect(() => {
@@ -825,7 +817,10 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       <div className="relative inline-block" style={transformStyle}>
         <canvas ref={mapCanvasRef} className="block" />
         <canvas ref={tokenCanvasRef} className="pointer-events-none absolute left-0 top-0" />
-        <canvas ref={fogCanvasRef} className="pointer-events-none absolute left-0 top-0" />
+        <canvas
+          ref={fogCanvasRef}
+          className={`pointer-events-none absolute left-0 top-0 transition-opacity duration-300 ${fogsLoaded ? 'opacity-100' : 'opacity-0'}`}
+        />
       </div>
     </div>
   )

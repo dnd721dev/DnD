@@ -12,9 +12,10 @@ const RollSchema = z.object({
     .max(50)
     .regex(/^\d+[dD]\d+([+-]\d+)?$/, 'Invalid notation — use e.g. 1d20+5'),
 
-  sessionId: z.string().uuid(),
+  /** Optional — when absent the roll is not persisted to session_rolls. */
+  sessionId: z.string().uuid().optional(),
   rollType: z
-    .enum(['attack', 'skill', 'save', 'damage', 'initiative', 'ability_check', 'coin_flip', 'test', 'custom'])
+    .enum(['attack', 'skill', 'save', 'damage', 'initiative', 'ability_check', 'coin_flip', 'test', 'sheet', 'custom'])
     .default('custom'),
   label: z.string().max(100).optional().default(''),
   characterId: z.string().uuid().optional(),
@@ -27,6 +28,13 @@ const RollSchema = z.object({
 
   rollerName: z.string().max(80).optional().default('Adventurer'),
   rollerWallet: z.string().max(100).optional(),
+
+  /**
+   * When provided the client has already rolled locally (for instant feedback).
+   * The server skips its own roll and stores this value instead.
+   * Only honoured when sessionId is also provided so it lands in session_rolls.
+   */
+  prerolledTotal: z.number().int().min(-999).max(9999).optional(),
 })
 
 // ── Parsing ────────────────────────────────────────────────────────────────────
@@ -173,19 +181,22 @@ export async function POST(req: NextRequest) {
     disadvantage,
     rollerName,
     rollerWallet,
+    prerolledTotal,
   } = parsed.data
 
   const db = supabaseAdmin()
 
-  // ── Verify session exists ──────────────────────────────────────────────────
-  const { data: session } = await db
-    .from('sessions')
-    .select('id')
-    .eq('id', sessionId)
-    .maybeSingle()
+  // ── Verify session exists (only when sessionId provided) ───────────────────
+  if (sessionId) {
+    const { data: session } = await db
+      .from('sessions')
+      .select('id')
+      .eq('id', sessionId)
+      .maybeSingle()
 
-  if (!session) {
-    return NextResponse.json({ error: 'Session not found' }, { status: 404 })
+    if (!session) {
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 })
+    }
   }
 
   // ── Coin flip shortcut ─────────────────────────────────────────────────────
@@ -194,34 +205,38 @@ export async function POST(req: NextRequest) {
     const outcome = value === 1 ? 'Heads' : 'Tails'
     const coinNotation = '1d2'
 
-    const { data: row, error: insertErr } = await db
-      .from('session_rolls')
-      .insert({
-        session_id:      sessionId,
-        character_id:    characterId ?? null,
-        roller_wallet:   rollerWallet?.toLowerCase() ?? null,
-        roller_name:     rollerName,
-        roll_type:       'coin_flip',
-        label:           label || 'Coin Flip',
-        formula:         coinNotation,
-        result_total:    value,
-        individual_dice: [{ die: 'd2', value }],
-        outcome,
-        advantage:       false,
-        disadvantage:    false,
-      })
-      .select()
-      .maybeSingle()
+    let rollId: string | null = null
+    if (sessionId) {
+      const { data: row, error: insertErr } = await db
+        .from('session_rolls')
+        .insert({
+          session_id:      sessionId,
+          character_id:    characterId ?? null,
+          roller_wallet:   rollerWallet?.toLowerCase() ?? null,
+          roller_name:     rollerName,
+          roll_type:       'coin_flip',
+          label:           label || 'Coin Flip',
+          formula:         coinNotation,
+          result_total:    value,
+          individual_dice: [{ die: 'd2', value }],
+          outcome,
+          advantage:       false,
+          disadvantage:    false,
+        })
+        .select()
+        .maybeSingle()
 
-    if (insertErr) {
-      console.error('coin flip insert error', insertErr)
-      return NextResponse.json({ error: insertErr.message }, { status: 500 })
+      if (insertErr) {
+        console.error('coin flip insert error', insertErr)
+        return NextResponse.json({ error: insertErr.message }, { status: 500 })
+      }
+      rollId = row?.id ?? null
     }
 
     return NextResponse.json({
       results:       [value],
       total:         value,
-      rollId:        row?.id ?? null,
+      rollId,
       outcome,
       individualDice: [{ die: 'd2', value }],
     }, { status: 201 })
@@ -236,20 +251,33 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // ── Execute roll ───────────────────────────────────────────────────────────
+  // ── Execute roll (skip if client pre-rolled) ───────────────────────────────
   const rollOutput = executeRoll(parsedNotation, advantage, disadvantage)
+
+  // When the client sent a pre-rolled total (instant feedback path), trust it.
+  const finalTotal = prerolledTotal ?? rollOutput.total
 
   // ── Compute outcome ────────────────────────────────────────────────────────
   const outcome = await computeOutcome({
     rollType,
     kept:          rollOutput.kept,
     sides:         parsedNotation.sides,
-    total:         rollOutput.total,
+    total:         finalTotal,
     targetTokenId,
     db,
   })
 
-  // ── Persist ────────────────────────────────────────────────────────────────
+  // ── Persist (only when session provided) ──────────────────────────────────
+  if (!sessionId) {
+    return NextResponse.json({
+      results:        rollOutput.kept,
+      total:          finalTotal,
+      rollId:         null,
+      outcome,
+      individualDice: rollOutput.individualDice,
+    }, { status: 201 })
+  }
+
   const { data: row, error: insertErr } = await db
     .from('session_rolls')
     .insert({
@@ -260,8 +288,9 @@ export async function POST(req: NextRequest) {
       roll_type:       rollType,
       label:           label || notation,
       formula:         notation,
-      result_total:    rollOutput.total,
-      individual_dice: rollOutput.individualDice,
+      result_total:    finalTotal,
+      // When prerolledTotal is used, skip individual_dice (client already showed them)
+      individual_dice: prerolledTotal != null ? null : rollOutput.individualDice,
       target_token_id: targetTokenId ?? null,
       outcome:         outcome ?? null,
       advantage,
@@ -277,7 +306,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     results:        rollOutput.kept,
-    total:          rollOutput.total,
+    total:          finalTotal,
     rollId:         row?.id ?? null,
     outcome,
     individualDice: rollOutput.individualDice,

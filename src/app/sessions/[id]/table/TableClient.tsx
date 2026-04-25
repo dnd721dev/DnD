@@ -49,6 +49,8 @@ type SessionPlayerRow = {
   wallet_address: string
   character_id: string | null
   display_name?: string | null
+  vision?: number | null
+  race?: string | null
 }
 
 export default function TableClient({ sessionId }: TableClientProps) {
@@ -219,16 +221,6 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
   // ✅ Pull vision from character row — if missing, use simple 5e guess by race
   const visionFeet = useMemo(() => {
-    if (isGm) return 120
-    if (!selectedCharacter) return 30
-
-    const raw = (selectedCharacter as any)?.vision
-    const n = typeof raw === 'number' ? raw : Number(raw)
-    if (Number.isFinite(n) && n > 0) {
-      return Math.max(5, Math.min(240, Math.floor(n)))
-    }
-
-    const race = String(selectedCharacter.race ?? '').trim().toLowerCase()
     const darkvisionRaces = new Set([
       'elf',
       'dwarf',
@@ -240,8 +232,30 @@ export default function TableClient({ sessionId }: TableClientProps) {
       'tiefling',
       'drow',
     ])
+
+    // GM free view — unlimited sight, no fog
+    if (isGm && !gmViewWallet) return 120
+
+    // GM "View As" — use the selected player's actual vision radius, not the GM's
+    if (isGm && gmViewWallet) {
+      const viewed = sessionPlayers.find((p) => p.wallet_address === gmViewWallet)
+      const raw = viewed?.vision
+      const n = typeof raw === 'number' ? raw : Number(raw)
+      if (Number.isFinite(n) && n > 0) return Math.max(5, Math.min(240, Math.floor(n)))
+      const race = String(viewed?.race ?? '').trim().toLowerCase()
+      return darkvisionRaces.has(race) ? 60 : 30
+    }
+
+    // Player view
+    if (!selectedCharacter) return 30
+    const raw = (selectedCharacter as any)?.vision
+    const n = typeof raw === 'number' ? raw : Number(raw)
+    if (Number.isFinite(n) && n > 0) {
+      return Math.max(5, Math.min(240, Math.floor(n)))
+    }
+    const race = String(selectedCharacter.race ?? '').trim().toLowerCase()
     return darkvisionRaces.has(race) ? 60 : 30
-  }, [selectedCharacter, isGm])
+  }, [selectedCharacter, isGm, gmViewWallet, sessionPlayers])
 
   // ✅ GM: load session players list (for dropdown)
   useEffect(() => {
@@ -276,7 +290,31 @@ export default function TableClient({ sessionId }: TableClientProps) {
         const profileMap = new Map(
           (profiles ?? []).map((p: any) => [p.wallet_address as string, p.display_name as string | null])
         )
-        setSessionPlayers(rows.map((p) => ({ ...p, display_name: profileMap.get(p.wallet_address) ?? null })))
+
+        // Batch-fetch character vision + race so GM "View As" uses the correct radius
+        const charIds = rows.map((p) => p.character_id).filter(Boolean) as string[]
+        type CharVision = { id: string; vision: number | null; race: string | null }
+        const charMap = new Map<string, CharVision>()
+        if (charIds.length > 0) {
+          const { data: chars } = await supabase
+            .from('characters')
+            .select('id, vision, race')
+            .in('id', charIds)
+          if (!mounted) return
+          for (const ch of (chars ?? []) as CharVision[]) charMap.set(ch.id, ch)
+        }
+
+        setSessionPlayers(
+          rows.map((p) => {
+            const ch = p.character_id ? charMap.get(p.character_id) : undefined
+            return {
+              ...p,
+              display_name: profileMap.get(p.wallet_address) ?? null,
+              vision: ch?.vision ?? null,
+              race: ch?.race ?? null,
+            }
+          })
+        )
       } else {
         setSessionPlayers([])
       }
