@@ -64,7 +64,12 @@ export function TableTopBar(props: {
             {showDiceLog ? 'Hide Dice Log' : 'Show Dice Log'}
           </button>
           <div className="shrink-0">
-            <VoiceChat roomName={roomName} identity={identity} />
+            <VoiceChat
+              roomName={roomName}
+              identity={identity}
+              isGm={isGm}
+              sessionId={session.id}
+            />
           </div>
         </div>
 

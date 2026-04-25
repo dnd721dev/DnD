@@ -16,14 +16,25 @@ const StopRecordingSchema = z.object({
 
 type Params = { params: Promise<{ sessionId: string }> }
 
+// Bug 5 fix: validate env var before calling .replace() — undefined.replace() throws TypeError
+function livekitHost(): string {
+  const wsUrl = process.env.NEXT_PUBLIC_LIVEKIT_WS_URL
+  if (!wsUrl) throw new Error('NEXT_PUBLIC_LIVEKIT_WS_URL is not configured')
+  return wsUrl.replace('wss://', 'https://')
+}
+
 function makeEgressClient() {
-  const host = process.env.NEXT_PUBLIC_LIVEKIT_WS_URL!.replace('wss://', 'https://')
-  return new EgressClient(host, process.env.LIVEKIT_API_KEY!, process.env.LIVEKIT_API_SECRET!)
+  const apiKey    = process.env.LIVEKIT_API_KEY
+  const apiSecret = process.env.LIVEKIT_API_SECRET
+  if (!apiKey || !apiSecret) throw new Error('LIVEKIT_API_KEY / LIVEKIT_API_SECRET not configured')
+  return new EgressClient(livekitHost(), apiKey, apiSecret)
 }
 
 function makeRoomClient() {
-  const host = process.env.NEXT_PUBLIC_LIVEKIT_WS_URL!.replace('wss://', 'https://')
-  return new RoomServiceClient(host, process.env.LIVEKIT_API_KEY!, process.env.LIVEKIT_API_SECRET!)
+  const apiKey    = process.env.LIVEKIT_API_KEY
+  const apiSecret = process.env.LIVEKIT_API_SECRET
+  if (!apiKey || !apiSecret) throw new Error('LIVEKIT_API_KEY / LIVEKIT_API_SECRET not configured')
+  return new RoomServiceClient(livekitHost(), apiKey, apiSecret)
 }
 
 function makeS3Upload(
@@ -83,14 +94,13 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const timestamp  = new Date().toISOString().replace(/[:.]/g, '-')
   const ext        = audioOnly ? 'ogg' : 'mp4'
-  const fileKey    = `recordings/${sessionId}/${timestamp}.${ext}`
-  const publicBase = (process.env.RECORDING_S3_PUBLIC_BASE_URL ?? '').replace(/\/$/, '')
-  const s3Upload   = makeS3Upload(bucket, region, accessKey, secret)
+  const fileKey  = `recordings/${sessionId}/${timestamp}.${ext}`
+  const s3Upload = makeS3Upload(bucket, region, accessKey, secret)
 
   // ── 1. Start composite (room-wide) egress ────────────────────────────────
   let compositeEgress: any
   try {
-    const client = makeEgressClient()
+    const client = makeEgressClient()   // throws if env vars missing → caught below
     compositeEgress = await client.startRoomCompositeEgress(
       roomName,
       {
@@ -107,8 +117,9 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: err?.message ?? 'Failed to start recording' }, { status: 500 })
   }
 
-  const fileUrl = publicBase ? `${publicBase}/${fileKey}` : null
-
+  // Bug 7 fix: do NOT store file_url at recording start — the file doesn't
+  // exist on S3 yet.  The webhook sets file_url when the egress_ended event
+  // fires and the file is confirmed uploaded.
   const db = supabaseAdmin()
   const { data: recording, error: insertError } = await db
     .from('session_recordings')
@@ -118,7 +129,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       egress_id:  compositeEgress?.egressId ?? compositeEgress?.egress_id ?? null,
       status:     'recording',
       file_key:   fileKey,
-      file_url:   fileUrl,
+      file_url:   null,  // set by webhook when egress_ended fires
     })
     .select()
     .maybeSingle()
@@ -154,7 +165,6 @@ export async function POST(req: NextRequest, { params }: Params) {
           audioTrack.sid,
         )
 
-        const trackUrl = publicBase ? `${publicBase}/${trackKey}` : null
         const { data: trackRow } = await db
           .from('recording_tracks')
           .insert({
@@ -163,7 +173,8 @@ export async function POST(req: NextRequest, { params }: Params) {
             participant_identity: participant.identity,
             egress_id:            trackEgress?.egressId ?? trackEgress?.egress_id ?? null,
             file_key:             trackKey,
-            file_url:             trackUrl,
+            file_url:             null,       // set by webhook when egress_ended fires
+            file_status:          'recording',
           })
           .select()
           .maybeSingle()

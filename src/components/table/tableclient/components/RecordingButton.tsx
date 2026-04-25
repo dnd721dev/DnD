@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
+import { supabase } from '@/lib/supabase'
 
 type RecordingRow = {
   id: string
@@ -49,6 +50,33 @@ export function RecordingButton({ sessionId, roomName }: Props) {
   }, [sessionId])
 
   useEffect(() => { fetchStatus() }, [fetchStatus])
+
+  // Bug 9 fix: subscribe to session_recordings changes so the DM sees
+  // status transitions (processing → completed) without a page refresh.
+  useEffect(() => {
+    const channel = supabase
+      .channel(`recording-status-${sessionId}`)
+      .on(
+        'postgres_changes',
+        {
+          event:  'UPDATE',
+          schema: 'public',
+          table:  'session_recordings',
+          filter: `session_id=eq.${sessionId}`,
+        },
+        (payload) => {
+          const updated = payload.new as RecordingRow
+          setRecordings((prev) =>
+            prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r))
+          )
+          setRecording((prev) =>
+            prev?.id === updated.id ? { ...prev, ...updated } : prev
+          )
+        }
+      )
+      .subscribe()
+    return () => { void supabase.removeChannel(channel) }
+  }, [sessionId])
 
   useEffect(() => {
     if (!recording || recording.status !== 'recording') { setElapsed(0); return }
