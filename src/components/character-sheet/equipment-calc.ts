@@ -53,7 +53,15 @@ export function computeArmorClass(c: CharacterSheetData, abilities: Abilities): 
 
   // No armor (or invalid armor)
   if (!armor) {
-    const base = 10 + dexMod
+    const classKey = norm((c as any).main_job ?? '')
+    const conMod = abilityMod(abilities.con)
+    const wisMod = abilityMod(abilities.wis)
+
+    // Unarmored Defense: Barbarian = 10+DEX+CON, Monk = 10+DEX+WIS, everyone else = 10+DEX
+    let base = 10 + dexMod
+    if (classKey === 'barbarian') base = 10 + dexMod + conMod
+    else if (classKey === 'monk')  base = 10 + dexMod + wisMod
+
     const ac = base + (shieldEquipped ? 2 : 0)
     return { ac: Math.max(10, ac), armorName: null, shieldEquipped }
   }
@@ -96,14 +104,34 @@ export function computeMainAttack(
   // Unarmed fallback
   if (!weapon) {
     const strMod = abilityMod(abilities.str)
+    const dexMod = abilityMod(abilities.dex)
+    const classKey = norm((c as any).main_job ?? '')
+    const level   = Math.max(1, Number((c as any).level ?? 1))
+
+    // Monk Martial Arts: use higher of STR/DEX; damage die scales by level
+    let unarmedAbility: keyof Abilities = 'str'
+    let unarmedMod = strMod
+    if (classKey === 'monk' && dexMod > strMod) {
+      unarmedAbility = 'dex'
+      unarmedMod = dexMod
+    }
+
+    let damageDie = '1'
+    if (classKey === 'monk') {
+      if (level >= 17) damageDie = 'd10'
+      else if (level >= 11) damageDie = 'd8'
+      else if (level >= 5)  damageDie = 'd6'
+      else                  damageDie = 'd4'
+    }
+
     const proficient = true
-    const attackBonus = strMod + profBonus
+    const attackBonus = unarmedMod + profBonus
     return {
       weaponName: null,
-      attackAbility: 'str',
+      attackAbility: unarmedAbility,
       proficient,
       attackBonus,
-      damageFormula: `1+${strMod}`,
+      damageFormula: `${damageDie}+${unarmedMod}`,
       damageType: null,
       attackFormula: `1d20+${attackBonus}`,
     }

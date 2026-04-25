@@ -24,11 +24,18 @@ export function isProficientWithMainWeapon(c: CharacterSheetData): boolean {
   const martial = new Set(['fighter', 'barbarian', 'paladin', 'ranger'])
 
   // Simple-only by default (starter)
-  const simpleOnly = new Set(['wizard', 'sorcerer', 'warlock', 'cleric', 'druid', 'bard'])
+  const simpleOnly = new Set(['wizard', 'sorcerer', 'warlock', 'cleric', 'druid'])
 
   if (martial.has(job)) return true
 
-  // Rogue: simple + some martial (rapier/shortsword/hand crossbow etc.)
+  // Bard: simple + hand crossbow, longsword, rapier, shortsword
+  if (job === 'bard') {
+    if (weapon.category === 'simple') return true
+    const k = weapon.key
+    return k === 'hand_crossbow' || k === 'longsword' || k === 'rapier' || k === 'shortsword'
+  }
+
+  // Rogue: simple + rapier, shortsword, hand crossbow
   if (job === 'rogue') {
     if (weapon.category === 'simple') return true
     const k = weapon.key

@@ -1055,7 +1055,7 @@ export const FEATURES: Record<FeatureKey, Feature> = {
     key: 'monk_diamond_soul',
     name: 'Diamond Soul',
     class: 'monk',
-    level: 13,
+    level: 14, // ✅ fixed: was 13; 5e RAW = level 14
     sourceType: 'class',
     summary:
       'You gain proficiency in all saving throws. When you fail a save you can spend 1 ki point to reroll it.',

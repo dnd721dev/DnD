@@ -19,6 +19,9 @@ export type DerivedResource = {
 }
 
 export type CharacterLikeForSubclass = {
+  /** Preferred field name in CharacterSheetData */
+  subclass?: string | null
+  /** Legacy alias — supported for backwards compat */
   subclass_key?: string | null
   level?: number | null
   armor_key?: string | null
@@ -51,7 +54,7 @@ function getScaledValue(
 }
 
 export function applySubclassToDerived(c: CharacterLikeForSubclass, abilities: Abilities, d: DerivedLike) {
-  const subclass = (c.subclass_key ?? null) as SubclassKey | null
+  const subclass = (c.subclass ?? c.subclass_key ?? null) as SubclassKey | null
   if (!subclass) return d
 
   const classLevel = Math.max(1, Number(c.level ?? 1))

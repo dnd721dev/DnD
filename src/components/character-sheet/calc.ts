@@ -40,6 +40,9 @@ export type DerivedStats = {
   flags: Record<string, any>
   notes: string[]
   resources: DerivedResource[]
+
+  /** Rogue Sneak Attack: number of d6s (0 for non-rogues). Formula: Math.ceil(level / 2) */
+  sneakAttackDice: number
 }
 
 export function deriveStats(c: CharacterSheetData, abilities: Abilities): DerivedStats {
@@ -92,6 +95,13 @@ export function deriveStats(c: CharacterSheetData, abilities: Abilities): Derive
       ? dvRaw
       : (race?.vision === 'darkvision' ? 60 : 0)
 
+  // ✅ FIX: use main_job as the default class key (fallback to class_key if it exists)
+  const classKeyRaw = (c as any).class_key ?? (c as any).main_job ?? null
+  const classKey = String(classKeyRaw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+
   const d: DerivedStats = {
     level,
     profBonus,
@@ -120,14 +130,10 @@ export function deriveStats(c: CharacterSheetData, abilities: Abilities): Derive
     flags: {},
     notes: [],
     resources: [],
-  }
 
-  // ✅ FIX: use main_job as the default class key (fallback to class_key if it exists)
-  const classKeyRaw = (c as any).class_key ?? (c as any).main_job ?? null
-  const classKey = String(classKeyRaw ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '_')
+    // Rogue Sneak Attack: 1d6 at level 1, +1d6 every 2 levels (max 10d6 at level 19)
+    sneakAttackDice: classKey === 'rogue' ? Math.ceil(level / 2) : 0,
+  }
 
   if (classKey) {
     d.resources = [...(d.resources ?? []), ...getClassResources(classKey as any, level)]

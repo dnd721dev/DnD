@@ -31,15 +31,15 @@ export const CLASS_HIT_DIE: Partial<Record<ClassKey, string>> = {
   barbarian: 'd12',
   fighter: 'd10',
   paladin: 'd10',
-  rogue: 'd10',
+  rogue: 'd8',    // ✅ fixed: was 'd10'
   artificer: 'd8',
   cleric: 'd8',
   druid: 'd8',
   monk: 'd8',
   ranger: 'd8',
-  bard: 'd6',
+  bard: 'd8',     // ✅ fixed: was 'd6'
   sorcerer: 'd6',
-  warlock: 'd6',
+  warlock: 'd8',  // ✅ fixed: was 'd6'
   wizard: 'd6',
 }
 
@@ -63,7 +63,7 @@ export const CLASS_RESOURCES: Partial<Record<ClassKey, ClassResourceDef[]>> = {
   ],
 
   bard: [
-    { key: 'hit_die', name: 'Hit Dice (d6)', recharge: 'long_rest', die: 'd6', note: 'Spend during short rest to heal.', maxAtLevel: (lvl) => lvl },
+    { key: 'hit_die', name: 'Hit Dice (d8)', recharge: 'long_rest', die: 'd8', note: 'Spend during short rest to heal.', maxAtLevel: (lvl) => lvl }, // ✅ fixed: was d6
     {
       key: 'bard.bardic_inspiration',
       name: 'Bardic Inspiration',
@@ -115,7 +115,7 @@ export const CLASS_RESOURCES: Partial<Record<ClassKey, ClassResourceDef[]>> = {
       name: 'Second Wind',
       recharge: 'short_rest',
       note: 'Uses per short or long rest.',
-      maxAtLevel: (lvl) => (lvl >= 1 ? profBonusForLevel(lvl) : 0),
+      maxAtLevel: (lvl) => (lvl >= 1 ? 1 : 0), // ✅ fixed: was profBonusForLevel(lvl); 5e RAW = 1/short rest
     },
     {
       key: 'fighter.action_surge',
@@ -159,8 +159,10 @@ export const CLASS_RESOURCES: Partial<Record<ClassKey, ClassResourceDef[]>> = {
       key: 'paladin.divine_sense',
       name: 'Divine Sense',
       recharge: 'long_rest',
-      note: 'Uses per long rest.',
-      maxAtLevel: (lvl) => (lvl >= 1 ? Math.max(1, profBonusForLevel(lvl)) : 0),
+      // ✅ fixed: true formula is 1 + CHA modifier, which requires ability scores.
+      // Ability scores aren't available here, so we show 1 (floor) and explain in the note.
+      note: 'Uses = 1 + CHA modifier per long rest (shown as 1; edit resource_state if needed).',
+      maxAtLevel: (lvl) => (lvl >= 1 ? 1 : 0),
     },
     {
       key: 'paladin.lay_on_hands',
