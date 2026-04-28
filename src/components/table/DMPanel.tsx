@@ -630,12 +630,12 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
         })()}
       </section>
 
-      {/* ── Mid-session XP Award (active CAYA sessions) ───────────────────── */}
-      {sessionType === 'caya' && sessionStatus === 'active' && sessionId && gmWallet && (
+      {/* ── Mid-session XP Award (any active session — awards only to CAYA characters) ── */}
+      {sessionStatus === 'in_progress' && sessionId && gmWallet && (
         <section className="rounded-lg border border-violet-700/50 bg-violet-950/20 p-2">
           <p className="mb-1 text-xs font-semibold text-violet-200">Award XP</p>
           <p className="mb-2 text-[10px] text-slate-400">
-            Grants XP to all CAYA characters in this session.
+            Grants XP to all CAYA characters seated at this session.
           </p>
 
           {/* Quick preset buttons */}
