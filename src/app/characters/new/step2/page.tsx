@@ -397,11 +397,8 @@ export default function NewCharacterStep2Page() {
               <div className="text-[11px] font-semibold text-slate-300">{selectedBackground.name}</div>
               {selectedBackground.feature && (
                 <p className="text-[11px] text-slate-400">
-                  {typeof selectedBackground.feature === 'string'
-                    ? selectedBackground.feature
-                    : (selectedBackground.feature as any)?.description ??
-                      (selectedBackground.feature as any)?.name ??
-                      JSON.stringify(selectedBackground.feature)}
+                  <strong className="text-slate-300">{selectedBackground.feature.name}:</strong>{' '}
+                  {selectedBackground.feature.summary}
                 </p>
               )}
             </div>

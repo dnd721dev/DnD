@@ -63,17 +63,32 @@ export function xpToNextLevel(xp: number): number {
  * Compute Armor Class from an equipped armor key + DEX score.
  * If acOverride is provided (non-null), that value is used as-is.
  * Uses the armor's baseAc and dexCap from src/lib/armor.ts.
+ *
+ * Pass opts.classKey + opts.conScore/wisScore to get correct unarmored
+ * defense for Barbarian (10+DEX+CON) and Monk (10+DEX+WIS).
  */
 export function calcAC(
   armorKey: string | null | undefined,
   dexScore: number,
   acOverride?: number | null,
   shieldEquipped?: boolean,
+  opts?: { classKey?: string; conScore?: number; wisScore?: number },
 ): number {
   const shieldBonus = shieldEquipped ? 2 : 0
   if (acOverride != null) return acOverride + shieldBonus
   const dexMod = Math.floor((dexScore - 10) / 2)
-  if (!armorKey) return 10 + dexMod + shieldBonus
+  if (!armorKey) {
+    const cls = String(opts?.classKey ?? '').toLowerCase()
+    let base = 10 + dexMod
+    if (cls === 'barbarian' && opts?.conScore != null) {
+      const conMod = Math.floor((opts.conScore - 10) / 2)
+      base = 10 + dexMod + conMod
+    } else if (cls === 'monk' && opts?.wisScore != null) {
+      const wisMod = Math.floor((opts.wisScore - 10) / 2)
+      base = 10 + dexMod + wisMod
+    }
+    return base + shieldBonus
+  }
   // Dynamic import of ARMORS to avoid circular deps
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { ARMORS } = require('./armor') as { ARMORS: Record<string, { baseAc: number; dexCap: number | null }> }

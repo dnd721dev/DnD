@@ -321,15 +321,15 @@ export function EquipmentPanel({
       ac = computeArmorClass(simulatedC as any, abilities).ac
     }
 
-    // armor_class is GENERATED ALWAYS AS (ac) STORED in Postgres — never include it
-    // in an UPDATE patch or Postgres will throw "can only be updated to DEFAULT".
-    // We pass ac to onSaved() separately so the local React state reflects the new
-    // value immediately without waiting for a DB round-trip.
+    // Include ac in the patch so the DB column stays current when armor changes.
+    // DO NOT include armor_class — it is GENERATED ALWAYS AS (ac) STORED in Postgres;
+    // writing it directly throws "can only be updated to DEFAULT".
     const patch: Partial<CharacterSheetData> = {
       main_weapon_key: safeWeapon || null,
       armor_key: safeArmor || null,
       equipment_items: buildEquipmentItems(safeShieldEquipped),
       inventory_items: next.inventory.length ? (next.inventory as any) : null,
+      ac,
     }
 
     const sig = JSON.stringify({ ...patch, armor_class: ac })

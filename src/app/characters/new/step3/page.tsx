@@ -7,6 +7,7 @@ import type { CharacterDraft } from '../../../../types/characterDraft'
 import type { Abilities } from '../../../../types/character'
 import { RACE_LIST } from '@/lib/races'
 import { asiSlotsForClassLevel } from '@/lib/rules'
+import { FEAT_LIST, getFeat } from '@/lib/feats'
 
 type AbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
 
@@ -350,15 +351,35 @@ export default function NewCharacterStep3Page() {
                   )}
 
                   {choice.type === 'feat' && (
-                    <div className="space-y-1">
-                      <label className="text-[11px] text-slate-400">Feat name</label>
-                      <input
-                        type="text"
-                        className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-xs focus:border-cyan-400 focus:outline-none w-full"
-                        placeholder="e.g. War Caster, Sentinel, Lucky…"
-                        value={choice.featName ?? ''}
-                        onChange={(e) => setChoice(i, { featName: e.target.value })}
-                      />
+                    <div className="space-y-2">
+                      <div className="space-y-1">
+                        <label className="text-[11px] text-slate-400">Feat</label>
+                        <select
+                          className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-xs focus:border-cyan-400 focus:outline-none w-full"
+                          value={choice.featName ?? ''}
+                          onChange={(e) => setChoice(i, { featName: e.target.value || undefined })}
+                        >
+                          <option value="">— Choose a feat —</option>
+                          {FEAT_LIST.map((feat) => (
+                            <option key={feat.key} value={feat.key}>
+                              {feat.name}
+                              {feat.prerequisite ? ` (req: ${feat.prerequisite})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      {choice.featName && (() => {
+                        const feat = getFeat(choice.featName)
+                        if (!feat) return null
+                        return (
+                          <div className="rounded-md border border-amber-700/30 bg-amber-900/10 px-2 py-1.5 text-[11px] text-slate-300 space-y-0.5">
+                            {feat.prerequisite && (
+                              <p className="text-amber-300/80">Req: {feat.prerequisite}</p>
+                            )}
+                            <p>{feat.summary}</p>
+                          </div>
+                        )
+                      })()}
                     </div>
                   )}
                 </div>

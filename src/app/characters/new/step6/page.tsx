@@ -16,8 +16,8 @@ import { WEAPONS } from '@/lib/weapons'
 import { ARMORS } from '@/lib/armor'
 import { getPack, getGear, type PackKey } from '@/lib/equipment'
 
-// ✅ NEW: for HP calc
 import type { ClassKey } from '@/lib/subclasses'
+import { calcMaxHp } from '@/lib/hitPoints'
 
 const DEFAULT_ABILITIES: Abilities = {
   str: 10,
@@ -138,51 +138,7 @@ function buildInventoryFromDraft(draft: CharacterDraft): InventoryItem[] {
   return out
 }
 
-// ✅ NEW: class hit die + HP calc (kept local so you can paste one file)
-function hitDieForClass(classKeyRaw: string | null | undefined): number {
-  const k = String(classKeyRaw ?? 'fighter').toLowerCase()
-  switch (k) {
-    case 'barbarian':
-      return 12
-    case 'fighter':
-    case 'paladin':
-    case 'ranger':
-      return 10
-    case 'sorcerer':
-    case 'wizard':
-      return 6
-    case 'bard':
-    case 'cleric':
-    case 'druid':
-    case 'monk':
-    case 'rogue':
-    case 'warlock':
-    case 'artificer':
-    default:
-      return 8
-  }
-}
-
-function averageHpPerLevel(hitDie: number): number {
-  // d6=4, d8=5, d10=6, d12=7
-  return Math.floor(hitDie / 2) + 1
-}
-
-function calcMaxHp(args: { classKey: ClassKey | string; level: number; conScore: number }): number {
-  const level = Math.max(1, Math.min(20, Math.floor(args.level || 1)))
-  const hitDie = hitDieForClass(String(args.classKey))
-  const conMod = abilityMod(args.conScore)
-
-  // Level 1: max hit die + CON
-  const level1 = hitDie + conMod
-  if (level === 1) return Math.max(1, level1)
-
-  // Later levels: average + CON each level
-  const perLevel = averageHpPerLevel(hitDie) + conMod
-  const laterLevels = (level - 1) * perLevel
-
-  return Math.max(1, level1 + laterLevels)
-}
+// calcMaxHp is imported from @/lib/hitPoints (canonical source)
 
 export default function NewCharacterStep6Page() {
   const router = useRouter()
@@ -427,7 +383,13 @@ export default function NewCharacterStep6Page() {
         hp: computedMaxHp,
         hit_points_current: computedCurrentHp,
         hit_points_max: computedMaxHp,
-        ac: calcAC(draft.armorKey ?? null, abilitiesPayload.dex, draft.acOverride ?? null),
+        ac: calcAC(
+          draft.armorKey ?? null,
+          abilitiesPayload.dex,
+          draft.acOverride ?? null,
+          false,
+          { classKey, conScore: abilitiesPayload.con, wisScore: abilitiesPayload.wis },
+        ),
 
         // ✅ NEW: movement + vision authority
         speed_ft,
@@ -513,6 +475,39 @@ export default function NewCharacterStep6Page() {
     return <div className="text-sm text-slate-300">Loading final step…</div>
   }
 
+  // ── Background personality suggestion helpers ──────────────────────────────
+  type PersonalityField = 'personalityTraits' | 'ideals' | 'bonds' | 'flaws'
+
+  const bgKey = draft.backgroundKey as BackgroundKey | undefined
+  const bg = bgKey ? BACKGROUNDS[bgKey] : undefined
+
+  function appendSuggestion(field: PersonalityField, text: string) {
+    if (!draft) return
+    const current = (draft[field] as string | undefined) ?? ''
+    const next = current.trim() ? `${current.trim()}\n${text}` : text
+    updateDraft({ [field]: next })
+  }
+
+  function SuggestionChips(props: { suggestions: string[] | undefined; field: PersonalityField }) {
+    if (!props.suggestions?.length) return null
+    return (
+      <div className="flex flex-wrap gap-1 mt-1">
+        {props.suggestions.map((s, idx) => (
+          <button
+            key={idx}
+            type="button"
+            onClick={() => appendSuggestion(props.field, s)}
+            title={s}
+            className="max-w-[200px] truncate rounded-full border border-slate-600 bg-slate-800/60 px-2 py-0.5 text-[10px] text-slate-300 hover:border-cyan-500 hover:text-cyan-200 transition"
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    )
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
   return (
     <div className="space-y-6">
       <div className="space-y-1">
@@ -527,8 +522,15 @@ export default function NewCharacterStep6Page() {
         <span className="text-slate-500"> (from your pack + chosen weapon/armor)</span>
       </div>
 
+      {/* Background-aware personality section */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-3 text-xs">
+          {bg && (
+            <p className="text-[11px] text-slate-500">
+              Click a suggestion from your <span className="text-slate-300">{bg.name}</span> background to fill it in.
+            </p>
+          )}
+
           <div className="space-y-1">
             <label className="font-semibold text-slate-300">Personality Traits</label>
             <textarea
@@ -537,6 +539,7 @@ export default function NewCharacterStep6Page() {
               value={draft.personalityTraits ?? ''}
               onChange={(e) => updateDraft({ personalityTraits: e.target.value })}
             />
+            <SuggestionChips suggestions={bg?.personalityTraits} field="personalityTraits" />
             <p className="text-[11px] text-slate-500">Little quirks, habits, and behaviors that define how they act.</p>
           </div>
 
@@ -548,6 +551,7 @@ export default function NewCharacterStep6Page() {
               value={draft.ideals ?? ''}
               onChange={(e) => updateDraft({ ideals: e.target.value })}
             />
+            <SuggestionChips suggestions={bg?.ideals} field="ideals" />
             <p className="text-[11px] text-slate-500">What they believe in, fight for, or will never compromise on.</p>
           </div>
 
@@ -559,7 +563,8 @@ export default function NewCharacterStep6Page() {
               value={draft.bonds ?? ''}
               onChange={(e) => updateDraft({ bonds: e.target.value })}
             />
-            <p className="text-[11px] text-slate-500">People, places, or oaths they’re tied to.</p>
+            <SuggestionChips suggestions={bg?.bonds} field="bonds" />
+            <p className="text-[11px] text-slate-500">People, places, or oaths they're tied to.</p>
           </div>
 
           <div className="space-y-1">
@@ -570,6 +575,7 @@ export default function NewCharacterStep6Page() {
               value={draft.flaws ?? ''}
               onChange={(e) => updateDraft({ flaws: e.target.value })}
             />
+            <SuggestionChips suggestions={bg?.flaws} field="flaws" />
             <p className="text-[11px] text-slate-500">The cracks in their armor that make them interesting.</p>
           </div>
         </div>

@@ -9,18 +9,32 @@ const CLASS_PROFS: Record<
   ClassKey,
   {
     weapons: ('simple' | 'martial' | 'all')[]
+    /** Specific weapon keys allowed in addition to the weapon groups above. */
+    extraWeaponKeys?: string[]
     armor: ('light' | 'medium' | 'heavy' | 'shields' | 'all' | 'none')[]
   }
 > = {
   barbarian: { weapons: ['simple', 'martial'], armor: ['light', 'medium', 'shields'] },
-  bard: { weapons: ['simple'], armor: ['light'] },
+  bard: {
+    weapons: ['simple'],
+    extraWeaponKeys: ['rapier', 'longsword', 'shortsword', 'hand_crossbow'],
+    armor: ['light'],
+  },
   cleric: { weapons: ['simple'], armor: ['light', 'medium', 'shields'] },
   druid: { weapons: ['simple'], armor: ['light', 'medium', 'shields'] },
   fighter: { weapons: ['all'], armor: ['all'] },
-  monk: { weapons: ['simple'], armor: ['none'] },
+  monk: {
+    weapons: ['simple'],
+    extraWeaponKeys: ['shortsword'],
+    armor: ['none'],
+  },
   paladin: { weapons: ['all'], armor: ['all'] },
   ranger: { weapons: ['simple', 'martial'], armor: ['light', 'medium', 'shields'] },
-  rogue: { weapons: ['simple'], armor: ['light'] },
+  rogue: {
+    weapons: ['simple'],
+    extraWeaponKeys: ['rapier', 'shortsword', 'longbow', 'hand_crossbow'],
+    armor: ['light'],
+  },
   sorcerer: { weapons: ['simple'], armor: ['none'] },
   warlock: { weapons: ['simple'], armor: ['light'] },
   wizard: { weapons: ['simple'], armor: ['none'] },
@@ -61,6 +75,10 @@ export function classCanUseWeapon(classKeyRaw: any, weapon: any): boolean {
   const prof = CLASS_PROFS[classKey] ?? CLASS_PROFS.fighter
 
   if (prof.weapons.includes('all')) return true
+
+  // Check specific weapon key exceptions (e.g. Bard's rapier, Rogue's longbow)
+  const wKey = norm(weapon?.key)
+  if (wKey && prof.extraWeaponKeys?.some((k) => norm(k) === wKey)) return true
 
   const g = weaponGroup(weapon)
   if (!g) return true // if we can't detect, don't hide it (safe default)

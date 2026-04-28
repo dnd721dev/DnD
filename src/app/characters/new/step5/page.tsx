@@ -212,7 +212,9 @@ export default function NewCharacterStep5Page() {
     const classArmorOptions = allArmors.filter((a) => classCanUseArmor(classKey, a))
 
     const defaultWeaponKey = classWeaponOptions[0]?.key ?? (allWeapons[0]?.key ?? 'club')
-    const defaultArmorKey = classArmorOptions[0]?.key ?? (allArmors[0]?.key ?? 'padded')
+    // Unarmored classes (monk, wizard, sorcerer) have an empty classArmorOptions list.
+    // Default to '' (no armor) instead of falling back to the first armor in the full list.
+    const defaultArmorKey = classArmorOptions[0]?.key ?? ''
 
     // Use saved keys if still valid; otherwise fall back to allowed defaults
     const savedWeapon = existing.mainWeaponKey ?? defaultWeaponKey
@@ -260,7 +262,8 @@ export default function NewCharacterStep5Page() {
         next.mainWeaponKey = allowedWeapons[0]?.key ?? next.mainWeaponKey
       }
       if (next.armorKey && !allowedArmors.some((a) => a.key === next.armorKey)) {
-        next.armorKey = allowedArmors[0]?.key ?? next.armorKey
+        // For unarmored classes allowedArmors is empty — fall to null, not back to old key.
+        next.armorKey = allowedArmors[0]?.key ?? null
       }
 
       // ✅ recompute owned items whenever weapon/armor/pack changes
@@ -295,8 +298,10 @@ export default function NewCharacterStep5Page() {
   const currentWeapon =
     weaponOptions.find((w) => w.key === draft.mainWeaponKey) ?? weaponOptions[0]
 
-  const currentArmor =
-    armorOptions.find((a) => a.key === draft.armorKey) ?? armorOptions[0]
+  // null when no armor is selected (unarmored class or explicit "No armor")
+  const currentArmor = draft.armorKey
+    ? (armorOptions.find((a) => a.key === draft.armorKey) ?? null)
+    : null
 
   const currentPack =
     packOptions.find((p) => p.key === draft.packKey) ?? packOptions[0]
@@ -356,9 +361,10 @@ export default function NewCharacterStep5Page() {
 
           <select
             className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
-            value={draft.armorKey ?? armorOptions[0]?.key}
-            onChange={(e) => updateDraft({ armorKey: e.target.value })}
+            value={draft.armorKey ?? ''}
+            onChange={(e) => updateDraft({ armorKey: e.target.value || null })}
           >
+            <option value="">No armor (Unarmored)</option>
             {armorOptions.map((a) => (
               <option key={a.key} value={a.key}>
                 {a.name}
@@ -366,40 +372,58 @@ export default function NewCharacterStep5Page() {
             ))}
           </select>
 
-          {currentArmor ? (
-            <div className="rounded-lg border border-slate-800 bg-slate-900/80 px-3 py-2 text-xs space-y-1">
-              <p className="text-slate-300">
-                <span className="font-semibold">Base AC:</span> {currentArmor.baseAc}
-              </p>
-              <p className="text-slate-300">
-                <span className="font-semibold">Dex:</span>{' '}
-                {currentArmor.dexCap === null
-                  ? '+Dex (no cap)'
-                  : currentArmor.dexCap === 0
-                    ? 'No Dex'
-                    : `+Dex (max ${currentArmor.dexCap})`}
-              </p>
-              <p className="text-slate-300">
-                <span className="font-semibold">Category:</span> {currentArmor.category}
-              </p>
-              {currentArmor.strengthRequirement != null ? (
-                <p className="text-[11px] text-slate-500">Str req: {currentArmor.strengthRequirement}</p>
-              ) : null}
-              {currentArmor.disadvantageOnStealth ? (
-                <p className="text-[11px] text-slate-500">Disadvantage on Stealth</p>
-              ) : null}
-              {(() => {
-                const dexScore = (draft.baseAbilities?.dex ?? 10) + (draft.abilityBonuses?.dex ?? 0)
-                const computedAC = calcAC(currentArmor.key, dexScore, draft.acOverride ?? null)
-                return (
-                  <div className="mt-2 flex items-center gap-2 rounded-md border border-cyan-700/40 bg-cyan-900/20 px-2 py-1.5">
-                    <div className="text-[11px] text-cyan-300 font-semibold">Computed AC: {computedAC}</div>
-                    <div className="text-[11px] text-slate-500">(with your DEX {dexScore > 10 ? `+${Math.floor((dexScore-10)/2)}` : Math.floor((dexScore-10)/2)})</div>
-                  </div>
-                )
-              })()}
-            </div>
-          ) : null}
+          {(() => {
+            const dexScore = (draft.baseAbilities?.dex ?? 10) + (draft.abilityBonuses?.dex ?? 0)
+            const conScore = (draft.baseAbilities?.con ?? 10) + (draft.abilityBonuses?.con ?? 0)
+            const wisScore = (draft.baseAbilities?.wis ?? 10) + (draft.abilityBonuses?.wis ?? 0)
+            const computedAC = calcAC(
+              draft.armorKey ?? null,
+              dexScore,
+              draft.acOverride ?? null,
+              false,
+              { classKey: draft.classKey ?? 'fighter', conScore, wisScore },
+            )
+            const dexMod = Math.floor((dexScore - 10) / 2)
+            const dexLabel = dexMod >= 0 ? `+${dexMod}` : String(dexMod)
+            return (
+              <div className="rounded-lg border border-slate-800 bg-slate-900/80 px-3 py-2 text-xs space-y-1">
+                {currentArmor ? (
+                  <>
+                    <p className="text-slate-300">
+                      <span className="font-semibold">Base AC:</span> {currentArmor.baseAc}
+                    </p>
+                    <p className="text-slate-300">
+                      <span className="font-semibold">Dex:</span>{' '}
+                      {currentArmor.dexCap === null
+                        ? '+Dex (no cap)'
+                        : currentArmor.dexCap === 0
+                          ? 'No Dex'
+                          : `+Dex (max ${currentArmor.dexCap})`}
+                    </p>
+                    <p className="text-slate-300">
+                      <span className="font-semibold">Category:</span> {currentArmor.category}
+                    </p>
+                    {currentArmor.strengthRequirement != null ? (
+                      <p className="text-[11px] text-slate-500">Str req: {currentArmor.strengthRequirement}</p>
+                    ) : null}
+                    {currentArmor.disadvantageOnStealth ? (
+                      <p className="text-[11px] text-slate-500">Disadvantage on Stealth</p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="text-[11px] text-slate-500">
+                    Unarmored — AC = 10 + DEX
+                    {String(draft.classKey ?? '').toLowerCase() === 'barbarian' ? ' + CON' : ''}
+                    {String(draft.classKey ?? '').toLowerCase() === 'monk' ? ' + WIS' : ''}
+                  </p>
+                )}
+                <div className="mt-2 flex items-center gap-2 rounded-md border border-cyan-700/40 bg-cyan-900/20 px-2 py-1.5">
+                  <div className="text-[11px] text-cyan-300 font-semibold">Computed AC: {computedAC}</div>
+                  <div className="text-[11px] text-slate-500">(DEX {dexLabel})</div>
+                </div>
+              </div>
+            )
+          })()}
         </div>
 
         {/* Pack */}
