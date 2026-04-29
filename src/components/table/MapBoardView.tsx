@@ -109,6 +109,12 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   const panStartRef = useRef<Point | null>(null)
   const panTranslateStartRef = useRef<Point | null>(null)
 
+  // Multi-touch pinch-to-zoom tracking
+  const activePointersRef = useRef<Map<number, Point>>(new Map())
+  const pinchStartDistRef = useRef<number | null>(null)
+  const pinchStartZoomRef = useRef<number>(1)
+  const pinchMidRef       = useRef<Point | null>(null)
+
   const ownerLower = useMemo(() => (ownerWallet ? ownerWallet.toLowerCase() : null), [ownerWallet])
 
   // Canvas dimensions driven by tile data or image
@@ -592,15 +598,8 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     ctx.restore()
   }, [canvasSize, reveals, gridSize])
 
-  // Helpers
-  const getScreenPointFromMouse = (e: React.MouseEvent) => {
-    const container = containerRef.current
-    if (!container) return { x: 0, y: 0 }
-    const rect = container.getBoundingClientRect()
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top }
-  }
-
-  const getScreenPointFromWheel = (e: React.WheelEvent) => {
+  // Helpers — accept any event with clientX/clientY (pointer, mouse, wheel)
+  const getScreenPoint = (e: { clientX: number; clientY: number }) => {
     const container = containerRef.current
     if (!container) return { x: 0, y: 0 }
     const rect = container.getBoundingClientRect()
@@ -629,10 +628,24 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     return true
   }
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId)
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+    // Two-finger pinch: snapshot zoom state
+    if (activePointersRef.current.size >= 2) {
+      const pts = Array.from(activePointersRef.current.values())
+      pinchStartDistRef.current = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y)
+      pinchStartZoomRef.current = zoom
+      pinchMidRef.current = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 }
+      setIsPanning(false)
+      setDragTokenId(null)
+      return
+    }
+
     if (e.button !== 0) return
 
-    const screen = getScreenPointFromMouse(e)
+    const screen = getScreenPoint(e)
     const world = screenToWorld(screen)
 
     const hit = tokens.find((t) => Math.hypot(t.x - world.x, t.y - world.y) < gridSize * 0.5)
@@ -658,8 +671,33 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     }
   }
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const screen = getScreenPointFromMouse(e)
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+    // Two-finger pinch zoom
+    if (activePointersRef.current.size >= 2 && pinchStartDistRef.current !== null) {
+      const pts = Array.from(activePointersRef.current.values())
+      const newDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y)
+      const newZoom = clamp(
+        pinchStartZoomRef.current * (newDist / pinchStartDistRef.current),
+        MIN_ZOOM,
+        MAX_ZOOM,
+      )
+      if (newZoom !== zoom && pinchMidRef.current) {
+        const rect = containerRef.current?.getBoundingClientRect()
+        if (rect) {
+          const midX = pinchMidRef.current.x - rect.left
+          const midY = pinchMidRef.current.y - rect.top
+          const worldX = (midX - translate.x) / zoom
+          const worldY = (midY - translate.y) / zoom
+          setZoom(newZoom)
+          setTranslate({ x: midX - worldX * newZoom, y: midY - worldY * newZoom })
+        }
+      }
+      return
+    }
+
+    const screen = getScreenPoint(e)
     const world = screenToWorld(screen)
 
     if (isPanning && panStartRef.current && panTranslateStartRef.current) {
@@ -693,7 +731,9 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     }
   }
 
-  const handleMouseUp = async () => {
+  const handlePointerUp = async (e: React.PointerEvent<HTMLDivElement>) => {
+    activePointersRef.current.delete(e.pointerId)
+    if (activePointersRef.current.size < 2) pinchStartDistRef.current = null
     // ✅ target selection (click token)
     if (!dragTokenId && clickTokenIdRef.current) {
       const tok = tokens.find((t) => t.id === clickTokenIdRef.current)
@@ -769,10 +809,15 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     )
   }
 
-  const handleMouseLeave = () => {
-    if (isPanning) setIsPanning(false)
-    setDragTokenId(null)
-    dragStartTokenRef.current = null
+  const handlePointerLeave = (e: React.PointerEvent<HTMLDivElement>) => {
+    activePointersRef.current.delete(e.pointerId)
+    if (activePointersRef.current.size < 2) pinchStartDistRef.current = null
+    // Only clear pan/drag if no pointers remain (pointer capture keeps them active during drag)
+    if (activePointersRef.current.size === 0) {
+      if (isPanning) setIsPanning(false)
+      setDragTokenId(null)
+      dragStartTokenRef.current = null
+    }
   }
 
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
@@ -783,7 +828,7 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     const newZoom = clamp(zoom * zoomFactor, MIN_ZOOM, MAX_ZOOM)
     if (newZoom === zoom) return
 
-    const screen = getScreenPointFromWheel(e)
+    const screen = getScreenPoint(e)
     const worldX = (screen.x - translate.x) / zoom
     const worldY = (screen.y - translate.y) / zoom
 
@@ -808,10 +853,12 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     <div
       ref={containerRef}
       className="relative h-full w-full overflow-hidden overscroll-none rounded-xl border border-slate-800 bg-slate-950/80"
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseLeave}
+      style={{ touchAction: 'none' }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerLeave}
+      onPointerCancel={handlePointerLeave}
       onWheel={handleWheel}
     >
       <div className="relative inline-block" style={transformStyle}>

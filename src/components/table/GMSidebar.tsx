@@ -253,7 +253,7 @@ export default function GMSidebar({
 
         {/* ⚔ Combat: InitiativeTracker (left) + MonsterLibrary (right) */}
         {activeTab === 'combat' && (
-          <div className="grid h-full grid-cols-2 gap-2">
+          <div className="grid h-full grid-cols-1 gap-2 sm:grid-cols-2">
             <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
               <InitiativeTracker encounterId={encounterId ?? null} sessionId={sessionId ?? null} onRoundChange={setCombatRound} />
             </div>
@@ -269,7 +269,7 @@ export default function GMSidebar({
 
         {/* 🎲 Tools: DMPanel (left) + TriggersPanel (right) */}
         {activeTab === 'tools' && (
-          <div className="grid h-full grid-cols-2 gap-2">
+          <div className="grid h-full grid-cols-1 gap-2 sm:grid-cols-2">
             <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
               {encounterId ? (
                 <DMPanel
@@ -299,7 +299,7 @@ export default function GMSidebar({
 
         {/* 📜 Session: Handouts+Notes (left) + Chat (right) */}
         {activeTab === 'session' && (
-          <div className="grid h-full grid-cols-2 gap-2">
+          <div className="grid h-full grid-cols-1 gap-2 sm:grid-cols-2">
             <div className="flex flex-col gap-2 overflow-y-auto">
               <div className="rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
                 {sessionId ? (

@@ -108,31 +108,42 @@ export function computeMainAttack(
     const classKey = norm((c as any).main_job ?? '')
     const level   = Math.max(1, Number((c as any).level ?? 1))
 
-    // Monk Martial Arts: use higher of STR/DEX; damage die scales by level
-    let unarmedAbility: keyof Abilities = 'str'
-    let unarmedMod = strMod
-    if (classKey === 'monk' && dexMod > strMod) {
-      unarmedAbility = 'dex'
-      unarmedMod = dexMod
-    }
+    const isMonk = classKey === 'monk'
 
-    let damageDie = '1'
-    if (classKey === 'monk') {
-      if (level >= 17) damageDie = 'd10'
-      else if (level >= 11) damageDie = 'd8'
-      else if (level >= 5)  damageDie = 'd6'
-      else                  damageDie = 'd4'
-    }
+    // Monks use STR or DEX — whichever modifier is higher
+    const unarmedAbility: keyof Abilities = (isMonk && dexMod > strMod) ? 'dex' : 'str'
+    const unarmedMod = unarmedAbility === 'dex' ? dexMod : strMod
 
     const proficient = true
     const attackBonus = unarmedMod + profBonus
+
+    let damageFormula: string
+    if (isMonk) {
+      // Monk Martial Arts die scales by level (5e RAW)
+      // Level  1-4:  1d6
+      // Level  5-10: 1d8
+      // Level 11-16: 1d10
+      // Level 17-20: 1d12
+      let die: string
+      if      (level >= 17) die = '1d12'
+      else if (level >= 11) die = '1d10'
+      else if (level >= 5)  die = '1d8'
+      else                  die = '1d6'
+      const modStr = unarmedMod >= 0 ? `+${unarmedMod}` : `${unarmedMod}`
+      damageFormula = `${die}${modStr}`
+    } else {
+      // Non-monk: flat 1 + STR modifier (no damage die, 5e RAW)
+      const total = 1 + strMod
+      damageFormula = String(total)
+    }
+
     return {
       weaponName: null,
       attackAbility: unarmedAbility,
       proficient,
       attackBonus,
-      damageFormula: `${damageDie}+${unarmedMod}`,
-      damageType: null,
+      damageFormula,
+      damageType: 'bludgeoning',
       attackFormula: `1d20+${attackBonus}`,
     }
   }

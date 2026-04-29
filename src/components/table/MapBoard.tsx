@@ -107,6 +107,12 @@ const MapBoard: React.FC<MapBoardProps> = ({
   const [fogRevealSet, setFogRevealSet] = useState<Set<string>>(new Set());
   const isFogPaintingRef = useRef(false);
 
+  // Multi-touch pinch-to-zoom tracking
+  const activePointersRef   = useRef<Map<number, Point>>(new Map());
+  const pinchStartDistRef   = useRef<number | null>(null);
+  const pinchStartZoomRef   = useRef<number>(1);
+  const pinchMidRef         = useRef<Point | null>(null);
+
   // Trigger placement mode
   const [triggerMode, setTriggerMode] = useState(false);
   const [hoveredTile, setHoveredTile] = useState<{ x: number; y: number } | null>(null);
@@ -572,14 +578,14 @@ const MapBoard: React.FC<MapBoardProps> = ({
     else setFogRevealSet(new Set());
   };
 
-  /** Math helpers */
-  const getScreenPoint = (e: React.MouseEvent) => {
+  /** Math helpers — accept any event with clientX/clientY (mouse, pointer, wheel) */
+  const getScreenPoint = (e: { clientX: number; clientY: number }) => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return { x: 0, y: 0 };
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   };
 
-  const getWorldPoint = (e: React.MouseEvent) => {
+  const getWorldPoint = (e: { clientX: number; clientY: number }) => {
     const p = getScreenPoint(e);
     return { x: (p.x - translate.x) / zoom, y: (p.y - translate.y) / zoom };
   };
@@ -604,11 +610,30 @@ const MapBoard: React.FC<MapBoardProps> = ({
     updateHudPosition(tok);
   }, [hudTokenId, tokens, zoom, translate]);
 
-  /** Mouse events */
-  const onDown = (e: React.MouseEvent) => {
+  /** Pointer events — handles mouse, touch, and stylus uniformly */
+  const onDown = (e: React.PointerEvent) => {
+    // Capture so pointermove / pointerup fire even when pointer leaves the element
+    e.currentTarget.setPointerCapture(e.pointerId);
+
+    // Track all active pointers
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    // Two-finger pinch: snapshot zoom state and bail — no other mode should start
+    if (activePointersRef.current.size >= 2) {
+      const pts = Array.from(activePointersRef.current.values());
+      pinchStartDistRef.current = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+      pinchStartZoomRef.current = zoom;
+      pinchMidRef.current = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+      isFogPaintingRef.current = false;
+      setIsPanning(false);
+      setDragTokenId(null);
+      return;
+    }
+
+    // Skip non-primary pointer buttons on mouse (right-click, middle-click)
     if (e.button !== 0) return;
 
-    // Trigger placement mode — click a tile to place or edit a trigger
+    // Trigger placement mode — click/tap a tile to place or edit a trigger
     if (triggerMode) {
       const world = getWorldPoint(e);
       const tileX = Math.floor(world.x / gridSize);
@@ -745,7 +770,30 @@ const MapBoard: React.FC<MapBoardProps> = ({
     }
   };
 
-  const onMove = (e: React.MouseEvent) => {
+  const onMove = (e: React.PointerEvent) => {
+    // Update position for this pointer
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    // Two-finger pinch zoom
+    if (activePointersRef.current.size >= 2 && pinchStartDistRef.current !== null) {
+      const pts = Array.from(activePointersRef.current.values());
+      const newDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+      const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM,
+        pinchStartZoomRef.current * (newDist / pinchStartDistRef.current)));
+      if (newZoom !== zoom && pinchMidRef.current) {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) {
+          const midX = pinchMidRef.current.x - rect.left;
+          const midY = pinchMidRef.current.y - rect.top;
+          const worldX = (midX - translate.x) / zoom;
+          const worldY = (midY - translate.y) / zoom;
+          setZoom(newZoom);
+          setTranslate({ x: midX - worldX * newZoom, y: midY - worldY * newZoom });
+        }
+      }
+      return;
+    }
+
     // In trigger mode, track which tile the cursor is over for the highlight overlay
     if (triggerMode) {
       const world = getWorldPoint(e);
@@ -784,7 +832,9 @@ const MapBoard: React.FC<MapBoardProps> = ({
     }
   };
 
-  const onUp = async () => {
+  const onUp = async (e: React.PointerEvent) => {
+    activePointersRef.current.delete(e.pointerId);
+    if (activePointersRef.current.size < 2) pinchStartDistRef.current = null;
     if (fogToolActive) { isFogPaintingRef.current = false; return; }
     if (rulerActive && measureStart && measureEnd) {
       setMeasureFrozen(true);
@@ -811,7 +861,17 @@ const MapBoard: React.FC<MapBoardProps> = ({
     await supabase.from('tokens').update({ x: t.x, y: t.y }).eq('id', t.id);
   };
 
-  const onLeave = () => { isFogPaintingRef.current = false; setIsPanning(false); setDragTokenId(null); };
+  const onLeave = (e: React.PointerEvent) => {
+    activePointersRef.current.delete(e.pointerId);
+    if (activePointersRef.current.size < 2) pinchStartDistRef.current = null;
+    isFogPaintingRef.current = false;
+    // With pointer capture, pointerup is the authoritative cleanup.
+    // Only clear pan/drag if no pointers remain at all.
+    if (activePointersRef.current.size === 0) {
+      setIsPanning(false);
+      setDragTokenId(null);
+    }
+  };
 
   const onContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -884,11 +944,15 @@ const MapBoard: React.FC<MapBoardProps> = ({
     <div
       ref={containerRef}
       className="relative h-full w-full overflow-hidden overscroll-none rounded-xl border border-slate-800 bg-slate-950/80"
-      style={{ cursor: fogToolActive ? 'cell' : triggerMode ? 'crosshair' : rulerActive ? 'crosshair' : placementPending ? 'crosshair' : undefined }}
-      onMouseDown={onDown}
-      onMouseMove={onMove}
-      onMouseUp={onUp}
-      onMouseLeave={onLeave}
+      style={{
+        cursor: fogToolActive ? 'cell' : triggerMode ? 'crosshair' : rulerActive ? 'crosshair' : placementPending ? 'crosshair' : undefined,
+        touchAction: 'none',
+      }}
+      onPointerDown={onDown}
+      onPointerMove={onMove}
+      onPointerUp={onUp}
+      onPointerLeave={onLeave}
+      onPointerCancel={onLeave}
       onContextMenu={onContextMenu}
       onWheel={onWheel}
     >
@@ -1020,7 +1084,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
       {/* Trigger placement mode banner */}
       {triggerMode && (
         <div className="pointer-events-auto absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-orange-600/60 bg-slate-950/90 px-3 py-1.5 text-xs text-orange-200 shadow-lg">
-          <span>☠ Click a tile to place a trigger</span>
+          <span>☠ Tap a tile to place a trigger</span>
           <button
             type="button"
             onClick={() => { setTriggerMode(false); setHoveredTile(null); }}
@@ -1034,7 +1098,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
       {/* Placement mode banner */}
       {placementPending && (
         <div className="pointer-events-auto absolute left-1/2 top-3 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-sky-600/60 bg-slate-950/90 px-3 py-1.5 text-xs text-sky-200 shadow-lg">
-          <span>Click to place <strong>{placementPending.label}</strong></span>
+          <span>Tap to place <strong>{placementPending.label}</strong></span>
           <button
             type="button"
             onClick={() => { setPlacementPending(null); setGhostPos(null); }}

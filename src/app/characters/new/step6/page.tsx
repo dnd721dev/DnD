@@ -8,6 +8,7 @@ import type { CharacterDraft } from '../../../../types/characterDraft'
 import { RACE_LIST, getRace, type RaceKey } from '@/lib/races'
 import { BACKGROUNDS, type BackgroundKey } from '@/lib/backgrounds'
 import { proficiencyForLevel, calcAC } from '@/lib/rules'
+import { getSpellSlotsForClass, getSlotsForCasterType, getWarlockPactRow } from '@/lib/spellcastingProgression'
 import { RACES } from '@/lib/races'
 import { supabase } from '@/lib/supabase'
 
@@ -355,6 +356,43 @@ export default function NewCharacterStep6Page() {
       const shieldSelected = selectedArmor && String(selectedArmor.category).toLowerCase() === 'shield'
       const equipment_items: string[] | null = shieldSelected ? ['shield'] : null
 
+      // ✅ Spellcasting fields — needed so isMageUser = Boolean(c.spellcasting_ability) works
+      const SPELLCASTING_CLASSES = ['wizard','sorcerer','cleric','druid','bard','paladin','ranger','warlock']
+      const subclassKey = String(draft.subclassKey ?? '').toLowerCase()
+      const isEK = classKey === 'fighter' && subclassKey === 'fighter_eldritch_knight' && level >= 3
+      const isAT = classKey === 'rogue'   && subclassKey === 'rogue_arcane_trickster'  && level >= 3
+      const isThirdCasterSubclass = isEK || isAT
+
+      let castingAbilityKey: keyof Abilities | null = null
+      if (SPELLCASTING_CLASSES.includes(classKey)) {
+        if (classKey === 'wizard')                                    castingAbilityKey = 'int'
+        else if (['sorcerer','bard','paladin','warlock'].includes(classKey)) castingAbilityKey = 'cha'
+        else if (['cleric','druid','ranger'].includes(classKey))      castingAbilityKey = 'wis'
+      } else if (isThirdCasterSubclass) {
+        castingAbilityKey = 'int'
+      }
+
+      let spellSaveDC: number | null = null
+      let spellAttackBonus: number | null = null
+      let spellSlots: Record<string, number> | null = null
+
+      if (castingAbilityKey) {
+        const castingMod = abilityMod(abilitiesPayload[castingAbilityKey])
+        spellSaveDC     = 8 + proficiencyBonus + castingMod
+        spellAttackBonus = proficiencyBonus + castingMod
+      }
+
+      if (classKey === 'warlock') {
+        const pact = getWarlockPactRow(level)
+        if (pact) spellSlots = { [String(pact.pactSlotLevel)]: pact.pactSlots }
+      } else if (isThirdCasterSubclass) {
+        const raw = getSlotsForCasterType('third', level)
+        spellSlots = raw as Record<string, number>
+      } else if (SPELLCASTING_CLASSES.includes(classKey)) {
+        const raw = getSpellSlotsForClass(classKey as any, level)
+        spellSlots = raw as Record<string, number>
+      }
+
       const payload: Record<string, any> = {
         // ✅ identity
         wallet_address: walletLower,
@@ -413,6 +451,12 @@ export default function NewCharacterStep6Page() {
           return [...new Set([...(draft.knownSpells ?? []), ...innateAuto, ...innateChoice])]
         })(),
         spells_prepared: draft.preparedSpells ?? [],
+
+        // ✅ spellcasting stats — gates isMageUser on the character sheet
+        spellcasting_ability: castingAbilityKey,
+        spell_save_dc: spellSaveDC,
+        spell_attack_bonus: spellAttackBonus,
+        spell_slots: spellSlots,
 
         // NFT
         nft_contract: (draft as any).nft_contract ?? null,
