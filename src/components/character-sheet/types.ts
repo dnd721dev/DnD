@@ -9,6 +9,7 @@ export type InventoryItem = {
   key?: string
   name?: string
   type?: string
+  kind?: string
   qty?: number
   quantity?: number
   equipped?: boolean
@@ -71,10 +72,20 @@ export type CharacterSheetData = {
   // ✅ Campaign-aware notes: { general?: string, [campaignId: uuid]: string }
   notes_data?: Record<string, string> | null
 
+  // ✅ Currency (migration 017)
+  gold?: number | null
+  silver?: number | null
+  copper?: number | null
+  electrum?: number | null
+  platinum?: number | null
+
   // Languages, tool proficiencies, feats
   languages?: string[] | null
   tool_proficiencies?: string[] | null
   feats?: string[] | null
+
+  // Inventory items (weapons, armor, gear)
+  inventory_items?: InventoryItem[] | null
 
   [key: string]: any
 }

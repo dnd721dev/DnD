@@ -13,6 +13,8 @@ import { getClassResources, CLASS_HIT_DIE } from '@/lib/classResources'
 import type { ClassKey } from '@/lib/subclasses'
 import type { ActionType, SheetAction } from '@/lib/actions/types'
 import { roll as rollDice } from '@/lib/dice'
+import { WEAPON_DB } from '@/components/character-sheet/equipment-db'
+import type { InventoryItem } from '@/components/character-sheet/types'
 import { SKILLS, DIE_TYPES, type DieSides, DIE_CONFIG } from '@/lib/dnd5e'
 import { getActiveConditionMechanics, CONDITIONS as CONDITION_DEFS, type ConditionKey } from '@/lib/conditions'
 import { DiceShape } from '@/components/dice/DiceShape'
@@ -36,7 +38,7 @@ type PlayerSidebarProps = {
   onSelectCharacter: (id: string) => void
   onAbilityCheck: (abilityKey: AbilityKey, label: string) => void
   onInitiative: () => void
-  onRoll?: (roll: { label: string; formula: string; result: number; outcome?: string | null }) => void
+  onRoll?: (roll: { label: string; formula: string; result: number; outcome?: string | null; individual_dice?: { die: string; value: number; dropped?: true }[] | null }) => void
   diceLog?: { id: string; roller: string; label: string; formula: string; result: number; timestamp: string }[]
   onOpenDiceLog?: () => void
 }
@@ -92,6 +94,7 @@ type SheetPreview = Pick<
   | 'hit_points_current'
   | 'hit_points_max'
   | 'armor_class'
+  | 'ac'
   | 'speed_ft'
   | 'spell_save_dc'
   | 'spell_attack_bonus'
@@ -100,6 +103,12 @@ type SheetPreview = Pick<
   | 'skill_proficiencies'
   | 'spell_slots'
   | 'temp_hp'
+  | 'inventory_items'
+  | 'gold'
+  | 'silver'
+  | 'copper'
+  | 'electrum'
+  | 'platinum'
 >
 
 export function PlayerSidebar({
@@ -211,20 +220,30 @@ export function PlayerSidebar({
     let d20: number
     let modeNote = ''
     let formulaPrefix = '1d20'
+    let individualDice: { die: string; value: number; dropped?: true }[]
     if (mode === 'adv') {
       const r1 = Math.floor(Math.random() * 20) + 1
       const r2 = Math.floor(Math.random() * 20) + 1
       d20 = Math.max(r1, r2)
       modeNote = ' (Adv)'
       formulaPrefix = '2d20kh1'
+      individualDice = [
+        { die: 'd20', value: r1, ...(r1 < r2 ? { dropped: true as const } : {}) },
+        { die: 'd20', value: r2, ...(r2 < r1 ? { dropped: true as const } : {}) },
+      ]
     } else if (mode === 'dis') {
       const r1 = Math.floor(Math.random() * 20) + 1
       const r2 = Math.floor(Math.random() * 20) + 1
       d20 = Math.min(r1, r2)
       modeNote = ' (Dis)'
       formulaPrefix = '2d20kl1'
+      individualDice = [
+        { die: 'd20', value: r1, ...(r1 > r2 ? { dropped: true as const } : {}) },
+        { die: 'd20', value: r2, ...(r2 > r1 ? { dropped: true as const } : {}) },
+      ]
     } else {
       d20 = Math.floor(Math.random() * 20) + 1
+      individualDice = [{ die: 'd20', value: d20 }]
     }
     const total = d20 + bonus
 
@@ -243,6 +262,7 @@ export function PlayerSidebar({
       formula: `${formulaPrefix}${sign}${bonus}`,
       result: total,
       outcome,
+      individual_dice: individualDice,
     })
   }
 
@@ -261,12 +281,26 @@ export function PlayerSidebar({
     let d20: number
     let formulaPrefix = '1d20'
     let modeNote = ''
-    if (rollMode === 'adv') { d20 = Math.max(r1, r2); formulaPrefix = '2d20kh1'; modeNote = ' (Adv)' }
-    else if (rollMode === 'dis') { d20 = Math.min(r1, r2); formulaPrefix = '2d20kl1'; modeNote = ' (Dis)' }
-    else { d20 = r1 }
+    let individualDice: { die: string; value: number; dropped?: true }[]
+    if (rollMode === 'adv') {
+      d20 = Math.max(r1, r2); formulaPrefix = '2d20kh1'; modeNote = ' (Adv)'
+      individualDice = [
+        { die: 'd20', value: r1, ...(r1 < r2 ? { dropped: true as const } : {}) },
+        { die: 'd20', value: r2, ...(r2 < r1 ? { dropped: true as const } : {}) },
+      ]
+    } else if (rollMode === 'dis') {
+      d20 = Math.min(r1, r2); formulaPrefix = '2d20kl1'; modeNote = ' (Dis)'
+      individualDice = [
+        { die: 'd20', value: r1, ...(r1 > r2 ? { dropped: true as const } : {}) },
+        { die: 'd20', value: r2, ...(r2 > r1 ? { dropped: true as const } : {}) },
+      ]
+    } else {
+      d20 = r1
+      individualDice = [{ die: 'd20', value: r1 }]
+    }
     const total = d20 + mod
     const sign = mod >= 0 ? '+' : ''
-    onRoll?.({ label: `${label}${modeNote}`, formula: `${formulaPrefix}${sign}${mod}`, result: total, outcome: null })
+    onRoll?.({ label: `${label}${modeNote}`, formula: `${formulaPrefix}${sign}${mod}`, result: total, outcome: null, individual_dice: individualDice })
   }
 
   function doWeaponAttack() {
@@ -293,19 +327,27 @@ export function PlayerSidebar({
     }
   }
 
-  function doWeaponDamage() {
+  function doWeaponDamage(opts?: { damageDice?: string; mod?: number; label?: string; noMod?: boolean }) {
     if (!sheet) return
     const str = Number(sheet.abilities?.str ?? 10)
     const dex = Number(sheet.abilities?.dex ?? 10)
-    const mod = Math.max(abilityMod(str), abilityMod(dex))
-    const roll = Math.floor(Math.random() * 8) + 1
-    const total = roll + mod
+    const defaultMod = Math.max(abilityMod(str), abilityMod(dex))
+    const mod = opts?.noMod ? 0 : (opts?.mod ?? defaultMod)
+    const damageDice = opts?.damageDice ?? '1d8'
+    // Parse dice string e.g. "1d8", "2d6"
+    const diceMatch = damageDice.match(/^(\d+)d(\d+)$/)
+    const dCount = diceMatch ? Number(diceMatch[1]) : 1
+    const dSides = diceMatch ? Number(diceMatch[2]) : 8
+    const rolls = Array.from({ length: dCount }, () => Math.floor(Math.random() * dSides) + 1)
+    const total = rolls.reduce((a, b) => a + b, 0) + mod
     const sign = mod >= 0 ? '+' : ''
+    const dieKey = `d${dSides}`
     onRoll?.({
-      label: `Weapon Damage${(target as any)?.label ? ` → ${(target as any).label}` : ''}`,
-      formula: `1d8${sign}${mod}`,
+      label: opts?.label ?? `Weapon Damage${(target as any)?.label ? ` → ${(target as any).label}` : ''}`,
+      formula: `${damageDice}${sign}${mod}`,
       result: Math.max(1, total),
       outcome: null,
+      individual_dice: rolls.map(v => ({ die: dieKey, value: v })),
     })
     setLastAttackHit(null)
   }
@@ -540,7 +582,7 @@ export function PlayerSidebar({
 
       const { data, error } = await supabase
         .from('characters')
-        .select(['id', 'name', 'level', 'main_job', 'subclass', 'race', 'background', 'abilities', 'hit_points_current', 'hit_points_max', 'armor_class', 'speed_ft', 'spell_save_dc', 'spell_attack_bonus', 'resource_state', 'saving_throw_profs', 'skill_proficiencies', 'spell_slots', 'temp_hp'].join(','))
+        .select(['id', 'name', 'level', 'main_job', 'subclass', 'race', 'background', 'abilities', 'hit_points_current', 'hit_points_max', 'ac', 'armor_class', 'speed_ft', 'spell_save_dc', 'spell_attack_bonus', 'resource_state', 'saving_throw_profs', 'skill_proficiencies', 'spell_slots', 'temp_hp', 'inventory_items', 'gold', 'silver', 'copper', 'electrum', 'platinum'].join(','))
         .eq('id', selectedCharacterId)
         .maybeSingle()
 
@@ -825,7 +867,7 @@ export function PlayerSidebar({
                     </p>
                   </div>
                   <div className="flex shrink-0 gap-1">
-                    <Link href={`/characters/${selectedCharacterId}`} target="_blank" rel="noopener noreferrer" className="rounded-md border border-yellow-800/50 bg-slate-900 px-1.5 py-0.5 text-[10px] text-yellow-300/70 hover:border-yellow-500/60">Sheet</Link>
+                    <Link href={`/characters/${selectedCharacterId}`} target="_blank" rel="noopener noreferrer" className="rounded-md border border-yellow-800/50 bg-slate-900 px-1.5 py-0.5 text-[10px] text-yellow-300/70 hover:border-yellow-500/60">✏ Edit</Link>
                     <button type="button" onClick={() => onSelectCharacter('')} className="rounded-md border border-yellow-800/50 bg-slate-900 px-1.5 py-0.5 text-[10px] text-yellow-300/70 hover:border-yellow-500/60">Change</button>
                   </div>
                 </div>
@@ -843,7 +885,7 @@ export function PlayerSidebar({
                           <svg viewBox="0 0 40 46" fill="none" xmlns="http://www.w3.org/2000/svg" className="absolute inset-0 h-full w-full">
                             <path d="M20 2L4 8v14c0 10 7 18.5 16 22 9-3.5 16-12 16-22V8L20 2z" fill="rgba(30,41,59,0.9)" stroke="rgba(250,204,21,0.5)" strokeWidth="2"/>
                           </svg>
-                          <span className="relative z-10 text-xs font-black leading-none text-yellow-200">{(sheet?.armor_class && sheet.armor_class > 0) ? sheet.armor_class : 10}</span>
+                          <span className="relative z-10 text-xs font-black leading-none text-yellow-200">{sheet?.ac ?? sheet?.armor_class ?? 10}</span>
                         </div>
                       </div>
                       <div className="rounded-md border border-yellow-900/30 bg-slate-900/40 p-1.5">
@@ -879,6 +921,27 @@ export function PlayerSidebar({
                         )}
                       </div>
                     </div>
+
+                    {/* Currency — Bug 19 UI */}
+                    {(sheet?.gold != null || sheet?.silver != null || sheet?.copper != null || sheet?.electrum != null || sheet?.platinum != null) && (
+                      <div className="flex flex-wrap gap-1.5 rounded-md border border-yellow-900/20 bg-slate-900/40 px-2 py-1.5">
+                        {[
+                          { key: 'platinum', label: 'PP', color: 'text-slate-300' },
+                          { key: 'gold',     label: 'GP', color: 'text-amber-300' },
+                          { key: 'electrum', label: 'EP', color: 'text-sky-300' },
+                          { key: 'silver',   label: 'SP', color: 'text-slate-200' },
+                          { key: 'copper',   label: 'CP', color: 'text-orange-400' },
+                        ].map(({ key, label, color }) => {
+                          const val = Number((sheet as any)[key] ?? 0)
+                          if (val === 0 && key !== 'gold') return null
+                          return (
+                            <span key={key} className={`text-[10px] font-semibold ${color}`}>
+                              {val} <span className="text-[9px] font-normal opacity-70">{label}</span>
+                            </span>
+                          )
+                        })}
+                      </div>
+                    )}
 
                     {/* Ability scores */}
                     {sheet?.abilities && (
@@ -1073,30 +1136,99 @@ export function PlayerSidebar({
                   )
                 })()}
 
-                {/* Weapon attack quick roll */}
-                {sheet?.abilities && (
-                  <div className="rounded-lg border border-yellow-900/30 bg-slate-900/50 p-1.5">
-                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-yellow-300/70">Attack</p>
-                    <div className="flex gap-1">
-                      <button
-                        type="button"
-                        onClick={doWeaponAttack}
-                        className="flex-1 rounded-md border border-emerald-800/50 bg-emerald-900/20 px-1 py-1 text-[10px] font-semibold text-emerald-200 hover:bg-emerald-900/40"
-                        title="Weapon attack roll"
-                      >
-                        ⚔ Attack {fmtMod(Math.max(abilityMod(Number(sheet.abilities.str ?? 10)), abilityMod(Number(sheet.abilities.dex ?? 10))) + proficiencyBonus(sheet.level))}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={doWeaponDamage}
-                        className="flex-1 rounded-md border border-orange-800/50 bg-orange-900/20 px-1 py-1 text-[10px] font-semibold text-orange-200 hover:bg-orange-900/40"
-                        title="Weapon damage roll"
-                      >
-                        💥 Damage
-                      </button>
+                {/* Weapon attack quick roll — weapon-aware (Bug 9) */}
+                {sheet?.abilities && (() => {
+                  const str = Number(sheet.abilities?.str ?? 10)
+                  const dex = Number(sheet.abilities?.dex ?? 10)
+                  const pb = proficiencyBonus(sheet.level)
+
+                  // Find equipped weapons from inventory
+                  const equippedWeapons = ((sheet.inventory_items ?? []) as InventoryItem[])
+                    .filter(it => it.equipped && it.kind === 'weapon' && it.key)
+                    .map(it => ({ item: it, weapon: (WEAPON_DB as any)[it.key!] ?? null }))
+                    .filter(({ weapon }) => weapon !== null) as { item: InventoryItem; weapon: NonNullable<(typeof WEAPON_DB)[string]> }[]
+
+                  // Pick main hand weapon (first equipped), fallback to generic 1d8
+                  const mainHandEntry = equippedWeapons[0] ?? null
+                  const mainWeapon = mainHandEntry?.weapon ?? null
+
+                  // Offhand: second equipped light weapon
+                  const offhandEntry = equippedWeapons.length >= 2 && equippedWeapons[1].weapon.properties.includes('light') ? equippedWeapons[1] : null
+
+                  // Derive attack mod for main weapon
+                  const mainAtkMod = (() => {
+                    if (!mainWeapon) return Math.max(abilityMod(str), abilityMod(dex)) + pb
+                    const isFinesse = mainWeapon.properties.includes('finesse')
+                    const isRanged = mainWeapon.attackType === 'ranged'
+                    const abilScore = (isFinesse || isRanged) ? Math.max(abilityMod(str), abilityMod(dex)) : abilityMod(str)
+                    return abilScore + pb
+                  })()
+
+                  // Derive damage mod for main weapon
+                  const mainDmgMod = (() => {
+                    if (!mainWeapon) return Math.max(abilityMod(str), abilityMod(dex))
+                    const isFinesse = mainWeapon.properties.includes('finesse')
+                    const isRanged = mainWeapon.attackType === 'ranged'
+                    return (isFinesse || isRanged) ? Math.max(abilityMod(str), abilityMod(dex)) : abilityMod(str)
+                  })()
+
+                  const mainDice = mainWeapon?.damageDice ?? '1d8'
+                  const mainLabel = mainWeapon ? mainWeapon.name : 'Weapon'
+                  const mainIsRanged = mainWeapon?.attackType === 'ranged'
+
+                  return (
+                    <div className="rounded-lg border border-yellow-900/30 bg-slate-900/50 p-1.5 space-y-1">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-yellow-300/70">
+                        {mainLabel}{mainIsRanged ? ' 🏹' : ' ⚔'}
+                      </p>
+                      {/* Main hand */}
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          onClick={doWeaponAttack}
+                          className="flex-1 rounded-md border border-emerald-800/50 bg-emerald-900/20 px-1 py-1 text-[10px] font-semibold text-emerald-200 hover:bg-emerald-900/40"
+                          title={`${mainLabel} attack roll`}
+                        >
+                          ⚔ Attack {fmtMod(mainAtkMod)}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => doWeaponDamage({ damageDice: mainDice, mod: mainDmgMod, label: `${mainLabel} Damage${(target as any)?.label ? ` → ${(target as any).label}` : ''}` })}
+                          className="flex-1 rounded-md border border-orange-800/50 bg-orange-900/20 px-1 py-1 text-[10px] font-semibold text-orange-200 hover:bg-orange-900/40"
+                          title={`${mainDice} + ${mainDmgMod >= 0 ? '+' : ''}${mainDmgMod}`}
+                        >
+                          💥 {mainDice}
+                        </button>
+                      </div>
+                      {/* Off-hand attack (dual wield — bonus action; 2024 PHB includes ability mod on damage) */}
+                      {offhandEntry && (
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const offDex = Math.max(abilityMod(str), abilityMod(dex))
+                              const offAtk = offDex + pb
+                              const mode = getAttackRollMode()
+                              rollD20VsACWithResult(`${offhandEntry.weapon.name} (Off-hand)`, offAtk, mode)
+                            }}
+                            className="flex-1 rounded-md border border-teal-800/50 bg-teal-900/20 px-1 py-1 text-[10px] font-semibold text-teal-200 hover:bg-teal-900/40"
+                            title="Off-hand attack (Dual Wield bonus action)"
+                          >
+                            ↩ Off-hand {fmtMod(Math.max(abilityMod(str), abilityMod(dex)) + pb)}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => doWeaponDamage({ damageDice: offhandEntry.weapon.damageDice, label: `${offhandEntry.weapon.name} (Off-hand) Damage${(target as any)?.label ? ` → ${(target as any).label}` : ''}` })}
+                            className="flex-1 rounded-md border border-teal-800/50 bg-teal-900/20 px-1 py-1 text-[10px] font-semibold text-teal-200 hover:bg-teal-900/40"
+                            title={`${offhandEntry.weapon.damageDice} + ability mod (2024 TWF)`}
+                          >
+                            💥 {offhandEntry.weapon.damageDice}
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
+                  )
+                })()}
 
                 {/* Action economy — grouped by slot type */}
                 {(() => {
@@ -1425,7 +1557,7 @@ export function PlayerSidebar({
                       {lastAttackHit === true ? (
                         <div className="space-y-1.5">
                           <div className="text-center text-[10px] font-semibold text-emerald-400">Hit! Roll damage:</div>
-                          <button type="button" onClick={doWeaponDamage} className="w-full rounded-lg border border-emerald-700/50 bg-emerald-600/25 px-2 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-600/40">Roll Damage (1d8)</button>
+                          <button type="button" onClick={() => doWeaponDamage()} className="w-full rounded-lg border border-emerald-700/50 bg-emerald-600/25 px-2 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-600/40">Roll Damage (1d8)</button>
                           <button type="button" onClick={() => setLastAttackHit(null)} className="w-full rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1.5 text-[10px] text-slate-400 hover:bg-slate-800">Back</button>
                         </div>
                       ) : (

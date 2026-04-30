@@ -201,11 +201,91 @@ export function InventoryPanel({
     await saveInventory(next.filter((it) => (it.qty ?? 0) > 0))
   }
 
+  // Currency state — seeded from character data
+  const [currencyEdit, setCurrencyEdit] = useState(false)
+  const [gold, setGold]         = useState(Number(c.gold     ?? 0))
+  const [silver, setSilver]     = useState(Number(c.silver   ?? 0))
+  const [copper, setCopper]     = useState(Number(c.copper   ?? 0))
+  const [electrum, setElectrum] = useState(Number(c.electrum ?? 0))
+  const [platinum, setPlatinum] = useState(Number(c.platinum ?? 0))
+
+  async function saveCurrency() {
+    setSaving(true)
+    const patch = { gold, silver, copper, electrum, platinum }
+    const { error } = await supabase.from('characters').update(patch).eq('id', c.id)
+    setSaving(false)
+    if (error) { setStatus(`Save failed: ${error.message}`); return }
+    onSaved(patch as any)
+    setStatus('Saved!')
+    setCurrencyEdit(false)
+    setTimeout(() => setStatus(''), 1200)
+  }
+
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Inventory</h2>
         <div className="text-[11px] text-slate-500">{status}</div>
+      </div>
+
+      {/* Currency (Bug 19 UI) */}
+      <div className="mb-3 rounded-lg border border-yellow-900/20 bg-slate-900/50 p-2">
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-yellow-300/70">💰 Currency</span>
+          <button
+            type="button"
+            onClick={() => setCurrencyEdit(v => !v)}
+            className="rounded border border-slate-700 bg-slate-900 px-1.5 py-0.5 text-[9px] text-slate-400 hover:text-slate-200"
+          >
+            {currencyEdit ? 'Cancel' : 'Edit'}
+          </button>
+        </div>
+        {currencyEdit ? (
+          <div className="space-y-1.5">
+            <div className="grid grid-cols-5 gap-1">
+              {([
+                { key: 'pp', label: 'PP', value: platinum, set: setPlatinum, color: 'border-slate-500' },
+                { key: 'gp', label: 'GP', value: gold,     set: setGold,     color: 'border-amber-700' },
+                { key: 'ep', label: 'EP', value: electrum, set: setElectrum, color: 'border-sky-700' },
+                { key: 'sp', label: 'SP', value: silver,   set: setSilver,   color: 'border-slate-500' },
+                { key: 'cp', label: 'CP', value: copper,   set: setCopper,   color: 'border-orange-700' },
+              ] as const).map(({ key, label, value, set, color }) => (
+                <div key={key} className="flex flex-col items-center gap-0.5">
+                  <label className="text-[9px] text-slate-400">{label}</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={value}
+                    onChange={e => set(Math.max(0, Number(e.target.value)))}
+                    className={`w-full rounded border ${color} bg-slate-900 px-1 py-1 text-center text-[11px] text-slate-100 focus:outline-none`}
+                  />
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={saveCurrency}
+              className="w-full rounded bg-amber-700/60 py-1 text-[11px] font-semibold text-amber-100 hover:bg-amber-700/80 disabled:opacity-50"
+            >
+              Save Currency
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {([
+              { label: 'PP', value: platinum, color: 'text-slate-300' },
+              { label: 'GP', value: gold,     color: 'text-amber-300' },
+              { label: 'EP', value: electrum, color: 'text-sky-300' },
+              { label: 'SP', value: silver,   color: 'text-slate-200' },
+              { label: 'CP', value: copper,   color: 'text-orange-400' },
+            ]).map(({ label, value, color }) => (
+              <span key={label} className={`text-[11px] font-semibold ${color}`}>
+                {value} <span className="text-[9px] font-normal opacity-60">{label}</span>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Add section */}

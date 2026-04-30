@@ -77,8 +77,9 @@ export function useSessionRolls(params: { sessionId: string; hasMounted: boolean
 
   function pushRollLocal(entry: DiceEntry) {
     setDiceLog(prev => {
-      const updated = [entry, ...prev]
-      return updated.slice(0, 20)
+      // Guard against duplicates when realtime fires before this call resolves
+      if (prev.some((e) => e.id === entry.id)) return prev
+      return [entry, ...prev].slice(0, 20)
     })
   }
 

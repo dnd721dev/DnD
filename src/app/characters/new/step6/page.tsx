@@ -421,13 +421,21 @@ export default function NewCharacterStep6Page() {
         hp: computedMaxHp,
         hit_points_current: computedCurrentHp,
         hit_points_max: computedMaxHp,
-        ac: calcAC(
-          draft.armorKey ?? null,
-          abilitiesPayload.dex,
-          draft.acOverride ?? null,
-          false,
-          { classKey, conScore: abilitiesPayload.con, wisScore: abilitiesPayload.wis },
-        ),
+        ac: (() => {
+          let baseAc = calcAC(
+            draft.armorKey ?? null,
+            abilitiesPayload.dex,
+            draft.acOverride ?? null,
+            false,
+            { classKey, conScore: abilitiesPayload.con, wisScore: abilitiesPayload.wis },
+          )
+          // Draconic Resilience: Draconic Bloodline Sorcerer gets 13 + DEX when unarmored
+          if (!draft.armorKey && subclassKey === 'sorcerer_draconic_bloodline') {
+            const dexMod = Math.floor((abilitiesPayload.dex - 10) / 2)
+            baseAc = Math.max(baseAc, 13 + dexMod)
+          }
+          return baseAc
+        })(),
 
         // ✅ NEW: movement + vision authority
         speed_ft,

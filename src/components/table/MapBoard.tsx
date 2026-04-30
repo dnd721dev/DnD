@@ -17,6 +17,7 @@ type Token = {
   ac?: number | null;
   type?: string | null;
   monster_id?: string | null;
+  token_image_url?: string | null;
 };
 
 type TriggerIcon = {
@@ -62,6 +63,9 @@ const MapBoard: React.FC<MapBoardProps> = ({
 
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [tokens, setTokens] = useState<Token[]>([]);
+  // Token portrait image cache
+  const tokenImgCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  const [tokenImgVersion, setTokenImgVersion] = useState(0);
   const [activeInitiativeName, setActiveInitiativeName] = useState<string | null>(null);
   const [tokenConditions, setTokenConditions] = useState<Record<string, string[]>>({});
 
@@ -294,7 +298,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
     async function loadTokens() {
       let query = supabase
         .from('tokens')
-        .select('id, label, x, y, color, hp, ac, current_hp, type, monster_id')
+        .select('id, label, x, y, color, hp, ac, current_hp, type, monster_id, token_image_url')
         .eq('encounter_id', encounterId);
 
       // GM free view: show tokens for current map + tokens with no map (PC tokens)
@@ -395,6 +399,20 @@ const MapBoard: React.FC<MapBoardProps> = ({
     }
   }, [img, tileData, gridSize]);
 
+  /** Pre-load token portrait images */
+  useEffect(() => {
+    const cache = tokenImgCacheRef.current;
+    tokens.forEach(t => {
+      const url = t.token_image_url;
+      if (!url || cache.has(url)) return;
+      const im = new Image();
+      im.crossOrigin = 'anonymous';
+      im.onload = () => { cache.set(url, im); setTokenImgVersion(v => v + 1); };
+      im.onerror = () => cache.set(url, new Image());
+      im.src = url;
+    });
+  }, [tokens]);
+
   /** Draw tokens */
   useEffect(() => {
     const canvas = tokenCanvasRef.current;
@@ -450,11 +468,22 @@ const MapBoard: React.FC<MapBoardProps> = ({
         ctx.restore();
       }
 
-      ctx.font = `${Math.max(12, gridSize * 0.35)}px system-ui, sans-serif`;
-      ctx.fillStyle = '#e5e7eb';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(t.label || 'T', t.x, t.y);
+      // Portrait image if available, otherwise text label
+      const tokenImg = t.token_image_url ? tokenImgCacheRef.current.get(t.token_image_url) : undefined;
+      if (tokenImg && tokenImg.complete && tokenImg.naturalWidth > 0) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, r, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(tokenImg, t.x - r, t.y - r, r * 2, r * 2);
+        ctx.restore();
+      } else {
+        ctx.font = `${Math.max(12, gridSize * 0.35)}px system-ui, sans-serif`;
+        ctx.fillStyle = '#e5e7eb';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(t.label || 'T', t.x, t.y);
+      }
 
       // Resistance / immunity indicator dots (bottom-right of token)
       const resists = tokenResistances[t.id] ?? [];
@@ -493,7 +522,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
       ctx.fillText('!', iconX, iconY);
       ctx.restore();
     });
-  }, [tokens, canvasSize, gridSize, highlightTokenId, activeInitiativeName, tokenConditions, tokenResistances, tokenImmunities, mapTriggers]);
+  }, [tokens, canvasSize, gridSize, highlightTokenId, activeInitiativeName, tokenConditions, tokenResistances, tokenImmunities, mapTriggers, tokenImgVersion]);
 
   /** Draw fog overlay (GM view: dark = unrevealed, slight green tint = revealed) */
   useEffect(() => {

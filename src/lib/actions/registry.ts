@@ -1,16 +1,26 @@
 import type { SheetAction } from './types'
 
 export const CORE_ACTIONS: SheetAction[] = [
-  { id: 'core-attack',     name: 'Attack',         category: 'Core', actionType: 'action', gates: { kind: 'always' }, cost: { type: 'none' }, effects: [{ type: 'rollAttack' }] },
-  { id: 'core-cast',       name: 'Cast a Spell',   category: 'Core', actionType: 'action', gates: { kind: 'always' }, cost: { type: 'none' } },
-  { id: 'core-dash',       name: 'Dash',           category: 'Core', actionType: 'action', gates: { kind: 'always' }, cost: { type: 'none' } },
-  { id: 'core-dodge',      name: 'Dodge',          category: 'Core', actionType: 'action', gates: { kind: 'always' }, cost: { type: 'none' } },
-  { id: 'core-disengage',  name: 'Disengage',      category: 'Core', actionType: 'action', gates: { kind: 'always' }, cost: { type: 'none' } },
-  { id: 'core-help',       name: 'Help',           category: 'Core', actionType: 'action', gates: { kind: 'always' }, cost: { type: 'none' } },
-  { id: 'core-hide',       name: 'Hide',           category: 'Core', actionType: 'action', gates: { kind: 'always' }, cost: { type: 'none' } },
-  { id: 'core-ready',      name: 'Ready',          category: 'Core', actionType: 'action', gates: { kind: 'always' }, cost: { type: 'none' } },
-  { id: 'core-search',     name: 'Search',         category: 'Core', actionType: 'action', gates: { kind: 'always' }, cost: { type: 'none' } },
-  { id: 'core-use-object', name: 'Use an Object',  category: 'Core', actionType: 'action', gates: { kind: 'always' }, cost: { type: 'none' } },
+  { id: 'core-attack',     name: 'Attack',         category: 'Core', actionType: 'action',        gates: { kind: 'always' }, cost: { type: 'none' }, effects: [{ type: 'rollAttack' }] },
+  { id: 'core-cast',       name: 'Cast a Spell',   category: 'Core', actionType: 'action',        gates: { kind: 'always' }, cost: { type: 'none' } },
+  { id: 'core-dash',       name: 'Dash',           category: 'Core', actionType: 'action',        gates: { kind: 'always' }, cost: { type: 'none' } },
+  { id: 'core-dodge',      name: 'Dodge',          category: 'Core', actionType: 'action',        gates: { kind: 'always' }, cost: { type: 'none' } },
+  { id: 'core-disengage',  name: 'Disengage',      category: 'Core', actionType: 'action',        gates: { kind: 'always' }, cost: { type: 'none' } },
+  { id: 'core-help',       name: 'Help',           category: 'Core', actionType: 'action',        gates: { kind: 'always' }, cost: { type: 'none' } },
+  { id: 'core-hide',       name: 'Hide',           category: 'Core', actionType: 'action',        gates: { kind: 'always' }, cost: { type: 'none' } },
+  { id: 'core-ready',      name: 'Ready',          category: 'Core', actionType: 'action',        gates: { kind: 'always' }, cost: { type: 'none' } },
+  { id: 'core-search',     name: 'Search',         category: 'Core', actionType: 'action',        gates: { kind: 'always' }, cost: { type: 'none' } },
+  { id: 'core-use-object', name: 'Use an Object',  category: 'Core', actionType: 'action',        gates: { kind: 'always' }, cost: { type: 'none' } },
+  // ── 2024 PHB additions ────────────────────────────────────────────────────────
+  {
+    id: 'core-unarmed-ba',
+    name: 'Unarmed Strike',
+    category: 'Core',
+    actionType: 'bonus_action',
+    gates: { kind: 'always' },
+    cost: { type: 'none' },
+    description: 'After using the Attack action, make one Unarmed Strike as a Bonus Action (2024 PHB).',
+  },
 ]
 
 export const CLASS_ACTIONS: SheetAction[] = [
@@ -129,6 +139,14 @@ export const CLASS_ACTIONS: SheetAction[] = [
     gates: { kind: 'class', classKey: 'rogue' },
     cost: { type: 'none' },
     description: 'Dash, Disengage, or Hide as a Bonus Action.',
+  },
+  {
+    id: 'rogue-steady-aim', name: 'Steady Aim', category: 'Class',
+    actionType: 'bonus_action',
+    gates: { kind: 'class', classKey: 'rogue' },
+    cost: { type: 'perTurnFlag', flag: 'steady_aim_used_turn' },
+    effects: [{ type: 'setFlag', flag: 'steady_aim_used_turn', value: true }],
+    description: 'Gain advantage on your next attack this turn; your Speed becomes 0 until turn end. (Cunning Action, 2024 PHB)',
   },
 
   // ── Sorcerer ─────────────────────────────────────────────────────────────────

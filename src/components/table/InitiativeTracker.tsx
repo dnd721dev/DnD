@@ -313,6 +313,8 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
     const nextState: Record<string, any> = {
       ...currentState,
       sneak_used_turn: false,
+      move_used_ft: 0,
+      dashing: false,
     };
 
     const { error: writeErr } = await supabase

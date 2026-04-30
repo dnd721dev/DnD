@@ -50,6 +50,10 @@ export async function GET(req: NextRequest) {
     isGm = await verifyGm(db, sessionId, gmWallet)
   }
 
+  // Tile-based lookup means movement detection — hidden traps still fire when
+  // stepped on (detection ≠ visibility).  Only filter is_hidden for list views.
+  const isTileDetection = tileX !== null && tileY !== null
+
   let query = db
     .from('map_triggers')
     .select('*')
@@ -57,14 +61,14 @@ export async function GET(req: NextRequest) {
     .eq('is_active', true)
     .order('created_at', { ascending: true })
 
-  if (!isGm) {
-    // Players only see non-hidden triggers (revealed traps)
+  if (!isGm && !isTileDetection) {
+    // List view: players only see non-hidden triggers (revealed traps)
     query = query.eq('is_hidden', false)
   }
 
   // Tile-specific lookup (for trigger detection on movement)
-  if (tileX !== null && tileY !== null) {
-    query = query.eq('tile_x', parseInt(tileX)).eq('tile_y', parseInt(tileY))
+  if (isTileDetection) {
+    query = query.eq('tile_x', parseInt(tileX!)).eq('tile_y', parseInt(tileY!))
     if (mapId) query = query.eq('map_id', mapId)
   } else if (mapId) {
     query = query.eq('map_id', mapId)

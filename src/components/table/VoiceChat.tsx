@@ -45,6 +45,10 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
   const [localMuted, setLocalMuted]     = useState(false)
   const [showPanel, setShowPanel]       = useState(false)
   const [mutingId, setMutingId]         = useState<string | null>(null)
+  // Bug 2: reconnection state
+  const [isReconnecting, setIsReconnecting] = useState(false)
+  // Bug 3: per-participant volume (0-100, default 100)
+  const [volumes, setVolumes] = useState<Record<string, number>>({})
 
   const url      = process.env.NEXT_PUBLIC_LIVEKIT_URL || ''
   const stableId = useRef(identity || `guest-${Math.random().toString(36).slice(2, 8)}`)
@@ -166,8 +170,18 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
         })
         .on(RoomEvent.Disconnected, () => {
           setConnected(false)
+          setIsReconnecting(false)
           setParticipants([])
           setLocalMuted(false)
+        })
+        // Bug 2: surface reconnection state so the UI doesn't look frozen
+        .on(RoomEvent.Reconnecting, () => {
+          setIsReconnecting(true)
+        })
+        .on(RoomEvent.Reconnected, () => {
+          setIsReconnecting(false)
+          setConnected(true)
+          void rebuildParticipants(newRoom)
         })
         .on(RoomEvent.ParticipantConnected, onParticipantsChanged)
         .on(RoomEvent.ParticipantDisconnected, onParticipantsChanged)
@@ -203,9 +217,16 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
   const handleLeave = () => {
     room?.disconnect()
     setConnected(false)
+    setIsReconnecting(false)
     setParticipants([])
     setLocalMuted(false)
     setRoom(null)
+  }
+
+  // Bug 3: per-participant volume — LiveKit accepts 0-1
+  function handleVolume(participantIdentity: string, value: number) {
+    setVolumes((prev) => ({ ...prev, [participantIdentity]: value }))
+    room?.remoteParticipants.get(participantIdentity)?.setVolume(value / 100)
   }
 
   // ── Local mute toggle ────────────────────────────────────────────────────────
@@ -266,14 +287,18 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
       ) : (
         /* ── Connected ── */
         <div className="flex items-center gap-1">
-          {/* Panel toggle — shows participant count */}
+          {/* Panel toggle — shows participant count (amber when reconnecting) */}
           <button
             onClick={() => setShowPanel((v) => !v)}
-            className="flex items-center gap-1.5 rounded-md bg-emerald-900/60 px-2.5 py-1 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-900/80"
+            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
+              isReconnecting
+                ? 'bg-amber-900/60 text-amber-300 hover:bg-amber-900/80'
+                : 'bg-emerald-900/60 text-emerald-300 hover:bg-emerald-900/80'
+            }`}
             title="Voice participants"
           >
-            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-            Voice ({participants.length + 1})
+            <span className={`h-2 w-2 rounded-full animate-pulse ${isReconnecting ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+            {isReconnecting ? 'Reconnecting…' : `Voice (${participants.length + 1})`}
           </button>
 
           {/* Local mute toggle */}
@@ -335,10 +360,10 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
           {participants.map((p) => (
             <div
               key={p.identity}
-              className="flex items-center justify-between gap-2 rounded-md px-1 py-0.5"
+              className="flex items-center gap-2 rounded-md px-1 py-0.5"
             >
-              <div className="flex items-center gap-1.5 min-w-0">
-                {/* Speaking indicator: animated ring when talking */}
+              {/* Speaking indicator */}
+              <div className="flex items-center gap-1.5 min-w-0 flex-1">
                 {p.isSpeaking ? (
                   <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400 ring-2 ring-emerald-400/40 animate-pulse" />
                 ) : (
@@ -349,6 +374,17 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
                   {p.isMuted && <span className="ml-1 text-[10px] text-slate-500">🔇</span>}
                 </span>
               </div>
+
+              {/* Bug 3: per-user volume slider */}
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={volumes[p.identity] ?? 100}
+                onChange={(e) => handleVolume(p.identity, Number(e.target.value))}
+                className="w-14 shrink-0 accent-emerald-500"
+                title={`Volume: ${volumes[p.identity] ?? 100}%`}
+              />
 
               {/* DM-only mute button */}
               {isGm && (

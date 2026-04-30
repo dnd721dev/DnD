@@ -16,6 +16,7 @@ type Message = {
 type Participant = {
   wallet: string
   name: string
+  avatarUrl?: string | null
 }
 
 type Props = {
@@ -31,30 +32,72 @@ export default function TableChat({ sessionId, senderWallet, senderName = 'Adven
   const [whisperMode, setWhisperMode] = useState(false)
   const [whisperTarget, setWhisperTarget] = useState<string>('')
   const [participants, setParticipants] = useState<Participant[]>([])
+  // wallet → avatar URL for rendering message bubbles
+  const [avatarMap, setAvatarMap] = useState<Record<string, string | null>>({})
   const bottomRef = useRef<HTMLDivElement | null>(null)
 
-  // Load session participants for whisper dropdown
+  // Load session participants for whisper dropdown (includes GM — Bug 8)
   useEffect(() => {
     if (!senderWallet) return
     async function loadParticipants() {
-      const { data, error } = await supabase
+      const myWallet = (senderWallet ?? '').toLowerCase()
+
+      // Fetch all players in the session (include avatar_url from profiles)
+      const { data: playerRows, error } = await supabase
         .from('session_players')
-        .select('wallet_address, profiles(display_name, username)')
+        .select('wallet_address, profiles(display_name, username, avatar_url)')
         .eq('session_id', sessionId)
 
-      if (error || !data) return
+      if (error) return
 
-      const list: Participant[] = (data as any[])
+      const newAvatarMap: Record<string, string | null> = {}
+
+      const list: Participant[] = ((playerRows ?? []) as any[])
         .map((row) => {
-          const profile = row.profiles as { display_name?: string; username?: string } | null
+          const profile = row.profiles as { display_name?: string; username?: string; avatar_url?: string | null } | null
+          const wallet = (row.wallet_address as string).toLowerCase()
           const name =
             profile?.display_name ||
             profile?.username ||
             shortWallet(row.wallet_address as string)
-          return { wallet: (row.wallet_address as string).toLowerCase(), name }
+          if (profile?.avatar_url) newAvatarMap[wallet] = profile.avatar_url
+          return { wallet, name, avatarUrl: profile?.avatar_url ?? null }
         })
-        .filter((p) => p.wallet !== (senderWallet ?? '').toLowerCase())
+        .filter((p) => p.wallet !== myWallet)
 
+      // Also include the GM so players can whisper to them (GM may not be in session_players)
+      const { data: sessionRow } = await supabase
+        .from('sessions')
+        .select('gm_wallet')
+        .eq('id', sessionId)
+        .maybeSingle()
+
+      const gmWallet = (sessionRow as any)?.gm_wallet?.toLowerCase() ?? null
+      if (gmWallet && gmWallet !== myWallet && !list.some(p => p.wallet === gmWallet)) {
+        // Try to fetch GM profile for avatar
+        const { data: gmProfile } = await supabase
+          .from('profiles')
+          .select('display_name, username, avatar_url')
+          .eq('wallet_address', gmWallet)
+          .maybeSingle()
+        const gmName = (gmProfile as any)?.display_name || (gmProfile as any)?.username || 'GM'
+        const gmAvatar = (gmProfile as any)?.avatar_url ?? null
+        if (gmAvatar) newAvatarMap[gmWallet] = gmAvatar
+        list.unshift({ wallet: gmWallet, name: gmName, avatarUrl: gmAvatar })
+      }
+
+      // Also add sender's own avatar for outgoing message display
+      if (myWallet) {
+        const { data: myProfile } = await supabase
+          .from('profiles')
+          .select('avatar_url')
+          .eq('wallet_address', myWallet)
+          .maybeSingle()
+        const myAvatar = (myProfile as any)?.avatar_url ?? null
+        if (myAvatar) newAvatarMap[myWallet] = myAvatar
+      }
+
+      setAvatarMap(newAvatarMap)
       setParticipants(list)
     }
     void loadParticipants()
@@ -197,22 +240,39 @@ export default function TableChat({ sessionId, senderWallet, senderName = 'Adven
             )
           }
 
+          const avatarUrl = avatarMap[m.sender_wallet?.toLowerCase() ?? ''] ?? null
           return (
-            <div key={m.id} className={`flex flex-col gap-0.5 ${isMe ? 'items-end' : 'items-start'}`}>
-              <div className="flex items-baseline gap-1.5">
-                <span className={`text-[10px] font-semibold ${isMe ? 'text-emerald-400' : 'text-yellow-300'}`}>
-                  {m.sender_name || shortWallet(m.sender_wallet)}
-                </span>
-                <span className="text-[9px] text-slate-600">{formatTime(m.created_at)}</span>
+            <div key={m.id} className={`flex gap-1.5 ${isMe ? 'flex-row-reverse' : 'flex-row'} items-end`}>
+              {/* Avatar */}
+              <div className="shrink-0">
+                {avatarUrl ? (
+                  <img
+                    src={avatarUrl}
+                    alt=""
+                    className="h-5 w-5 rounded-full object-cover ring-1 ring-slate-700"
+                  />
+                ) : (
+                  <div className={`flex h-5 w-5 items-center justify-center rounded-full text-[8px] font-bold ring-1 ring-slate-700 ${isMe ? 'bg-emerald-900 text-emerald-300' : 'bg-slate-800 text-yellow-300'}`}>
+                    {(m.sender_name || shortWallet(m.sender_wallet)).charAt(0).toUpperCase()}
+                  </div>
+                )}
               </div>
-              <div
-                className={`max-w-[90%] rounded-lg px-2.5 py-1.5 text-[11px] leading-relaxed break-words ${
-                  isMe
-                    ? 'bg-emerald-900/40 text-emerald-100 rounded-tr-none'
-                    : 'bg-slate-800/80 text-slate-200 rounded-tl-none'
-                }`}
-              >
-                {m.body}
+              <div className={`flex flex-col gap-0.5 ${isMe ? 'items-end' : 'items-start'}`}>
+                <div className="flex items-baseline gap-1.5">
+                  <span className={`text-[10px] font-semibold ${isMe ? 'text-emerald-400' : 'text-yellow-300'}`}>
+                    {m.sender_name || shortWallet(m.sender_wallet)}
+                  </span>
+                  <span className="text-[9px] text-slate-600">{formatTime(m.created_at)}</span>
+                </div>
+                <div
+                  className={`max-w-[90%] rounded-lg px-2.5 py-1.5 text-[11px] leading-relaxed break-words ${
+                    isMe
+                      ? 'bg-emerald-900/40 text-emerald-100 rounded-tr-none'
+                      : 'bg-slate-800/80 text-slate-200 rounded-tl-none'
+                  }`}
+                >
+                  {m.body}
+                </div>
               </div>
             </div>
           )

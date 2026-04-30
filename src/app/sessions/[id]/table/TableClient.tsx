@@ -459,6 +459,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
     formula: string
     result: number
     rollerName: string
+    individual_dice?: { die: string; value: number; dropped?: true }[] | null
   }) {
     if (!session) return null
 
@@ -474,6 +475,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
           label: params.label,
           formula: params.formula,
           result_total: params.result,
+          individual_dice: params.individual_dice ?? null,
         })
         .select('id, label, formula, result_total, created_at, roller_name')
         .limit(1)
@@ -491,8 +493,9 @@ export default function TableClient({ sessionId }: TableClientProps) {
         result: (data as any).result_total as number,
         formula: ((data as any).formula as string) || '',
         timestamp: new Date((data as any).created_at as string).toLocaleTimeString(),
-      outcome: null,
-    }
+        outcome: null,
+        individual_dice: params.individual_dice ?? null,
+      }
 
       return entry
     } catch (e) {
@@ -507,10 +510,11 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
     const persisted = await persistRollToSupabase({
       label: roll.label,
-      rollType: 'monster',
+      rollType: 'sheet',
       formula: roll.formula,
       result: roll.result,
       rollerName,
+      individual_dice: roll.individual_dice ?? null,
     })
 
     const entry: DiceEntry =
@@ -521,8 +525,9 @@ export default function TableClient({ sessionId }: TableClientProps) {
         result: roll.result,
         formula: roll.formula,
         timestamp: new Date().toLocaleTimeString(),
-      outcome: null,
-    }
+        outcome: null,
+        individual_dice: roll.individual_dice ?? null,
+      }
 
     pushRollLocal(entry)
     setShowDiceLog(true)
@@ -756,8 +761,16 @@ export default function TableClient({ sessionId }: TableClientProps) {
   async function spawnMonsterToken(monster: { id: string; name: string }) {
     if (!encounterId) return
 
-    const startX = 100
-    const startY = 100
+    // Spread monster spawns so multiple tokens don't stack at the same pixel.
+    // Count existing tokens in this encounter and offset each new spawn on a grid.
+    const { count: existingCount } = await supabase
+      .from('tokens')
+      .select('id', { count: 'exact', head: true })
+      .eq('encounter_id', encounterId)
+    const n = existingCount ?? 0
+    const SPAWN_TILE = 60 // ~1 tile step between spawns (pixels)
+    const startX = 100 + (n % 10) * SPAWN_TILE
+    const startY = 100 + Math.floor(n / 10) * SPAWN_TILE
 
     let baseHp: number | null = null
     let baseAc: number | null = null
@@ -861,6 +874,34 @@ export default function TableClient({ sessionId }: TableClientProps) {
     }
   }
 
+  // Bug 18: End Session — GM-only flow that marks session completed + posts system message
+  async function handleEndSession() {
+    if (!session) return
+
+    // Mark completed in DB
+    const { error: updateErr } = await supabase
+      .from('sessions')
+      .update({ status: 'completed' })
+      .eq('id', session.id)
+
+    if (updateErr) {
+      console.error('[EndSession] failed to update status', updateErr)
+      return
+    }
+
+    // Post a system chat message so all players see it
+    await supabase.from('session_messages').insert({
+      session_id: session.id,
+      sender_wallet: walletLower ?? 'gm',
+      sender_name: 'GM',
+      body: '⏹ The GM has ended the session. Well adventured!',
+      kind: 'system',
+    })
+
+    // Update local state so the status badge and button hide immediately
+    setSession((prev) => prev ? { ...prev, status: 'completed' } : prev)
+  }
+
   const topBar = (
     <TableTopBar
       session={session as any}
@@ -870,6 +911,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
       roomName={roomName}
       showDiceLog={showDiceLog}
       onToggleDiceLog={() => setShowDiceLog((v) => !v)}
+      onEndSession={isGm ? handleEndSession : undefined}
     />
   )
 

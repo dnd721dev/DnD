@@ -1,7 +1,7 @@
 'use client'
 
 import type { ChangeEvent } from 'react'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import MapBoard from '@/components/table/MapBoard'
 import MapBoardView from '@/components/table/MapBoardView'
 import { DiceLogOverlay } from './DiceLogOverlay'
@@ -64,6 +64,16 @@ export function MapSection(props: {
     mapControls,
   } = props
 
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  // Escape key exits fullscreen
+  useEffect(() => {
+    if (!isFullscreen) return
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsFullscreen(false) }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [isFullscreen])
+
   // Derive what to show on the map canvas
   const mapImageUrl = currentMap?.image_url ?? legacyMapUrl ?? ''
   const tileData = currentMap?.is_tile_map ? currentMap.tile_data : null
@@ -78,7 +88,16 @@ export function MapSection(props: {
   }, [isGm, viewAsWallet, address])
 
   return (
-    <section className="relative h-full overflow-hidden rounded-xl border border-slate-800 bg-slate-950/80">
+    <section className={`relative overflow-hidden border border-slate-800 bg-slate-950/80 ${isFullscreen ? 'fixed inset-0 z-50 rounded-none' : 'h-full rounded-xl'}`}>
+      {/* Fullscreen toggle button */}
+      <button
+        type="button"
+        onClick={() => setIsFullscreen(v => !v)}
+        title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen map'}
+        className="pointer-events-auto absolute right-2 top-2 z-10 rounded-md border border-slate-600/60 bg-slate-900/80 px-2 py-1 text-[11px] text-slate-300 hover:border-slate-400/60 hover:text-white backdrop-blur-sm"
+      >
+        {isFullscreen ? '⛶ Exit' : '⛶'}
+      </button>
       <div className="relative w-full min-h-[calc(100vh-180px)] overflow-hidden bg-[radial-gradient(circle_at_top,_#1e293b,_#020617)] p-3">
 
         {hasMap ? (

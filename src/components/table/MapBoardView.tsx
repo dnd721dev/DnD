@@ -14,6 +14,7 @@ type Token = {
   ac?: number | null
   owner_wallet?: string | null
   type?: string | null
+  token_image_url?: string | null
 }
 
 type FogReveal = {
@@ -99,8 +100,18 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   const [activeWalletLower, setActiveWalletLower] = useState<string | null>(null)
   const [activeInitiativeName, setActiveInitiativeName] = useState<string | null>(null)
 
+  // Token image cache: URL → loaded HTMLImageElement
+  const tokenImgCacheRef = useRef<Map<string, HTMLImageElement>>(new Map())
+  const [tokenImgVersion, setTokenImgVersion] = useState(0)
+
   // ✅ movement tracking (feet used this turn)
   const [moveUsedFt, setMoveUsedFt] = useState<number>(0)
+  // Dash action — doubles movement budget this turn
+  const [isDashing, setIsDashing] = useState(false)
+  // Last committed move — allows undo (one level)
+  const [lastMove, setLastMove] = useState<{ tokenId: string; fromX: number; fromY: number; movedFt: number } | null>(null)
+  // Bug 16: tap-selected token for tap-to-move (mobile-friendly)
+  const [tapSelectTokenId, setTapSelectTokenId] = useState<string | null>(null)
 
   const [zoom, setZoom] = useState(1)
   const [translate, setTranslate] = useState<Point>({ x: 0, y: 0 })
@@ -184,6 +195,8 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   useEffect(() => {
     if (!characterId) {
       setMoveUsedFt(0)
+      setIsDashing(false)
+      setLastMove(null)
       return
     }
 
@@ -206,6 +219,7 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       const st = ((data as any)?.action_state ?? {}) as Record<string, any>
       const n = Number(st.move_used_ft ?? 0)
       setMoveUsedFt(Number.isFinite(n) && n >= 0 ? n : 0)
+      setIsDashing(Boolean(st.dashing))
     }
 
     loadMoveUsed()
@@ -225,12 +239,27 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     }
   }, [characterId])
 
+  // Pre-load token portrait images; bump tokenImgVersion to trigger canvas redraw
+  useEffect(() => {
+    const cache = tokenImgCacheRef.current
+    tokens.forEach(t => {
+      const url = t.token_image_url
+      if (!url || cache.has(url)) return
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      img.onload = () => { cache.set(url, img); setTokenImgVersion(v => v + 1) }
+      img.onerror = () => cache.set(url, new Image()) // mark failed so we don't retry
+      img.src = url
+    })
+  }, [tokens])
+
   // 5e simple movement: speedFeet -> max distance per drag
+  // Dash action doubles the speed budget (PHB "Dash" action)
   const maxMovePx = useMemo(() => {
     const s = Number(speedFeet)
     const safe = Number.isFinite(s) && s > 0 ? clamp(Math.floor(s), 5, 120) : 30
-    return (safe / 5) * gridSize
-  }, [speedFeet, gridSize])
+    return (safe / 5) * gridSize * (isDashing ? 2 : 1)
+  }, [speedFeet, gridSize, isDashing])
 
   // Remaining movement this turn (only enforced when it's your turn AND we have a characterId)
   const remainingMovePx = useMemo(() => {
@@ -266,7 +295,7 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     async function loadTokens() {
       let query = supabase
         .from('tokens')
-        .select('id, label, x, y, color, hp, ac, owner_wallet, type')
+        .select('id, label, x, y, color, hp, ac, owner_wallet, type, token_image_url')
         .eq('encounter_id', encounterId)
 
       if (mapId) {
@@ -565,13 +594,39 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
         ctx.restore()
       }
 
-      ctx.font = `${Math.max(12, gridSize * 0.35)}px system-ui, sans-serif`
-      ctx.fillStyle = '#e5e7eb'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.fillText(t.label || 'T', t.x, t.y)
+      // Bug 16: tap-selected highlight — white dashed ring
+      if (t.id === tapSelectTokenId) {
+        const lw = Math.max(2, gridSize * 0.08)
+        ctx.save()
+        ctx.beginPath()
+        ctx.setLineDash([4, 4])
+        ctx.lineWidth = lw
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)'
+        ctx.shadowColor = 'rgba(255,255,255,0.5)'
+        ctx.shadowBlur = Math.max(6, gridSize * 0.2)
+        ctx.arc(t.x, t.y, r + lw + 2, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.restore()
+      }
+
+      // Draw portrait image if available, otherwise fall back to text label
+      const tokenImg = t.token_image_url ? tokenImgCacheRef.current.get(t.token_image_url) : undefined
+      if (tokenImg && tokenImg.complete && tokenImg.naturalWidth > 0) {
+        ctx.save()
+        ctx.beginPath()
+        ctx.arc(t.x, t.y, r, 0, Math.PI * 2)
+        ctx.clip()
+        ctx.drawImage(tokenImg, t.x - r, t.y - r, r * 2, r * 2)
+        ctx.restore()
+      } else {
+        ctx.font = `${Math.max(12, gridSize * 0.35)}px system-ui, sans-serif`
+        ctx.fillStyle = '#e5e7eb'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(t.label || 'T', t.x, t.y)
+      }
     })
-  }, [tokens, canvasSize, gridSize, ownerLower, revealSet, activeInitiativeName, activeWalletLower])
+  }, [tokens, canvasSize, gridSize, ownerLower, revealSet, activeInitiativeName, activeWalletLower, tokenImgVersion, tapSelectTokenId])
 
   // Draw fog overlay (PERSISTENT reveals only)
   useEffect(() => {
@@ -597,6 +652,108 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     }
     ctx.restore()
   }, [canvasSize, reveals, gridSize])
+
+  // ✅ Dash action — sets dashing flag locally + persists to action_state
+  async function handleDash() {
+    setIsDashing(true)
+    setLastMove(null) // clear undo when dashing (fresh budget)
+    if (!characterId) return
+    const { data: row } = await supabase
+      .from('characters')
+      .select('action_state')
+      .eq('id', characterId)
+      .maybeSingle()
+    const st = ((row as any)?.action_state ?? {}) as Record<string, any>
+    await supabase
+      .from('characters')
+      .update({ action_state: { ...st, dashing: true } })
+      .eq('id', characterId)
+  }
+
+  // ✅ Undo last move — reverts token to saved position and subtracts the feet
+  async function handleUndoMove() {
+    if (!lastMove) return
+    const { tokenId, fromX, fromY, movedFt } = lastMove
+
+    const { error } = await supabase.rpc('move_my_token', {
+      p_token_id: tokenId,
+      p_x: Math.round(fromX),
+      p_y: Math.round(fromY),
+    })
+    if (error) { logSupabaseError('undo move_my_token failed:', error); return }
+
+    setTokens(prev => prev.map(t => t.id === tokenId ? { ...t, x: fromX, y: fromY } : t))
+    setLastMove(null)
+
+    const newUsed = Math.max(0, moveUsedFt - movedFt)
+    setMoveUsedFt(newUsed)
+
+    if (characterId) {
+      const { data: row } = await supabase
+        .from('characters')
+        .select('action_state')
+        .eq('id', characterId)
+        .maybeSingle()
+      const st = ((row as any)?.action_state ?? {}) as Record<string, any>
+      await supabase
+        .from('characters')
+        .update({ action_state: { ...st, move_used_ft: newUsed } })
+        .eq('id', characterId)
+    }
+  }
+
+  // ── Shared move-commit helper (used by drag, tap-to-move, and arrow keys) ────
+  // Commits a token from startPos to target: RPC → action_state → fog → trigger.
+  const commitMoveToTarget = useCallback(async (
+    tok: Token,
+    target: Point,
+    startPos: Point,
+  ) => {
+    const movedPx = dist(startPos, target)
+    const movedFt = Math.round(movedPx / gridSize) * 5
+
+    const { error: moveErr } = await supabase.rpc('move_my_token', {
+      p_token_id: tok.id,
+      p_x: Math.round(target.x),
+      p_y: Math.round(target.y),
+    })
+
+    if (moveErr) {
+      logSupabaseError('move_my_token RPC failed:', moveErr)
+      setTokens((prev) => prev.map((t) => (t.id === tok.id ? { ...t, x: startPos.x, y: startPos.y } : t)))
+      return
+    }
+
+    if (characterId && activeWalletLower && isMyTurn && movedFt > 0) {
+      setLastMove({ tokenId: tok.id, fromX: startPos.x, fromY: startPos.y, movedFt })
+
+      const next = Math.max(0, Math.floor(moveUsedFt) + movedFt)
+      setMoveUsedFt(next)
+
+      const { data: row, error: readErr } = await supabase
+        .from('characters')
+        .select('action_state')
+        .eq('id', characterId)
+        .maybeSingle()
+      if (!readErr) {
+        const st = ((row as any)?.action_state ?? {}) as Record<string, any>
+        const prevUsed = Number(st.move_used_ft ?? 0)
+        const safePrev = Number.isFinite(prevUsed) && prevUsed >= 0 ? prevUsed : 0
+        const merged = { ...st, move_used_ft: Math.max(0, Math.floor(safePrev + movedFt)) }
+        await supabase.from('characters').update({ action_state: merged }).eq('id', characterId)
+      }
+    }
+
+    void revealAround({ x: target.x, y: target.y })
+
+    const tileX = Math.round(target.x / gridSize)
+    const tileY = Math.round(target.y / gridSize)
+    window.dispatchEvent(
+      new CustomEvent('dnd721-token-moved', {
+        detail: { tokenId: tok.id, tileX, tileY, mapId, encounterId },
+      })
+    )
+  }, [characterId, activeWalletLower, isMyTurn, moveUsedFt, gridSize, revealAround, mapId, encounterId])
 
   // Helpers — accept any event with clientX/clientY (pointer, mouse, wheel)
   const getScreenPoint = (e: { clientX: number; clientY: number }) => {
@@ -663,6 +820,24 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
         setIsPanning(false)
       }
     } else {
+      // Bug 16: if a token is tap-selected, this empty-space tap is a "move here"
+      if (tapSelectTokenId) {
+        const selectedTok = tokens.find((t) => t.id === tapSelectTokenId)
+        setTapSelectTokenId(null)
+        if (selectedTok && canMoveToken(selectedTok)) {
+          const snapped = { x: snapToGrid(world.x), y: snapToGrid(world.y) }
+          const tapDist = dist({ x: selectedTok.x, y: selectedTok.y }, snapped)
+          const budget = characterId && activeWalletLower && isMyTurn ? remainingMovePx : Infinity
+          if (tapDist <= budget) {
+            // Optimistic position update before async commit
+            setTokens((prev) =>
+              prev.map((t) => (t.id === selectedTok.id ? { ...t, x: snapped.x, y: snapped.y } : t))
+            )
+            void commitMoveToTarget(selectedTok, snapped, { x: selectedTok.x, y: selectedTok.y })
+          }
+        }
+        return
+      }
       clickTokenIdRef.current = null
       setIsPanning(true)
       panStartRef.current = screen
@@ -734,10 +909,12 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   const handlePointerUp = async (e: React.PointerEvent<HTMLDivElement>) => {
     activePointersRef.current.delete(e.pointerId)
     if (activePointersRef.current.size < 2) pinchStartDistRef.current = null
-    // ✅ target selection (click token)
+
+    // ✅ target selection (click non-owned token)
     if (!dragTokenId && clickTokenIdRef.current) {
       const tok = tokens.find((t) => t.id === clickTokenIdRef.current)
       clickTokenIdRef.current = null
+      setTapSelectTokenId(null) // clear any tap selection
       if (tok && typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('dnd721-target-selected', { detail: { token: tok } }))
       }
@@ -753,60 +930,23 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     dragStartTokenRef.current = null
     if (!tok) return
 
-    const startPoint = start
-    const movedPx = startPoint ? dist(startPoint, { x: tok.x, y: tok.y }) : 0
-    const movedFt = startPoint ? Math.round(movedPx / gridSize) * 5 : 0
+    const startPoint = start ?? { x: tok.x, y: tok.y }
+    const movedPx = dist(startPoint, { x: tok.x, y: tok.y })
 
-    const { error: moveErr } = await supabase.rpc('move_my_token', {
-      p_token_id: tok.id,
-      p_x: Math.round(tok.x),
-      p_y: Math.round(tok.y),
-    })
-
-    if (moveErr) {
-      logSupabaseError('move_my_token RPC failed:', moveErr)
-
-      if (start?.x != null && start?.y != null) {
-        setTokens((prev) => prev.map((t) => (t.id === tok.id ? { ...t, x: start.x, y: start.y } : t)))
-      }
+    // Bug 16: distinguish tap (<30% of a tile) from a real drag
+    const TAP_THRESHOLD = gridSize * 0.3
+    if (movedPx < TAP_THRESHOLD && start) {
+      // Restore the tiny nudge caused by pointer events
+      setTokens((prev) => prev.map((t) => (t.id === tok.id ? { ...t, x: start.x, y: start.y } : t)))
+      // Toggle tap selection — second tap on same token deselects
+      setTapSelectTokenId((prev) => (prev === tok.id ? null : tok.id))
       return
     }
 
-    // ✅ success: persist movement used (only when it's your turn + we have a character)
-    if (characterId && activeWalletLower && isMyTurn && movedFt > 0) {
-      const next = Math.max(0, Math.floor(moveUsedFt) + movedFt)
-      setMoveUsedFt(next)
+    // Real drag — clear any lingering tap selection
+    setTapSelectTokenId(null)
 
-      // merge into action_state
-      const { data: row, error: readErr } = await supabase
-        .from('characters')
-        .select('action_state')
-        .eq('id', characterId)
-        .maybeSingle()
-
-      if (readErr) {
-        logSupabaseError('Error reading action_state for move_used_ft:', readErr)
-      } else {
-        const st = ((row as any)?.action_state ?? {}) as Record<string, any>
-        const prevUsed = Number(st.move_used_ft ?? 0)
-        const safePrev = Number.isFinite(prevUsed) && prevUsed >= 0 ? prevUsed : 0
-        const merged = { ...st, move_used_ft: Math.max(0, Math.floor(safePrev + movedFt)) }
-        const { error: writeErr } = await supabase.from('characters').update({ action_state: merged }).eq('id', characterId)
-        if (writeErr) logSupabaseError('Error updating action_state.move_used_ft:', writeErr)
-      }
-    }
-
-    // success: permanent eraser reveal
-    void revealAround({ x: tok.x, y: tok.y })
-
-    // Notify trigger system about the tile the token landed on
-    const tileX = Math.round(tok.x / gridSize)
-    const tileY = Math.round(tok.y / gridSize)
-    window.dispatchEvent(
-      new CustomEvent('dnd721-token-moved', {
-        detail: { tokenId: tok.id, tileX, tileY, mapId, encounterId },
-      })
-    )
+    await commitMoveToTarget(tok, { x: tok.x, y: tok.y }, startPoint)
   }
 
   const handlePointerLeave = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -835,6 +975,49 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     setZoom(newZoom)
     setTranslate({ x: screen.x - worldX * newZoom, y: screen.y - worldY * newZoom })
   }
+
+  // Bug 17: Arrow-key movement — moves the player's PC token one tile per keypress
+  useEffect(() => {
+    const handler = async (e: KeyboardEvent) => {
+      if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return
+      if (!ownerLower) return
+
+      const myTok = tokens.find(
+        (t) => t.type === 'pc' && t.owner_wallet?.toLowerCase() === ownerLower
+      )
+      if (!myTok) return
+
+      // Replicate canMoveToken checks inline (closure over current state)
+      if (myTok.owner_wallet?.toLowerCase() !== ownerLower) return
+      if (activeWalletLower && ownerLower !== activeWalletLower) return
+      if (activeWalletLower && characterId && remainingMovePx <= 0) return
+
+      // One grid step — exactly 5 ft
+      const dx = e.key === 'ArrowLeft' ? -gridSize : e.key === 'ArrowRight' ? gridSize : 0
+      const dy = e.key === 'ArrowUp'   ? -gridSize : e.key === 'ArrowDown'  ? gridSize : 0
+      if (dx === 0 && dy === 0) return
+
+      // Don't steal focus from text inputs
+      const active = document.activeElement
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return
+
+      e.preventDefault()
+
+      const newX = myTok.x + dx
+      const newY = myTok.y + dy
+
+      // Enforce movement budget
+      if (characterId && activeWalletLower && isMyTurn && remainingMovePx < gridSize) return
+
+      // Optimistic position update so the canvas redraws immediately
+      setTokens((prev) => prev.map((t) => (t.id === myTok.id ? { ...t, x: newX, y: newY } : t)))
+
+      await commitMoveToTarget(myTok, { x: newX, y: newY }, { x: myTok.x, y: myTok.y })
+    }
+
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [ownerLower, tokens, gridSize, characterId, activeWalletLower, isMyTurn, remainingMovePx, commitMoveToTarget])
 
   useEffect(() => {
     const container = containerRef.current
@@ -869,6 +1052,40 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
           className={`pointer-events-none absolute left-0 top-0 transition-opacity duration-300 ${fogsLoaded ? 'opacity-100' : 'opacity-0'}`}
         />
       </div>
+
+      {/* Movement action bar — only shown on your turn */}
+      {isMyTurn && characterId && (
+        <div className="pointer-events-auto absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-lg border border-slate-700/70 bg-slate-900/90 px-2.5 py-1.5 shadow-lg backdrop-blur-sm">
+          {/* Remaining movement indicator */}
+          <span className="text-[10px] text-slate-400">
+            {Math.max(0, Math.round((remainingMovePx / gridSize) * 5))}ft left
+          </span>
+          {/* Dash button */}
+          <button
+            type="button"
+            onClick={handleDash}
+            disabled={isDashing}
+            title={isDashing ? 'Already dashing (2× speed)' : 'Dash — double your movement this turn'}
+            className={`rounded px-2 py-0.5 text-[10px] font-semibold transition ${
+              isDashing
+                ? 'bg-amber-800/60 text-amber-300 opacity-60 cursor-default'
+                : 'bg-amber-700/80 text-amber-100 hover:bg-amber-600/80'
+            }`}
+          >
+            {isDashing ? '⚡ Dashing' : '⚡ Dash'}
+          </button>
+          {/* Undo button */}
+          <button
+            type="button"
+            onClick={handleUndoMove}
+            disabled={!lastMove}
+            title={lastMove ? 'Undo last move' : 'No move to undo'}
+            className="rounded bg-slate-700/80 px-2 py-0.5 text-[10px] font-semibold text-slate-200 hover:bg-slate-600/80 disabled:cursor-default disabled:opacity-40"
+          >
+            ↩ Undo
+          </button>
+        </div>
+      )}
     </div>
   )
 }

@@ -40,6 +40,7 @@ export type ExternalRoll = {
   formula: string
   result: number
   outcome?: string | null
+  individual_dice?: { die: string; value: number; dropped?: true }[] | null
 }
 
 // Loose character summary – we only care about a few fields
