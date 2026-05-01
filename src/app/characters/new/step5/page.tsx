@@ -6,9 +6,10 @@ import { loadDraft, saveDraft } from '@/lib/characterDraft'
 import type { CharacterDraft } from '../../../../types/characterDraft'
 import { proficiencyForLevel, calcAC } from '@/lib/rules'
 
-import { WEAPONS } from '@/lib/weapons'
+import { WEAPONS, WEAPON_MASTERY_CLASSES, WEAPON_MASTERY_SLOTS, WEAPON_MASTERY_TABLE, MASTERY_PROPERTY_SUMMARIES } from '@/lib/weapons'
 import { ARMORS } from '@/lib/armor'
 import { PACK_LIST, getPack, getGear, type PackKey } from '@/lib/equipment'
+import { CLASS_STARTING_EQUIPMENT } from '@/lib/startingEquipment'
 
 function uniqStrings(arr: string[]) {
   const out: string[] = []
@@ -201,32 +202,35 @@ export default function NewCharacterStep5Page() {
 
     const level = existing.level ?? 1
     const proficiencyBonus = existing.proficiencyBonus ?? proficiencyForLevel(level)
-
-    const defaultPackKey = packOptions[0]?.key ?? 'dungeoneers'
-    const packKey = normalizePackKey(existing.packKey ?? defaultPackKey) ?? defaultPackKey
-
-    // ✅ class-aware defaults (use filtered options)
     const classKey = existing.classKey ?? 'fighter'
+
+    // Determine starting equipment choice (default to Option A for new characters)
+    const choice = existing.startingEquipmentChoice ?? 'A'
+
+    // Class starting kit (Option A defaults)
+    const kit = CLASS_STARTING_EQUIPMENT[classKey.toLowerCase()]
 
     const classWeaponOptions = allWeapons.filter((w) => classCanUseWeapon(classKey, w))
     const classArmorOptions = allArmors.filter((a) => classCanUseArmor(classKey, a))
 
-    const defaultWeaponKey = classWeaponOptions[0]?.key ?? (allWeapons[0]?.key ?? 'club')
-    // Unarmored classes (monk, wizard, sorcerer) have an empty classArmorOptions list.
-    // Default to '' (no armor) instead of falling back to the first armor in the full list.
-    const defaultArmorKey = classArmorOptions[0]?.key ?? ''
+    // When Option A, seed from kit defaults if the player hasn't customized yet
+    const kitWeaponKey = kit?.defaultWeaponKey ?? classWeaponOptions[0]?.key ?? (allWeapons[0]?.key ?? 'club')
+    const kitArmorKey = kit?.defaultArmorKey ?? classArmorOptions[0]?.key ?? ''
+    const kitPackKey = normalizePackKey(kit?.defaultPackKey ?? null) ?? packOptions[0]?.key ?? 'dungeoneers'
 
-    // Use saved keys if still valid; otherwise fall back to allowed defaults
-    const savedWeapon = existing.mainWeaponKey ?? defaultWeaponKey
-    const savedArmor = existing.armorKey ?? defaultArmorKey
+    const savedWeapon = existing.mainWeaponKey ?? (choice === 'A' ? kitWeaponKey : classWeaponOptions[0]?.key ?? 'club')
+    const savedArmor  = existing.armorKey  ?? (choice === 'A' ? kitArmorKey  : classArmorOptions[0]?.key ?? '')
+    const savedPack   = normalizePackKey(existing.packKey ?? (choice === 'A' ? kitPackKey : packOptions[0]?.key)) ?? 'dungeoneers'
 
     const safeWeaponKey =
-      classWeaponOptions.some((w) => w.key === savedWeapon) ? savedWeapon : defaultWeaponKey
+      classWeaponOptions.some((w) => w.key === savedWeapon) ? savedWeapon : kitWeaponKey
     const safeArmorKey =
-      classArmorOptions.some((a) => a.key === savedArmor) ? savedArmor : defaultArmorKey
+      choice === 'A' && kit?.defaultArmorKey === null
+        ? ''  // explicitly unarmored
+        : classArmorOptions.some((a) => a.key === savedArmor) ? savedArmor : classArmorOptions[0]?.key ?? ''
 
     const equipmentItems = buildOwnedEquipmentKeys({
-      packKey: packKey as any,
+      packKey: savedPack as any,
       mainWeaponKey: safeWeaponKey,
       armorKey: safeArmorKey,
     })
@@ -235,9 +239,11 @@ export default function NewCharacterStep5Page() {
       ...existing,
       level,
       proficiencyBonus,
+      startingEquipmentChoice: choice,
+      startingGold: existing.startingGold ?? (choice === 'B' ? (kit?.optionBGold ?? 50) : undefined),
       mainWeaponKey: safeWeaponKey,
       armorKey: safeArmorKey,
-      packKey,
+      packKey: savedPack,
       equipmentItems,
     }
 
@@ -314,6 +320,85 @@ export default function NewCharacterStep5Page() {
           Choose your main weapon, armor, and adventuring pack. These dropdowns only show gear your class can use.
         </p>
       </div>
+
+      {/* Option A / Option B toggle */}
+      {(() => {
+        const classKey = String(draft.classKey ?? 'fighter').toLowerCase()
+        const kit = CLASS_STARTING_EQUIPMENT[classKey]
+        const choice = draft.startingEquipmentChoice ?? 'A'
+
+        function applyOptionA() {
+          if (!kit) { updateDraft({ startingEquipmentChoice: 'A', startingGold: undefined }); return }
+          updateDraft({
+            startingEquipmentChoice: 'A',
+            startingGold: undefined,
+            mainWeaponKey: kit.defaultWeaponKey,
+            armorKey: kit.defaultArmorKey,
+            packKey: kit.defaultPackKey,
+          })
+        }
+
+        function applyOptionB() {
+          const gold = kit?.optionBGold ?? 50
+          updateDraft({ startingEquipmentChoice: 'B', startingGold: gold })
+        }
+
+        return (
+          <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4 space-y-3">
+            <div className="text-sm font-semibold text-slate-200">Starting Equipment Method</div>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* Option A */}
+              <button
+                type="button"
+                onClick={applyOptionA}
+                className={`flex-1 rounded-lg border px-4 py-3 text-left text-xs transition ${
+                  choice === 'A'
+                    ? 'border-cyan-500 bg-cyan-900/20 text-slate-100'
+                    : 'border-slate-700 bg-slate-900/40 text-slate-400 hover:border-slate-500'
+                }`}
+              >
+                <div className="font-semibold text-sm mb-1">
+                  {choice === 'A' ? '✦' : '○'} Option A — Class Kit
+                </div>
+                {kit
+                  ? <p className="text-[11px] text-slate-400">{kit.optionALabel}</p>
+                  : <p className="text-[11px] text-slate-500 italic">No kit defined for this class.</p>
+                }
+              </button>
+
+              {/* Option B */}
+              <button
+                type="button"
+                onClick={applyOptionB}
+                className={`flex-1 rounded-lg border px-4 py-3 text-left text-xs transition ${
+                  choice === 'B'
+                    ? 'border-amber-500 bg-amber-900/20 text-slate-100'
+                    : 'border-slate-700 bg-slate-900/40 text-slate-400 hover:border-slate-500'
+                }`}
+              >
+                <div className="font-semibold text-sm mb-1">
+                  {choice === 'B' ? '✦' : '○'} Option B — Starting Gold
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Start with{' '}
+                  <span className={`font-semibold ${choice === 'B' ? 'text-amber-300' : 'text-slate-300'}`}>
+                    {kit?.optionBGold ?? 50} gp
+                  </span>{' '}
+                  and purchase your own gear between sessions.
+                </p>
+              </button>
+            </div>
+
+            {choice === 'B' && (
+              <div className="rounded-md border border-amber-700/30 bg-amber-900/10 px-3 py-2 text-[11px] text-amber-200/80">
+                💰 Starting gold recorded: <span className="font-semibold">{draft.startingGold ?? kit?.optionBGold ?? 50} gp</span>.
+                You can still customize your weapon, armor, and pack below for your character sheet — they won't affect your gold total.
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Weapon */}
@@ -456,6 +541,73 @@ export default function NewCharacterStep5Page() {
           ) : null}
         </div>
       </div>
+
+      {/* Weapon Mastery (2024 rules — barbarian/fighter/paladin/ranger only) */}
+      {WEAPON_MASTERY_CLASSES.has(String(draft.classKey ?? '').toLowerCase()) && (() => {
+        const classKey = String(draft.classKey ?? '').toLowerCase()
+        const slots = WEAPON_MASTERY_SLOTS[classKey] ?? 2
+        const chosen: string[] = draft.weaponMasteries ?? []
+
+        // All weapons the class is proficient with that have a mastery property
+        const eligibleWeapons = Object.values(WEAPONS).filter(
+          (w) => classCanUseWeapon(classKey, w) && WEAPON_MASTERY_TABLE[w.key]
+        ).sort((a, b) => a.name.localeCompare(b.name))
+
+        function toggleMastery(weaponKey: string) {
+          const isSelected = chosen.includes(weaponKey)
+          let next: string[]
+          if (isSelected) {
+            next = chosen.filter((k) => k !== weaponKey)
+          } else if (chosen.length < slots) {
+            next = [...chosen, weaponKey]
+          } else {
+            // Replace the last selection
+            next = [...chosen.slice(0, slots - 1), weaponKey]
+          }
+          updateDraft({ weaponMasteries: next })
+        }
+
+        return (
+          <div className="rounded-xl border border-amber-700/40 bg-amber-900/10 p-4 space-y-3">
+            <div>
+              <div className="text-sm font-semibold text-amber-200">Weapon Mastery</div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Choose {slots} weapon{slots !== 1 ? 's' : ''} to apply your mastery property to.
+                You can swap your selections after each long rest.
+                ({chosen.length}/{slots} selected)
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {eligibleWeapons.map((w) => {
+                const mastery = WEAPON_MASTERY_TABLE[w.key]!
+                const selected = chosen.includes(w.key)
+                const atMax = !selected && chosen.length >= slots
+                return (
+                  <button
+                    key={w.key}
+                    type="button"
+                    disabled={atMax}
+                    onClick={() => toggleMastery(w.key)}
+                    title={MASTERY_PROPERTY_SUMMARIES[mastery]}
+                    className={`flex items-center gap-1 rounded-full border px-3 py-0.5 text-[11px] transition ${
+                      selected
+                        ? 'border-amber-400 bg-amber-500/20 text-amber-200 font-semibold'
+                        : atMax
+                        ? 'border-slate-700 text-slate-600 cursor-not-allowed'
+                        : 'border-slate-600 text-slate-300 hover:border-amber-500 hover:text-amber-200'
+                    }`}
+                  >
+                    {w.name}
+                    <span className={`text-[10px] ${selected ? 'text-amber-400' : 'text-slate-500'}`}>
+                      · {mastery}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
 
       <div className="flex justify-between items-center pt-4 border-t border-slate-800 mt-4">
         <button

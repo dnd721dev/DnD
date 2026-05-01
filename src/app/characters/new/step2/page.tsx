@@ -8,9 +8,38 @@ import { RACE_LIST, RACES, type RaceKey } from '@/lib/races'
 import { BACKGROUND_LIST, BACKGROUNDS, type BackgroundKey } from '@/lib/backgrounds'
 import { proficiencyForLevel } from '@/lib/rules'
 import { supabase } from '@/lib/supabase'
+import { getFeat } from '@/lib/feats'
 
 // ✅ pull subclasses from the real library
 import { CLASS_SUBCLASSES, type ClassKey, type SubclassKey } from '@/lib/subclasses'
+
+// 2024 rules: all classes unlock their subclass at level 3
+const SUBCLASS_UNLOCK_LEVEL: Record<string, number> = {
+  barbarian: 3,
+  bard: 3,
+  cleric: 3,
+  druid: 3,
+  fighter: 3,
+  monk: 3,
+  paladin: 3,
+  ranger: 3,
+  rogue: 3,
+  sorcerer: 3,
+  warlock: 3,
+  wizard: 3,
+}
+
+/** Format background ability modifiers as "+2 STR, +1 CON" */
+function formatAsiMods(mods: Partial<Record<string, number>>): string {
+  const LABELS: Record<string, string> = {
+    str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA',
+  }
+  return Object.entries(mods)
+    .filter(([, v]) => v && v !== 0)
+    .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
+    .map(([k, v]) => `+${v} ${LABELS[k] ?? k.toUpperCase()}`)
+    .join(', ')
+}
 
 const CLASS_OPTIONS = [
   { key: 'fighter', label: 'Fighter' },
@@ -103,6 +132,10 @@ export default function NewCharacterStep2Page() {
     const safeSubclass =
       existingSubclass && !allowedSubclassKeys.has(existingSubclass) ? null : existing.subclassKey ?? null
 
+    // Auto-set originFeat from background (2024 rules)
+    const bgData = BACKGROUNDS[backgroundKey as BackgroundKey]
+    const originFeat = existing.originFeat ?? bgData?.originFeatKey ?? undefined
+
     const merged: CharacterDraft = {
       ...existing,
       level,
@@ -112,6 +145,7 @@ export default function NewCharacterStep2Page() {
       baseAbilities,
       proficiencyBonus,
       subclassKey: safeSubclass,
+      originFeat,
     }
 
     setDraft(merged)
@@ -317,25 +351,47 @@ export default function NewCharacterStep2Page() {
           <p className="text-[11px] text-slate-500">Determines your hit dice, primary abilities, and which spells you'll learn later.</p>
         </div>
 
-        <div className="space-y-1 text-xs">
-          <label className="font-semibold text-slate-300">Subclass (optional)</label>
-          <select
-            className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
-            value={draft.subclassKey ?? ''}
-            onChange={(e) => {
-              const v = e.target.value
-              updateDraft({ subclassKey: v ? (v as SubclassKey) : null })
-            }}
-          >
-            {subclassOptions.map((opt) => (
-              <option key={String(opt.key)} value={String(opt.key)}>
-                {opt.label}
-                {opt.source ? ` (${opt.source})` : ''}
-              </option>
-            ))}
-          </select>
-          <p className="text-[11px] text-slate-500">You can leave this blank at low levels and decide later.</p>
-        </div>
+        {(() => {
+          const unlockLevel = SUBCLASS_UNLOCK_LEVEL[String(draft.classKey ?? 'fighter')] ?? 3
+          const characterLevel = draft.level ?? 1
+          const subclassUnlocked = characterLevel >= unlockLevel
+
+          if (!subclassUnlocked) {
+            return (
+              <div className="space-y-1 text-xs">
+                <label className="font-semibold text-slate-400">Subclass</label>
+                <div className="rounded-md border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-[11px] text-slate-500 italic">
+                  🔒 Unlocks at level {unlockLevel} — choose your subclass when your character advances.
+                </div>
+              </div>
+            )
+          }
+
+          return (
+            <div className="space-y-1 text-xs">
+              <label className="font-semibold text-slate-300">
+                Subclass{' '}
+                <span className="text-[10px] font-normal text-slate-500">(optional at level {characterLevel})</span>
+              </label>
+              <select
+                className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
+                value={draft.subclassKey ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value
+                  updateDraft({ subclassKey: v ? (v as SubclassKey) : null })
+                }}
+              >
+                {subclassOptions.map((opt) => (
+                  <option key={String(opt.key)} value={String(opt.key)}>
+                    {opt.label}
+                    {opt.source ? ` (${opt.source})` : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-500">Leave blank to decide later.</p>
+            </div>
+          )
+        })()}
 
         <div className="space-y-1 text-xs">
           <label className="font-semibold text-slate-300">Proficiency Bonus</label>
@@ -383,7 +439,14 @@ export default function NewCharacterStep2Page() {
           <select
             className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
             value={draft.backgroundKey ?? ''}
-            onChange={(e) => updateDraft({ backgroundKey: e.target.value as BackgroundKey })}
+            onChange={(e) => {
+              const bgKey = e.target.value as BackgroundKey
+              const bgEntry = BACKGROUNDS[bgKey]
+              updateDraft({
+                backgroundKey: bgKey,
+                originFeat: bgEntry?.originFeatKey ?? undefined,
+              })
+            }}
           >
             {BACKGROUND_LIST.map((bg) => (
               <option key={bg.key} value={bg.key}>
@@ -393,8 +456,30 @@ export default function NewCharacterStep2Page() {
           </select>
 
           {selectedBackground && (
-            <div className="mt-2 rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 space-y-1">
+            <div className="mt-2 rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 space-y-1.5">
               <div className="text-[11px] font-semibold text-slate-300">{selectedBackground.name}</div>
+
+              {/* Ability Score Improvements */}
+              {selectedBackground.abilityScoreModifiers && Object.keys(selectedBackground.abilityScoreModifiers).length > 0 && (
+                <p className="text-[11px] text-slate-400">
+                  <span className="text-slate-500">Ability scores: </span>
+                  <span className="font-semibold text-emerald-300">
+                    {formatAsiMods(selectedBackground.abilityScoreModifiers)}
+                  </span>
+                </p>
+              )}
+
+              {/* Origin Feat */}
+              {selectedBackground.originFeatKey && (
+                <p className="text-[11px] text-slate-400">
+                  <span className="text-slate-500">Origin feat: </span>
+                  <span className="font-semibold text-amber-300">
+                    {getFeat(selectedBackground.originFeatKey)?.name ?? selectedBackground.originFeatKey}
+                  </span>
+                </p>
+              )}
+
+              {/* Background feature */}
               {selectedBackground.feature && (
                 <p className="text-[11px] text-slate-400">
                   <strong className="text-slate-300">{selectedBackground.feature.name}:</strong>{' '}

@@ -221,18 +221,7 @@ export default function NewCharacterStep4Page() {
       spellClass = null
   }
 
-  // racial bonuses (no hooks)
-  const racialBonuses: Partial<Abilities> = (() => {
-    const out: Partial<Abilities> = {}
-    if (race?.abilityBonuses) {
-      for (const [k, v] of Object.entries(race.abilityBonuses)) {
-        out[k as keyof Abilities] = v
-      }
-    }
-    return out
-  })()
-
-  // final abilities (no hooks)
+  // final abilities (2024 rules: species grant no ability bonuses)
   const finalAbilities: Abilities = (() => {
     const out: Abilities = { ...draft.baseAbilities! }
     ;(Object.keys(draft.abilityBonuses!) as (keyof Abilities)[]).forEach(
@@ -240,9 +229,6 @@ export default function NewCharacterStep4Page() {
         out[k] += draft.abilityBonuses![k]
       }
     )
-    ;(Object.keys(racialBonuses) as (keyof Abilities)[]).forEach((k) => {
-      out[k] += racialBonuses[k] ?? 0
-    })
     return out
   })()
 

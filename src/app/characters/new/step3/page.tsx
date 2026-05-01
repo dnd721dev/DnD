@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { loadDraft, saveDraft } from '@/lib/characterDraft'
 import type { CharacterDraft } from '../../../../types/characterDraft'
 import type { Abilities } from '../../../../types/character'
-import { RACE_LIST } from '@/lib/races'
+import { BACKGROUNDS, type BackgroundKey } from '@/lib/backgrounds'
 import { asiSlotsForClassLevel } from '@/lib/rules'
 import { FEAT_LIST, getFeat } from '@/lib/feats'
 
@@ -71,22 +71,13 @@ export default function NewCharacterStep3Page() {
     setLoading(false)
   }, [])
 
-  // Race object from raceKey
-  const race = useMemo(() => {
-    if (!draft?.raceKey) return undefined
-    return RACE_LIST.find((r) => r.key === draft.raceKey)
-  }, [draft?.raceKey])
-
-  // Racial bonuses, if any
-  const racialBonuses: Partial<Abilities> = useMemo(() => {
-    const out: Partial<Abilities> = {}
-    if (race?.abilityBonuses) {
-      for (const [k, v] of Object.entries(race.abilityBonuses)) {
-        out[k as AbilityKey] = v as number
-      }
-    }
-    return out
-  }, [race])
+  // Background ASI modifiers (2024 rules: all ability bonuses come from background)
+  const bgModifiers: Partial<Abilities> = useMemo(() => {
+    if (!draft?.backgroundKey) return {}
+    const bg = BACKGROUNDS[draft.backgroundKey as BackgroundKey]
+    if (!bg?.abilityScoreModifiers) return {}
+    return { ...bg.abilityScoreModifiers } as Partial<Abilities>
+  }, [draft?.backgroundKey])
 
   // 2) Early returns AFTER all hooks are declared
   if (loading) {
@@ -148,8 +139,8 @@ export default function NewCharacterStep3Page() {
           Step 3 — Abilities &amp; Modifiers
         </h2>
         <p className="text-xs md:text-sm text-slate-400">
-          Your base scores come from your NFT and race. You can apply additional
-          bonuses here (point buy, ASI, etc.).
+          Your base scores come from your NFT. Background bonuses are applied automatically.
+          Use the Bonus column for any additional modifiers (point buy, house rules, etc.).
         </p>
       </div>
 
@@ -191,9 +182,9 @@ export default function NewCharacterStep3Page() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {ABILITY_KEYS.map((key) => {
           const base = currentDraft.baseAbilities![key]
-          const racial = racialBonuses[key] ?? 0
+          const bgBonus = bgModifiers[key] ?? 0
           const bonus = currentDraft.abilityBonuses![key]
-          const total = base + racial + bonus
+          const total = base + bgBonus + bonus
           const mod = abilityMod(total)
           const sign = mod >= 0 ? '+' : ''
 
@@ -223,9 +214,9 @@ export default function NewCharacterStep3Page() {
                   </div>
                 </div>
                 <div className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1.5">
-                  <div className="text-[10px] text-slate-500">Racial</div>
-                  <div className="text-sm font-semibold text-cyan-300">
-                    {racial >= 0 ? `+${racial}` : racial}
+                  <div className="text-[10px] text-slate-500">Background</div>
+                  <div className="text-sm font-semibold text-emerald-300">
+                    {bgBonus >= 0 ? `+${bgBonus}` : bgBonus}
                   </div>
                 </div>
                 <div className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1.5">

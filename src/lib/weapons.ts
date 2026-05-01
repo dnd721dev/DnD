@@ -23,6 +23,17 @@ export type WeaponProperty =
 /** Whether this weapon makes a melee attack roll, ranged attack roll, or forces a saving throw. */
 export type AttackType = 'melee' | 'ranged' | 'save'
 
+/** 2024 Weapon Mastery properties */
+export type MasteryProperty =
+  | 'Cleave'
+  | 'Graze'
+  | 'Nick'
+  | 'Push'
+  | 'Sap'
+  | 'Slow'
+  | 'Topple'
+  | 'Vex'
+
 // Core weapon shape
 export type Weapon = {
   /** Internal key you'll store on the character (e.g. "longsword") */
@@ -48,6 +59,8 @@ export type Weapon = {
     normal: number
     long: number
   }
+  /** 2024 rules: each weapon has exactly one Mastery property. */
+  masteryProperty?: MasteryProperty
 }
 
 // -------------------------------------
@@ -561,4 +574,78 @@ export const MARTIAL_RANGED_WEAPONS = MARTIAL_WEAPONS.filter(
  */
 export function getWeapon(key: string): Weapon | undefined {
   return WEAPONS[key]
+}
+
+// ------------------------------------------------------------------
+// 2024 Weapon Mastery property lookup
+// ------------------------------------------------------------------
+
+/** Mastery property descriptions (one sentence each, original text). */
+export const MASTERY_PROPERTY_SUMMARIES: Record<MasteryProperty, string> = {
+  Cleave:  'After hitting a creature with a melee attack, you may make a free melee attack against another creature adjacent to you.',
+  Graze:   'When your attack roll misses, deal damage equal to your ability modifier (minimum 1) to the target.',
+  Nick:    'When using the Attack action with this Light weapon, you can make one extra attack with another Light weapon as part of the same action.',
+  Push:    'When you hit a creature with this weapon, you can push the target up to 10 ft. away.',
+  Sap:     'When you hit a creature with this weapon, the target has disadvantage on its next attack roll before the start of your next turn.',
+  Slow:    'When you hit a creature with this weapon, reduce the target\'s speed by 10 ft. until the start of your next turn.',
+  Topple:  'When you hit a creature with this weapon, you can force it to make a CON saving throw (DC = 8 + Prof + ability mod); on a failure, it falls prone.',
+  Vex:     'When you hit a creature with this weapon, you gain advantage on your next attack roll against that creature before the end of your next turn.',
+}
+
+/** Weapon key → mastery property (2024 PHB). */
+export const WEAPON_MASTERY_TABLE: Partial<Record<string, MasteryProperty>> = {
+  // Simple melee
+  club:         'Slow',
+  dagger:       'Nick',
+  greatclub:    'Push',
+  handaxe:      'Vex',
+  javelin:      'Slow',
+  lightHammer:  'Nick',
+  mace:         'Sap',
+  quarterstaff: 'Topple',
+  sickle:       'Nick',
+  spear:        'Sap',
+  // Simple ranged
+  dart:         'Vex',
+  lightCrossbow:'Slow',
+  shortbow:     'Vex',
+  // Martial melee
+  battleaxe:    'Topple',
+  flail:        'Sap',
+  glaive:       'Graze',
+  greataxe:     'Cleave',
+  greatsword:   'Graze',
+  halberd:      'Cleave',
+  lance:        'Topple',
+  longsword:    'Sap',
+  maul:         'Topple',
+  morningstar:  'Sap',
+  pike:         'Push',
+  rapier:       'Vex',
+  scimitar:     'Nick',
+  shortsword:   'Vex',
+  trident:      'Topple',
+  warPick:      'Sap',
+  warhammer:    'Push',
+  whip:         'Slow',
+  // Martial ranged
+  handCrossbow: 'Vex',
+  heavyCrossbow:'Push',
+  longbow:      'Slow',
+}
+
+/** Classes that have Weapon Mastery in 2024 rules. */
+export const WEAPON_MASTERY_CLASSES = new Set(['barbarian', 'fighter', 'paladin', 'ranger'])
+
+/** Number of mastery weapon slots at level 1 (can expand by level later). */
+export const WEAPON_MASTERY_SLOTS: Record<string, number> = {
+  barbarian: 2,
+  fighter:   3,
+  paladin:   2,
+  ranger:    2,
+}
+
+/** Returns the mastery property for a weapon key, or undefined. */
+export function getWeaponMastery(key: string): MasteryProperty | undefined {
+  return WEAPON_MASTERY_TABLE[key]
 }

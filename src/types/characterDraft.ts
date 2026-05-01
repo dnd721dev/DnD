@@ -47,6 +47,11 @@ export interface CharacterDraft {
   initiative?: number
   speed?: number
 
+  // Equipment method (Option A = class kit, Option B = starting gold)
+  startingEquipmentChoice?: 'A' | 'B'
+  /** Starting gold chosen under Option B (GP). */
+  startingGold?: number
+
   // Equipment (selected)
   packKey?: string | null
   mainWeaponKey?: string | null
@@ -77,6 +82,12 @@ export interface CharacterDraft {
     ability2?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
     featName?: string
   }>
+
+  // Origin Feat (2024 rules: granted by background, not player-chosen)
+  originFeat?: string
+
+  // Weapon Masteries (2024 rules: fighters/barbarians/paladins/rangers choose mastery weapons)
+  weaponMasteries?: string[]
 
   // Spells
   knownSpells?: string[]

@@ -215,22 +215,10 @@ export default function NewCharacterStep6Page() {
     const bonuses = draft.abilityBonuses
     if (!base || !bonuses) return null
 
-    const raceKey = (draft.raceKey as RaceKey) ?? (RACE_LIST[0]?.key as RaceKey)
-    const race = getRace(raceKey)
-
-    const racialBonuses: Partial<Abilities> = {}
-    if (race?.abilityBonuses) {
-      for (const [k, v] of Object.entries(race.abilityBonuses)) {
-        racialBonuses[k as keyof Abilities] = v
-      }
-    }
-
+    // 2024 rules: species grant no ability score bonuses; all bonuses come from background
     const out: Abilities = { ...base }
     ;(Object.keys(bonuses) as (keyof Abilities)[]).forEach((k) => {
       out[k] += bonuses[k]
-    })
-    ;(Object.keys(racialBonuses) as (keyof Abilities)[]).forEach((k) => {
-      out[k] += racialBonuses[k] ?? 0
     })
 
     return out
@@ -484,6 +472,13 @@ export default function NewCharacterStep6Page() {
         feats: (draft.asiChoices ?? [])
           .filter((c) => c.type === 'feat' && c.featName)
           .map((c) => c.featName as string),
+
+        // origin feat (2024 rules: granted automatically by background)
+        origin_feat: draft.originFeat ?? null,
+
+        // starting equipment method
+        starting_equipment_choice: draft.startingEquipmentChoice ?? 'A',
+        starting_gold: draft.startingGold ?? null,
 
         // CAYA progression
         is_caya: draft.is_caya ?? false,

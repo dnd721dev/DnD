@@ -65,6 +65,8 @@ export type GearKey =
   | 'diceSet'
   | 'pouch'
   | 'beltPouch'
+  | 'chest'
+  | 'candle'
 
 // Basic gear item
 export type GearItem = {
@@ -474,6 +476,22 @@ export const GEAR: Record<GearKey, GearItem> = {
     costGp: '0.5',
     description: 'Pouch that hangs from a belt for quick access to gear.',
   },
+  chest: {
+    key: 'chest',
+    name: 'Chest',
+    category: 'container',
+    weight: 25,
+    costGp: '5',
+    description: 'Sturdy wooden chest for storing valuables or traveling supplies.',
+  },
+  candle: {
+    key: 'candle',
+    name: 'Candle',
+    category: 'light',
+    weight: 0,
+    costGp: '0.01',
+    description: 'Tallow candle that sheds dim light in a small radius.',
+  },
 }
 
 // ------------------------------------------------------------------
@@ -514,7 +532,7 @@ export const PACKS: Record<PackKey, Pack> = {
       'Tools and gear for a stealthy intruder: ropes, lights, and ways to get into places.',
     items: [
       { item: 'backpack', quantity: 1 },
-      { item: 'ballOfSand' as any, quantity: 0 }, // placeholder if needed later
+      { item: 'bagOfSand', quantity: 1 },
       { item: 'crowbar', quantity: 1 },
       { item: 'hammer', quantity: 1 },
       { item: 'piton', quantity: 10 },
@@ -532,7 +550,7 @@ export const PACKS: Record<PackKey, Pack> = {
     description:
       'Finery, paper, and tools to look important and handle official business.',
     items: [
-      { item: 'chest10' as any, quantity: 0 }, // if you later add a chest item
+      { item: 'chest', quantity: 1 },
       { item: 'fineClothes', quantity: 2 }, // usually 1 set; you can tweak this
       { item: 'perfumebottle', quantity: 1 },
       { item: 'sealingWax', quantity: 1 },
@@ -572,7 +590,7 @@ export const PACKS: Record<PackKey, Pack> = {
       { item: 'bedroll', quantity: 1 },
       { item: 'costumeClothes', quantity: 2 },
       { item: 'disguiseKit', quantity: 1 },
-      { item: 'candle' as any, quantity: 5 }, // add candle later if you want full detail
+      { item: 'candle', quantity: 5 },
       { item: 'rationsDay', quantity: 5 },
       { item: 'waterskin', quantity: 1 },
     ],
@@ -603,7 +621,7 @@ export const PACKS: Record<PackKey, Pack> = {
     items: [
       { item: 'backpack', quantity: 1 },
       { item: 'blanket', quantity: 1 },
-      { item: 'candle' as any, quantity: 10 }, // placeholder
+      { item: 'candle', quantity: 10 },
       { item: 'incenseBlock', quantity: 2 },
       { item: 'prayerBook', quantity: 1 },
       { item: 'vestments', quantity: 1 },
