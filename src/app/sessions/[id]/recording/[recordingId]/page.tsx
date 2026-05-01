@@ -180,6 +180,20 @@ export default function RecordingEditorPage() {
     return () => { void supabase.removeChannel(channel) }
   }, [recordingId, fetchRecording])
 
+  // Fix 7: polling fallback — if realtime misses the webhook update, poll every
+  // 15 seconds while the recording is still in a processing state.
+  useEffect(() => {
+    if (!recording) return
+    const stillProcessing = recording.status === 'recording' || recording.status === 'stopped'
+    if (!stillProcessing) return
+
+    const interval = setInterval(() => {
+      void fetchRecording()
+    }, 15_000)
+
+    return () => clearInterval(interval)
+  }, [recording?.status, fetchRecording])
+
   // ── Script actions ─────────────────────────────────────────────────────────
 
   async function saveScript() {
