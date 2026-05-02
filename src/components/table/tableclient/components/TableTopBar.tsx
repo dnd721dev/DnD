@@ -18,8 +18,10 @@ export function TableTopBar(props: {
   onToggleDiceLog: () => void
   /** GM-only: called when the GM confirms "End Session" */
   onEndSession?: () => Promise<void>
+  /** Open the in-session shop modal */
+  onOpenShop?: () => void
 }) {
-  const { session, isGm, address, displayName, roomName, showDiceLog, onToggleDiceLog, onEndSession } = props
+  const { session, isGm, address, displayName, roomName, showDiceLog, onToggleDiceLog, onEndSession, onOpenShop } = props
   const [srdOpen, setSrdOpen] = useState(false)
   const [confirmEnd, setConfirmEnd] = useState(false)
   const [endingSession, setEndingSession] = useState(false)
@@ -60,6 +62,16 @@ export function TableTopBar(props: {
           >
             📖 SRD
           </button>
+          {onOpenShop && (
+            <button
+              type="button"
+              onClick={onOpenShop}
+              className="rounded-md bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:bg-amber-700/60 hover:text-amber-200 transition-colors"
+              title="Bishop's Shop — daily free items + paid consumables"
+            >
+              🏪 Bishop&apos;s Shop
+            </button>
+          )}
           <button
             type="button"
             onClick={onToggleDiceLog}

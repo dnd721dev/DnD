@@ -12,6 +12,7 @@ import { MONSTERS } from '@/lib/monsters'
 
 import type { DiceEntry, ExternalRoll } from '@/components/table/tableclient/types'
 import { TableTopBar } from '@/components/table/tableclient/components/TableTopBar'
+import { ShopModal } from '@/components/shop/ShopModal'
 import { MapSection } from '@/components/table/tableclient/components/MapSection'
 import { useSessionWithCampaign } from '@/components/table/tableclient/hooks/useSessionWithCampaign'
 import { useEncounter } from '@/components/table/tableclient/hooks/useEncounter'
@@ -902,17 +903,34 @@ export default function TableClient({ sessionId }: TableClientProps) {
     setSession((prev) => prev ? { ...prev, status: 'completed' } : prev)
   }
 
+  const [showShop,     setShowShop]     = useState(false)
+  const [shopToast,    setShopToast]    = useState<string | null>(null)
+
+  function handleShopPurchase(itemName: string) {
+    setShopToast(`🏪 ${itemName} added to inventory!`)
+    setTimeout(() => setShopToast(null), 4000)
+  }
+
   const topBar = (
-    <TableTopBar
-      session={session as any}
-      isGm={isGm}
-      address={address}
-      displayName={myDisplayName}
-      roomName={roomName}
-      showDiceLog={showDiceLog}
-      onToggleDiceLog={() => setShowDiceLog((v) => !v)}
-      onEndSession={isGm ? handleEndSession : undefined}
-    />
+    <>
+      <TableTopBar
+        session={session as any}
+        isGm={isGm}
+        address={address}
+        displayName={myDisplayName}
+        roomName={roomName}
+        showDiceLog={showDiceLog}
+        onToggleDiceLog={() => setShowDiceLog((v) => !v)}
+        onEndSession={isGm ? handleEndSession : undefined}
+        onOpenShop={() => setShowShop(true)}
+      />
+      {/* Shop toast notification */}
+      {shopToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-xl border border-amber-700/60 bg-slate-900 px-4 py-2.5 text-sm font-medium text-amber-200 shadow-xl">
+          {shopToast}
+        </div>
+      )}
+    </>
   )
 
   const mapSection = (
@@ -964,6 +982,16 @@ export default function TableClient({ sessionId }: TableClientProps) {
     return (
       <div className="flex h-[calc(100vh-2rem)] flex-col gap-2 p-2 sm:p-4">
         {topBar}
+
+        {/* Shop modal */}
+        {showShop && (
+          <ShopModal
+            isModal
+            sessionId={sessionId}
+            onClose={() => setShowShop(false)}
+            onPurchase={handleShopPurchase}
+          />
+        )}
 
         {/* MapBuilder overlay */}
         {showMapBuilder && (
@@ -1147,6 +1175,17 @@ export default function TableClient({ sessionId }: TableClientProps) {
   return (
     <div className="flex h-[calc(100vh-2rem)] flex-col gap-2 p-2 sm:p-4">
       {topBar}
+
+      {/* Shop modal (player) */}
+      {showShop && (
+        <ShopModal
+          isModal
+          sessionId={sessionId}
+          onClose={() => setShowShop(false)}
+          onPurchase={handleShopPurchase}
+        />
+      )}
+
       <div className="relative flex-1 min-h-0 min-w-0">
         <div className="absolute inset-0">
           {mapSection}
