@@ -1,14 +1,18 @@
 // GET /api/shop/price
 // Returns the current DND721/USD price from DexScreener.
+// Falls back to DND721_PRICE_USD_FALLBACK env var if DexScreener is unavailable.
 // Cached in memory for 60 seconds to avoid hammering the free API.
 
 import { NextResponse } from 'next/server'
 
-const DND721_ADDRESS = '0x85878508D21db40D53Aa38571022e6673dabe317'.toLowerCase()
-const CACHE_TTL_MS   = 60_000  // 60 seconds
+const DND721_ADDRESS   = '0x85878508D21db40D53Aa38571022e6673dabe317'.toLowerCase()
+const CACHE_TTL_MS     = 60_000  // 60 seconds
+// Configurable fallback price — set DND721_PRICE_USD_FALLBACK in env if DexScreener
+// doesn't list the token yet. Defaults to $0.10.
+const FALLBACK_PRICE   = Number(process.env.DND721_PRICE_USD_FALLBACK ?? '0.10')
 
-let cachedPrice:     number | null = null
-let cacheExpiresAt:  number        = 0
+let cachedPrice:    number | null = null
+let cacheExpiresAt: number        = 0
 
 export const dynamic = 'force-dynamic'
 
@@ -44,24 +48,25 @@ export async function GET(): Promise<Response> {
 
     if (!best?.priceUsd) throw new Error('No valid price found')
 
-    const price = Number(best.priceUsd)
+    const price    = Number(best.priceUsd)
     cachedPrice    = price
     cacheExpiresAt = Date.now() + CACHE_TTL_MS
 
-    return NextResponse.json({ priceUsd: price, cached: false })
+    return NextResponse.json({ priceUsd: price, cached: false, source: 'dexscreener' })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Unknown error'
-    console.error('[shop/price] DexScreener fetch failed:', msg)
+    console.warn('[shop/price] DexScreener fetch failed:', msg)
 
-    // Return last known price if available
+    // Return last known cached price
     if (cachedPrice !== null) {
-      return NextResponse.json({ priceUsd: cachedPrice, cached: true, stale: true })
+      return NextResponse.json({ priceUsd: cachedPrice, cached: true, stale: true, source: 'cache' })
     }
 
-    // Absolute fallback: return null so the UI can show a warning
-    return NextResponse.json(
-      { priceUsd: null, error: 'Price unavailable' },
-      { status: 503 },
-    )
+    // Fall back to configured static price — always returns 200 so the UI renders amounts
+    const fallback = Number.isFinite(FALLBACK_PRICE) && FALLBACK_PRICE > 0
+      ? FALLBACK_PRICE
+      : 0.10
+    console.warn('[shop/price] using fallback price:', fallback)
+    return NextResponse.json({ priceUsd: fallback, cached: false, source: 'fallback' })
   }
 }

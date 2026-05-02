@@ -123,10 +123,11 @@ export function ShopModal({ isModal = false, sessionId, onClose, onPurchase }: S
         else if (sessionId) setActiveSession(null)  // will be overridden by prop
       }
 
-      if (priceRes.ok) {
+      // Parse price regardless of HTTP status — route always returns JSON now
+      try {
         const { priceUsd } = await priceRes.json() as { priceUsd: number | null }
-        if (priceUsd) setTokenPrice(priceUsd)
-      }
+        if (priceUsd && Number.isFinite(priceUsd) && priceUsd > 0) setTokenPrice(priceUsd)
+      } catch { /* price unavailable — amounts will show as "–" */ }
     } finally {
       setLoading(false)
     }
@@ -350,12 +351,9 @@ export function ShopModal({ isModal = false, sessionId, onClose, onPurchase }: S
             ) : (
               <div>
                 <span className="text-slate-200 font-semibold">${item.price_usd?.toFixed(2)}</span>
-                {tokens !== null && (
-                  <span className="ml-1 text-slate-500">(≈{formatTokens(tokens)})</span>
-                )}
-                {tokens === null && !tokenPrice && (
-                  <span className="ml-1 text-slate-600">(price loading…)</span>
-                )}
+                <span className="ml-1 text-slate-500">
+                  {tokens !== null ? `(≈${formatTokens(tokens)})` : '(≈… DND721)'}
+                </span>
               </div>
             )}
           </div>
