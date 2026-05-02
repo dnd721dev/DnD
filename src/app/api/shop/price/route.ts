@@ -1,15 +1,14 @@
 // GET /api/shop/price
-// Returns the current DND721/USD price from DexScreener.
-// Falls back to DND721_PRICE_USD_FALLBACK env var if DexScreener is unavailable.
-// Cached in memory for 60 seconds to avoid hammering the free API.
+// Returns the current DND721/USD price from GeckoTerminal (free, no API key).
+// Falls back to DND721_PRICE_USD_FALLBACK env var if GeckoTerminal is unavailable.
+// Cached in memory for 60 seconds.
 
 import { NextResponse } from 'next/server'
 
-const DND721_ADDRESS   = '0x85878508D21db40D53Aa38571022e6673dabe317'.toLowerCase()
-const CACHE_TTL_MS     = 60_000  // 60 seconds
-// Configurable fallback price — set DND721_PRICE_USD_FALLBACK in env if DexScreener
-// doesn't list the token yet. Defaults to $0.10.
-const FALLBACK_PRICE   = Number(process.env.DND721_PRICE_USD_FALLBACK ?? '0.10')
+const DND721_ADDRESS = '0x85878508D21db40D53Aa38571022e6673dabe317'.toLowerCase()
+const GECKO_URL      = `https://api.geckoterminal.com/api/v2/networks/base/tokens/${DND721_ADDRESS}`
+const CACHE_TTL_MS   = 60_000
+const FALLBACK_PRICE = Number(process.env.DND721_PRICE_USD_FALLBACK ?? '0.01')
 
 let cachedPrice:    number | null = null
 let cacheExpiresAt: number        = 0
@@ -17,55 +16,45 @@ let cacheExpiresAt: number        = 0
 export const dynamic = 'force-dynamic'
 
 export async function GET(): Promise<Response> {
-  // Return cached price if still valid
   if (cachedPrice !== null && Date.now() < cacheExpiresAt) {
-    return NextResponse.json({ priceUsd: cachedPrice, cached: true })
+    return NextResponse.json({ priceUsd: cachedPrice, cached: true, source: 'cache' })
   }
 
   try {
     const controller = new AbortController()
     const timeout    = setTimeout(() => controller.abort(), 5_000)
 
-    const res = await fetch(
-      `https://api.dexscreener.com/latest/dex/tokens/${DND721_ADDRESS}`,
-      { signal: controller.signal },
-    )
+    const res = await fetch(GECKO_URL, {
+      signal:  controller.signal,
+      headers: { Accept: 'application/json;version=20230302' },
+    })
     clearTimeout(timeout)
 
-    if (!res.ok) throw new Error(`DexScreener returned ${res.status}`)
+    if (!res.ok) throw new Error(`GeckoTerminal returned ${res.status}`)
 
     const json = await res.json() as {
-      pairs?: Array<{ priceUsd?: string; liquidity?: { usd?: number } }>
+      data?: { attributes?: { price_usd?: string | null } }
     }
 
-    const pairs = json.pairs ?? []
-    if (pairs.length === 0) throw new Error('No pairs found for DND721')
+    const raw = json.data?.attributes?.price_usd
+    if (!raw) throw new Error('No price_usd in GeckoTerminal response')
 
-    // Pick the pair with the highest USD liquidity
-    const best = pairs
-      .filter((p) => p.priceUsd && Number(p.priceUsd) > 0)
-      .sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0]
+    const price = Number(raw)
+    if (!Number.isFinite(price) || price <= 0) throw new Error(`Invalid price: ${raw}`)
 
-    if (!best?.priceUsd) throw new Error('No valid price found')
-
-    const price    = Number(best.priceUsd)
     cachedPrice    = price
     cacheExpiresAt = Date.now() + CACHE_TTL_MS
 
-    return NextResponse.json({ priceUsd: price, cached: false, source: 'dexscreener' })
+    return NextResponse.json({ priceUsd: price, cached: false, source: 'geckoterminal' })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Unknown error'
-    console.warn('[shop/price] DexScreener fetch failed:', msg)
+    console.warn('[shop/price] GeckoTerminal fetch failed:', msg)
 
-    // Return last known cached price
     if (cachedPrice !== null) {
       return NextResponse.json({ priceUsd: cachedPrice, cached: true, stale: true, source: 'cache' })
     }
 
-    // Fall back to configured static price — always returns 200 so the UI renders amounts
-    const fallback = Number.isFinite(FALLBACK_PRICE) && FALLBACK_PRICE > 0
-      ? FALLBACK_PRICE
-      : 0.10
+    const fallback = Number.isFinite(FALLBACK_PRICE) && FALLBACK_PRICE > 0 ? FALLBACK_PRICE : 0.01
     console.warn('[shop/price] using fallback price:', fallback)
     return NextResponse.json({ priceUsd: fallback, cached: false, source: 'fallback' })
   }
