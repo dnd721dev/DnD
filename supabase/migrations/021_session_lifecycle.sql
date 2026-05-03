@@ -17,6 +17,20 @@ ALTER TABLE sessions
   ADD COLUMN IF NOT EXISTS player_count  integer NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS session_summary text;
 
+-- ── Normalise any remaining non-conforming status values ─────
+-- Migration 020 handled planned/in_progress/cancelled, but any other
+-- legacy values (e.g. null, empty string, custom strings) must be
+-- coerced before the CHECK constraint is added.
+UPDATE sessions
+SET status = CASE
+  WHEN status IN ('setup', 'lobby', 'active', 'paused', 'completed') THEN status
+  WHEN status = 'in_progress' THEN 'active'
+  WHEN status = 'completed'   THEN 'completed'
+  ELSE 'setup'
+END
+WHERE status NOT IN ('setup', 'lobby', 'active', 'paused', 'completed')
+   OR status IS NULL;
+
 -- ── Status CHECK constraint ───────────────────────────────────
 -- Drop any old constraint first (name may differ across environments).
 DO $$

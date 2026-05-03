@@ -8,14 +8,14 @@ import { getSessionItemPreview } from '@/lib/sessionItemProcessor'
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { sessionId: string } },
+  { params }: { params: Promise<{ sessionId: string }> },
 ): Promise<Response> {
   const wallet = req.headers.get('x-wallet-address')?.toLowerCase() ?? null
   if (!wallet || !/^0x[0-9a-f]{40}$/.test(wallet)) {
     return NextResponse.json({ error: 'Wallet not connected' }, { status: 401 })
   }
 
-  const { sessionId } = params
+  const { sessionId } = await params
   const db = supabaseAdmin()
 
   // DM guard
