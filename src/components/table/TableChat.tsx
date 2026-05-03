@@ -39,32 +39,48 @@ export default function TableChat({ sessionId, senderWallet, senderName = 'Adven
   const [avatarMap, setAvatarMap] = useState<Record<string, string | null>>({})
   const bottomRef = useRef<HTMLDivElement | null>(null)
 
-  // Load session participants for whisper dropdown (includes GM — Bug 8)
+  // Load session participants for whisper dropdown (includes GM)
+  // Bug fixes applied here:
+  //   Bug 2/4: query now uses characters join (has FK) instead of the broken
+  //            profiles join (FK added by 023_chat_fixes.sql — safe to use both).
+  //   Bug 3:   characters.avatar_url (NFT image) takes priority over
+  //            profiles.avatar_url (manual upload, usually null).
+  //   Bug 6:   realtime subscription on session_players refreshes the list
+  //            when a new player joins mid-session.
   useEffect(() => {
     if (!senderWallet) return
-    async function loadParticipants() {
-      const myWallet = (senderWallet ?? '').toLowerCase()
+    const myWallet = (senderWallet ?? '').toLowerCase()
 
-      // Fetch all players in the session (include avatar_url from profiles)
+    async function loadParticipants() {
+      // Join both characters (has FK via character_id) and profiles
+      // (FK added by migration 023). characters.avatar_url is the NFT
+      // image and takes priority.
       const { data: playerRows, error } = await supabase
         .from('session_players')
-        .select('wallet_address, profiles(display_name, username, avatar_url)')
+        .select('wallet_address, characters(name, avatar_url), profiles(display_name, username, avatar_url)')
         .eq('session_id', sessionId)
 
-      if (error) return
+      if (error) {
+        // Log but don't bail — the GM entry below is still fetchable.
+        console.error('[TableChat] loadParticipants query error', error)
+      }
 
       const newAvatarMap: Record<string, string | null> = {}
 
       const list: Participant[] = ((playerRows ?? []) as any[])
         .map((row) => {
-          const profile = row.profiles as { display_name?: string; username?: string; avatar_url?: string | null } | null
-          const wallet = (row.wallet_address as string).toLowerCase()
+          const char    = row.characters as { name?: string; avatar_url?: string | null } | null
+          const profile = row.profiles   as { display_name?: string; username?: string; avatar_url?: string | null } | null
+          const wallet  = (row.wallet_address as string).toLowerCase()
+          // Bug 3: prefer NFT image (characters.avatar_url) over profile avatar
+          const avatarUrl = char?.avatar_url ?? profile?.avatar_url ?? null
           const name =
+            char?.name ||
             profile?.display_name ||
             profile?.username ||
             shortWallet(row.wallet_address as string)
-          if (profile?.avatar_url) newAvatarMap[wallet] = profile.avatar_url
-          return { wallet, name, avatarUrl: profile?.avatar_url ?? null }
+          if (avatarUrl) newAvatarMap[wallet] = avatarUrl
+          return { wallet, name, avatarUrl }
         })
         .filter((p) => p.wallet !== myWallet)
 
@@ -77,33 +93,74 @@ export default function TableChat({ sessionId, senderWallet, senderName = 'Adven
 
       const gmWallet = (sessionRow as any)?.gm_wallet?.toLowerCase() ?? null
       if (gmWallet && gmWallet !== myWallet && !list.some(p => p.wallet === gmWallet)) {
-        // Try to fetch GM profile for avatar
-        const { data: gmProfile } = await supabase
-          .from('profiles')
-          .select('display_name, username, avatar_url')
-          .eq('wallet_address', gmWallet)
-          .maybeSingle()
-        const gmName = (gmProfile as any)?.display_name || (gmProfile as any)?.username || 'GM'
-        const gmAvatar = (gmProfile as any)?.avatar_url ?? null
+        // Fetch GM's NFT avatar from their most-recent character, fall back to profile
+        const [{ data: gmChar }, { data: gmProfile }] = await Promise.all([
+          supabase
+            .from('characters')
+            .select('name, avatar_url')
+            .eq('wallet_address', gmWallet)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          supabase
+            .from('profiles')
+            .select('display_name, username, avatar_url')
+            .eq('wallet_address', gmWallet)
+            .maybeSingle(),
+        ])
+        const gmName =
+          (gmProfile as any)?.display_name ||
+          (gmProfile as any)?.username ||
+          'GM'
+        const gmAvatar =
+          (gmChar as any)?.avatar_url ??
+          (gmProfile as any)?.avatar_url ??
+          null
         if (gmAvatar) newAvatarMap[gmWallet] = gmAvatar
         list.unshift({ wallet: gmWallet, name: gmName, avatarUrl: gmAvatar })
       }
 
-      // Also add sender's own avatar for outgoing message display
+      // Sender's own avatar for outgoing message display
       if (myWallet) {
-        const { data: myProfile } = await supabase
-          .from('profiles')
-          .select('avatar_url')
-          .eq('wallet_address', myWallet)
-          .maybeSingle()
-        const myAvatar = (myProfile as any)?.avatar_url ?? null
+        const [{ data: myChar }, { data: myProfile }] = await Promise.all([
+          supabase
+            .from('characters')
+            .select('avatar_url')
+            .eq('wallet_address', myWallet)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          supabase
+            .from('profiles')
+            .select('avatar_url')
+            .eq('wallet_address', myWallet)
+            .maybeSingle(),
+        ])
+        const myAvatar =
+          (myChar as any)?.avatar_url ??
+          (myProfile as any)?.avatar_url ??
+          null
         if (myAvatar) newAvatarMap[myWallet] = myAvatar
       }
 
       setAvatarMap(newAvatarMap)
       setParticipants(list)
     }
+
     void loadParticipants()
+
+    // Bug 6: refresh participant list when players join or leave mid-session.
+    // session_players is in the realtime publication (added by migration 011).
+    const channel = supabase
+      .channel(`chat-participants-${sessionId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'session_players', filter: `session_id=eq.${sessionId}` },
+        () => { void loadParticipants() }
+      )
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
   }, [sessionId, senderWallet])
 
   // Load last 80 messages
@@ -120,7 +177,19 @@ export default function TableChat({ sessionId, senderWallet, senderName = 'Adven
 
       if (!mounted) return
       if (error) { console.error('chat load error', error); return }
-      setMessages((data ?? []) as Message[])
+
+      // Bug 5: client-side whisper filter mirrors the realtime handler.
+      // This is a defence-in-depth guard — the DB-level RLS policy (from
+      // 002_rebuild_backend.sql, restored by 023_chat_fixes.sql dropping the
+      // open policy) is the primary enforcement.  If RLS ever regresses this
+      // ensures non-recipients never render whispers from the initial load.
+      const wallet = senderWallet?.toLowerCase() ?? null
+      const visible = (data ?? []).filter((m: any) => {
+        if (m.kind !== 'whisper') return true
+        if (!wallet) return false
+        return m.sender_wallet === wallet || m.whisper_to === wallet
+      })
+      setMessages(visible as Message[])
     }
 
     load()
