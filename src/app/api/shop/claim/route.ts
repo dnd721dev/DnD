@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getShopItem } from '@/lib/shopData'
 import { addItemToCharacterInventory, getOrCreateActiveInventory } from '@/lib/shopInventory'
+import { recordSessionItem } from '@/lib/sessionItemProcessor'
 
 const Schema = z.object({
   itemId:      z.string().min(1),
@@ -118,6 +119,11 @@ export async function POST(req: NextRequest): Promise<Response> {
     console.error('[shop/claim] inventory write error:', msg)
     // Purchase was recorded; inventory write failed — return partial success
     return NextResponse.json({ ok: true, itemName: item.name, inventoryError: msg })
+  }
+
+  // Track in session_items (best-effort — non-fatal if it errors)
+  if (sessionId) {
+    await recordSessionItem({ sessionId, characterId, walletAddress: wallet, item })
   }
 
   return NextResponse.json({ ok: true, itemName: item.name })

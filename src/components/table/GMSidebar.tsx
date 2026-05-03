@@ -8,7 +8,8 @@ import InitiativeTracker from '@/components/table/InitiativeTracker';
 import DMPanel from '@/components/table/DMPanel';
 import { HandoutsPanel } from '@/components/table/HandoutsPanel';
 import TableChat from '@/components/table/TableChat';
-import SponsorsPanel from '@/components/table/SponsorsPanel';
+import SponsorsPanel from '@/components/table/SponsorsPanel'
+import { SessionControlPanel } from '@/components/table/SessionControlPanel';
 import { TriggersPanel } from '@/components/table/TriggersPanel';
 
 type GMSidebarProps = {
@@ -21,6 +22,9 @@ type GMSidebarProps = {
   sessionType?: 'set_level' | 'caya' | null;
   sessionStatus?: SessionStatus | string | null;
   xpAwardedAlready?: number | null;
+  sessionStartedAt?: string | null;
+  sessionCompletedAt?: string | null;
+  onSessionStatusChange?: (newStatus: SessionStatus) => void;
 };
 
 type InitiativeEntry = {
@@ -46,6 +50,9 @@ export default function GMSidebar({
   sessionType,
   sessionStatus,
   xpAwardedAlready,
+  sessionStartedAt,
+  sessionCompletedAt,
+  onSessionStatusChange,
 }: GMSidebarProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('combat');
   const [collapsed, setCollapsed] = useState(false);
@@ -333,14 +340,35 @@ export default function GMSidebar({
           </div>
         )}
 
-        {/* ⭐ Admin: SponsorsPanel full width */}
+        {/* ⭐ Admin: Session lifecycle controls + SponsorsPanel */}
         {activeTab === 'admin' && (
-          <div className="h-full overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
-            {sessionId ? (
-              <SponsorsPanel sessionId={sessionId} />
-            ) : (
-              <p className="text-[11px] text-slate-400">Session not loaded.</p>
-            )}
+          <div className="flex h-full flex-col gap-2 overflow-y-auto">
+            {/* Session Lifecycle Controls */}
+            <div className="shrink-0 rounded-lg border border-yellow-900/30 bg-slate-950/80 p-3 shadow-inner shadow-black/40">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-yellow-300/70">
+                Session Lifecycle
+              </p>
+              {sessionId ? (
+                <SessionControlPanel
+                  sessionId={sessionId}
+                  sessionStatus={(sessionStatus as SessionStatus | null) ?? null}
+                  gmWallet={address ?? null}
+                  startedAt={sessionStartedAt ?? null}
+                  completedAt={sessionCompletedAt ?? null}
+                  onStatusChange={onSessionStatusChange}
+                />
+              ) : (
+                <p className="text-[11px] text-slate-400">Session not loaded.</p>
+              )}
+            </div>
+            {/* Sponsors Panel */}
+            <div className="flex-1 rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
+              {sessionId ? (
+                <SponsorsPanel sessionId={sessionId} />
+              ) : (
+                <p className="text-[11px] text-slate-400">Session not loaded.</p>
+              )}
+            </div>
           </div>
         )}
 

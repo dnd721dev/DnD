@@ -20,6 +20,15 @@ UPDATE sessions SET status = 'active' WHERE status = 'in_progress';
 -- 'completed' is unchanged.
 
 -- ── Ensure sessions table is in the realtime publication ──────
--- This is idempotent; adding a table that is already in the
--- publication raises no error in Postgres 15+.
-ALTER PUBLICATION supabase_realtime ADD TABLE sessions;
+-- Guard against "already a member" error if sessions was already added.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND tablename = 'sessions'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE sessions;
+  END IF;
+END
+$$;

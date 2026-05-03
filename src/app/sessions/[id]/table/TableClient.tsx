@@ -1253,7 +1253,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
           {/* GM overlay panel */}
           <div className="absolute bottom-0 left-0 right-0 z-30 pointer-events-none">
-            <GMSidebar sessionId={session?.id ?? null} encounterId={encounterId} address={walletLower ?? null} activeMapId={currentMapId} onRoll={handleExternalRoll} spawnMonsterToken={spawnMonsterToken} sessionType={(session as any)?.session_type ?? null} sessionStatus={sessionStatus ?? session?.status ?? null} xpAwardedAlready={(session as any)?.xp_award ?? null} />
+            <GMSidebar sessionId={session?.id ?? null} encounterId={encounterId} address={walletLower ?? null} activeMapId={currentMapId} onRoll={handleExternalRoll} spawnMonsterToken={spawnMonsterToken} sessionType={(session as any)?.session_type ?? null} sessionStatus={sessionStatus ?? session?.status ?? null} xpAwardedAlready={(session as any)?.xp_award ?? null} sessionStartedAt={(session as any)?.started_at ?? null} sessionCompletedAt={(session as any)?.completed_at ?? null} onSessionStatusChange={setSessionStatus} />
           </div>
         </div>
       </div>

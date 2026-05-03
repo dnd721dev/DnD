@@ -9,6 +9,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getShopItem } from '@/lib/shopData'
 import { usdToDnd721Wei } from '@/lib/shopPricing'
 import { addItemToCharacterInventory, getOrCreateActiveInventory } from '@/lib/shopInventory'
+import { recordSessionItem } from '@/lib/sessionItemProcessor'
 import { DND721_TOKEN_ADDRESS } from '@/lib/dnd721Token'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 
@@ -182,6 +183,11 @@ export async function POST(req: NextRequest): Promise<Response> {
       const msg = err instanceof Error ? err.message : 'Unknown error'
       console.error('[shop/verify-purchase] inventory write error:', msg)
       return NextResponse.json({ ok: true, itemName: item.name, inventoryError: msg })
+    }
+
+    // Track in session_items (best-effort — non-fatal if it errors)
+    if (sessionId) {
+      await recordSessionItem({ sessionId, characterId, walletAddress: wallet, item })
     }
 
     return NextResponse.json({ ok: true, itemName: item.name })
