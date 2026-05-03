@@ -1,6 +1,7 @@
 'use client'
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { supabase } from '@/lib/supabase'
 
 type MonsterStatPanelProps = {
   token: any
@@ -27,6 +28,8 @@ export function MonsterStatPanel({
 
   // 🎯 Target selection (click a token on the map)
   const [target, setTarget] = useState<any | null>(null)
+  // Track whether the last attack roll was a hit so damage can be auto-applied
+  const lastAttackHitRef = useRef<boolean | null>(null)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -234,16 +237,23 @@ export function MonsterStatPanel({
     const d20 = Math.floor(Math.random() * 20) + 1
     const total = d20 + bonus
 
-    // ✅ hit logic (AC)
+    // Determine hit / miss and store for the follow-up damage roll
     let outcome: string | null = null
-    if (targetAC != null) {
-      if (d20 === 1) outcome = `MISS (nat 1) vs AC ${targetAC}`
-      else if (d20 === 20) outcome = `HIT (nat 20) vs AC ${targetAC}`
-      else outcome = total >= targetAC ? `HIT vs AC ${targetAC}` : `MISS vs AC ${targetAC}`
+    let hit = false
+    if (d20 === 20) {
+      outcome = `HIT (nat 20)${targetAC != null ? ` vs AC ${targetAC}` : ''}`
+      hit = true
+    } else if (d20 === 1) {
+      outcome = `MISS (nat 1)${targetAC != null ? ` vs AC ${targetAC}` : ''}`
+      hit = false
+    } else if (targetAC != null) {
+      hit = total >= targetAC
+      outcome = `${hit ? 'HIT' : 'MISS'} vs AC ${targetAC}`
     }
 
-    const sign = bonus >= 0 ? '+' : ''
+    lastAttackHitRef.current = hit
 
+    const sign = bonus >= 0 ? '+' : ''
     onRoll({
       label: `${name}: ${action.name || 'Attack'}${target?.label ? ` → ${target.label}` : ''}`,
       formula: `1d20${sign}${bonus}`,
@@ -264,10 +274,23 @@ export function MonsterStatPanel({
     const result = rollFormula(dmgFormula)
 
     onRoll({
-      label: `${name}: ${action.name || 'Damage'}`,
+      label: `${name}: ${action.name || 'Damage'}${target?.label ? ` → ${target.label}` : ''}`,
       formula: dmgFormula,
       result,
     })
+
+    // HIGH-3: If the preceding attack roll hit, apply the damage to the target token.
+    if (lastAttackHitRef.current === true && target?.id) {
+      const currentHp = Number(target.current_hp ?? target.hp ?? 0)
+      const newHp = Math.max(0, currentHp - result)
+      supabase
+        .from('tokens')
+        .update({ current_hp: newHp })
+        .eq('id', target.id)
+        .then(({ error }) => { if (error) console.error('[MonsterStatPanel] damage apply error', error) })
+    }
+    // Consume the hit result — requires a new attack roll before next damage applies
+    lastAttackHitRef.current = null
   }
 
   return (

@@ -67,7 +67,18 @@ export function useSessionWithCampaign(sessionId: string) {
           if (!mounted) return
           const updated = payload.new as any
           setSession((prev) =>
-            prev ? { ...prev, current_map_id: updated.current_map_id ?? null } : prev
+            prev
+              ? {
+                  ...prev,
+                  // Sync all display-safe fields when the session row changes
+                  current_map_id:   updated.current_map_id   ?? null,
+                  status:           updated.status            ?? prev.status,
+                  title:            updated.title             ?? prev.title,
+                  xp_award:         updated.xp_award          ?? prev.xp_award,
+                  required_level:   updated.required_level    ?? prev.required_level,
+                  duration_minutes: updated.duration_minutes  ?? prev.duration_minutes,
+                }
+              : prev
           )
         }
       )

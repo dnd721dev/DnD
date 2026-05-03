@@ -402,6 +402,9 @@ export function PlayerSidebar({
     saveType: string
     dc: number
     description: string | null
+    damageDice: string | null
+    conditionApplied: string | null
+    tokenId: string | null
   } | null>(null)
   const [saveRolling, setSaveRolling] = useState(false)
 
@@ -410,13 +413,21 @@ export function PlayerSidebar({
     const handler = (ev: any) => {
       const t = ev?.detail?.trigger
       if (!t) return
-      setTriggerPrompt({ name: t.name, saveType: t.save_type, dc: t.dc, description: t.description ?? null })
+      setTriggerPrompt({
+        name:             t.name,
+        saveType:         t.save_type,
+        dc:               t.dc,
+        description:      t.description ?? null,
+        damageDice:       t.damage_dice ?? null,
+        conditionApplied: t.condition_applied ?? null,
+        tokenId:          ev?.detail?.tokenId ?? null,
+      })
     }
     window.addEventListener('dnd721-trigger-tripped', handler)
     return () => window.removeEventListener('dnd721-trigger-tripped', handler)
   }, [])
 
-  function rollSave() {
+  async function rollSave() {
     if (!triggerPrompt || !sheet) return
     setSaveRolling(true)
     const abilityMap: Record<string, string> = {
@@ -429,16 +440,56 @@ export function PlayerSidebar({
     const d20 = Math.floor(Math.random() * 20) + 1
     const total = d20 + mod + pb
     const success = total >= triggerPrompt.dc
+
     onRoll?.({
       label: `${triggerPrompt.saveType} Save (${triggerPrompt.name})`,
       formula: `1d20${fmtMod(mod + pb)}`,
       result: total,
       outcome: success ? `SUCCESS vs DC ${triggerPrompt.dc}` : `FAIL vs DC ${triggerPrompt.dc}`,
     })
+
+    // On a failed save, apply damage and/or condition to the player's token
+    if (!success) {
+      const { damageDice, conditionApplied, tokenId } = triggerPrompt
+
+      // 1. Roll damage and apply to the token's current HP
+      if (damageDice && tokenId) {
+        try {
+          const dmgResult = rollDice(damageDice)
+          onRoll?.({
+            label: `${triggerPrompt.name} Damage`,
+            formula: damageDice,
+            result: dmgResult.total,
+            outcome: `${dmgResult.total} damage (trigger)`,
+          })
+          const { data: tokenRow } = await supabase
+            .from('tokens')
+            .select('current_hp, hp')
+            .eq('id', tokenId)
+            .maybeSingle()
+          if (tokenRow) {
+            const currentHp = Number(tokenRow.current_hp ?? tokenRow.hp ?? 0)
+            const newHp = Math.max(0, currentHp - dmgResult.total)
+            await supabase.from('tokens').update({ current_hp: newHp }).eq('id', tokenId)
+          }
+        } catch (err) {
+          console.error('[rollSave] damage apply error', err)
+        }
+      }
+
+      // 2. Apply condition to the token via the shared conditions event
+      if (conditionApplied && conditionApplied !== 'None' && tokenId) {
+        window.dispatchEvent(new CustomEvent('dnd721-conditions-toggle', {
+          detail: { key: `token:${tokenId}`, condition: conditionApplied },
+        }))
+      }
+    }
+
     setSaveRolling(false)
     setTriggerPrompt(null)
   }
 
+  // Same-device fast path: window event from InitiativeTracker (GM device)
   useEffect(() => {
     if (typeof window === 'undefined') return
     const handler = (ev: any) => {
@@ -449,6 +500,42 @@ export function PlayerSidebar({
     window.addEventListener('dnd721-active-initiative', handler as any)
     return () => window.removeEventListener('dnd721-active-initiative', handler as any)
   }, [])
+
+  // Cross-device path: subscribe to encounters by session_id and read active_wallet/active_name.
+  // This lets players on separate devices receive turn notifications even when the
+  // dnd721-active-initiative window event never reaches them.
+  // MED-6: Also detect round_number increments to reset the reaction on all devices.
+  const lastSeenRoundRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!sessionId) return
+
+    const channel = supabase
+      .channel(`player-sidebar-encounter-${sessionId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'encounters', filter: `session_id=eq.${sessionId}` },
+        (payload) => {
+          const rec = (payload as any).new as any
+          const wallet = rec?.active_wallet ? String(rec.active_wallet).toLowerCase() : null
+          const name   = rec?.active_name   ? String(rec.active_name)   : null
+          setActiveWalletLower(wallet)
+          setActiveName(name)
+
+          // Reset reaction whenever round_number increments (cross-device)
+          const newRound = rec?.round_number != null ? Number(rec.round_number) : null
+          if (newRound !== null) {
+            if (lastSeenRoundRef.current !== null && newRound > lastSeenRoundRef.current) {
+              updateActionState({ reaction_used_round: false })
+            }
+            lastSeenRoundRef.current = newRound
+          }
+        }
+      )
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId])
 
   // Reset reaction at the start of each new round
   useEffect(() => {

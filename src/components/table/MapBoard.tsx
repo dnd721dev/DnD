@@ -19,6 +19,7 @@ type Token = {
   type?: string | null;
   monster_id?: string | null;
   token_image_url?: string | null;
+  character_id?: string | null;
 };
 
 type TriggerIcon = {
@@ -304,7 +305,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
     async function loadTokens() {
       let query = supabase
         .from('tokens')
-        .select('id, label, x, y, color, hp, ac, current_hp, type, monster_id, token_image_url')
+        .select('id, label, x, y, color, hp, ac, current_hp, type, monster_id, token_image_url, character_id, conditions, resistances, immunities')
         .eq('encounter_id', encounterId);
 
       // GM free view: show tokens for current map + tokens with no map (PC tokens)
@@ -329,8 +330,23 @@ const MapBoard: React.FC<MapBoardProps> = ({
           current_hp: t.current_hp,
           type: t.type,
           monster_id: t.monster_id,
+          token_image_url: t.token_image_url,
+          character_id: t.character_id ?? null,
         }))
       );
+
+      // HIGH-1: Seed condition rings from DB (persisted conditions survive refresh)
+      const dbConditions: Record<string, string[]> = {};
+      const dbResistances: Record<string, string[]> = {};
+      const dbImmunities: Record<string, string[]> = {};
+      for (const t of data as any[]) {
+        if (t.conditions?.length)  dbConditions[t.id]  = t.conditions;
+        if (t.resistances?.length) dbResistances[t.id] = t.resistances;
+        if (t.immunities?.length)  dbImmunities[t.id]  = t.immunities;
+      }
+      setTokenConditions(prev => ({ ...dbConditions, ...prev }));
+      setTokenResistances(prev => ({ ...dbResistances, ...prev }));
+      setTokenImmunities(prev => ({ ...dbImmunities, ...prev }));
     }
 
     loadTokens();
@@ -348,18 +364,27 @@ const MapBoard: React.FC<MapBoardProps> = ({
             setTokens((prev) => [
               ...prev,
               { id: t.id, label: t.label, x: t.x, y: t.y, color: t.color,
-                hp: t.hp, ac: t.ac, current_hp: t.current_hp, type: t.type, monster_id: t.monster_id },
+                hp: t.hp, ac: t.ac, current_hp: t.current_hp, type: t.type, monster_id: t.monster_id,
+                token_image_url: t.token_image_url, character_id: t.character_id ?? null },
             ]);
+            if (t.conditions?.length)  setTokenConditions(p => ({ ...p, [t.id]: t.conditions }));
+            if (t.resistances?.length) setTokenResistances(p => ({ ...p, [t.id]: t.resistances }));
+            if (t.immunities?.length)  setTokenImmunities(p => ({ ...p, [t.id]: t.immunities }));
           } else if (payload.eventType === 'UPDATE') {
             const t = payload.new as any;
             setTokens((prev) =>
               prev.map((tok) =>
                 tok.id === t.id
                   ? { ...tok, label: t.label, x: t.x, y: t.y, color: t.color,
-                      hp: t.hp, ac: t.ac, current_hp: t.current_hp, type: t.type, monster_id: t.monster_id }
+                      hp: t.hp, ac: t.ac, current_hp: t.current_hp, type: t.type, monster_id: t.monster_id,
+                      token_image_url: t.token_image_url, character_id: t.character_id ?? tok.character_id ?? null }
                   : tok
               )
             );
+            // Sync conditions/resistances/immunities from DB update
+            setTokenConditions(p => ({ ...p, [t.id]: t.conditions ?? [] }));
+            setTokenResistances(p => ({ ...p, [t.id]: t.resistances ?? [] }));
+            setTokenImmunities(p => ({ ...p, [t.id]: t.immunities ?? [] }));
           } else if (payload.eventType === 'DELETE') {
             const old = payload.old as { id: string };
             setTokens((prev) => prev.filter((tok) => tok.id !== old.id));
@@ -894,6 +919,15 @@ const MapBoard: React.FC<MapBoardProps> = ({
 
     if (!t) return;
     await supabase.from('tokens').update({ x: t.x, y: t.y }).eq('id', t.id);
+
+    // HIGH-4: Dispatch token-moved so TableClient trigger detection fires for GM moves too.
+    const tileX = Math.floor(t.x / gridSize);
+    const tileY = Math.floor(t.y / gridSize);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dnd721-token-moved', {
+        detail: { tokenId: t.id, tileX, tileY, mapId: mapId ?? null, encounterId },
+      }));
+    }
   };
 
   const onLeave = (e: React.PointerEvent) => {
@@ -949,6 +983,10 @@ const MapBoard: React.FC<MapBoardProps> = ({
     const newHp = (tok.current_hp ?? tok.hp ?? 0) + amount;
     setTokens((prev) => prev.map((t) => (t.id === hudTokenId ? { ...t, current_hp: newHp } : t)));
     await supabase.from('tokens').update({ current_hp: newHp }).eq('id', hudTokenId);
+    // MED-5: Keep characters.hit_points_current in sync for PC tokens
+    if (tok.character_id) {
+      await supabase.from('characters').update({ hit_points_current: newHp }).eq('id', tok.character_id);
+    }
   };
 
   const onHudDelete = async () => {
@@ -1156,10 +1194,30 @@ const MapBoard: React.FC<MapBoardProps> = ({
           onDelete={onHudDelete}
           resistances={tokenResistances[activeHudToken.id] ?? []}
           immunities={tokenImmunities[activeHudToken.id] ?? []}
-          onAddResistance={(type) => setTokenResistances(prev => ({ ...prev, [activeHudToken.id]: [...(prev[activeHudToken.id] ?? []), type] }))}
-          onRemoveResistance={(type) => setTokenResistances(prev => ({ ...prev, [activeHudToken.id]: (prev[activeHudToken.id] ?? []).filter(r => r !== type) }))}
-          onAddImmunity={(type) => setTokenImmunities(prev => ({ ...prev, [activeHudToken.id]: [...(prev[activeHudToken.id] ?? []), type] }))}
-          onRemoveImmunity={(type) => setTokenImmunities(prev => ({ ...prev, [activeHudToken.id]: (prev[activeHudToken.id] ?? []).filter(r => r !== type) }))}
+          onAddResistance={(type) => {
+            const next = [...(tokenResistances[activeHudToken.id] ?? []), type]
+            setTokenResistances(prev => ({ ...prev, [activeHudToken.id]: next }))
+            supabase.from('tokens').update({ resistances: next }).eq('id', activeHudToken.id)
+              .then(({ error }) => { if (error) console.error('[tokens] resistances persist error', error) })
+          }}
+          onRemoveResistance={(type) => {
+            const next = (tokenResistances[activeHudToken.id] ?? []).filter(r => r !== type)
+            setTokenResistances(prev => ({ ...prev, [activeHudToken.id]: next }))
+            supabase.from('tokens').update({ resistances: next }).eq('id', activeHudToken.id)
+              .then(({ error }) => { if (error) console.error('[tokens] resistances persist error', error) })
+          }}
+          onAddImmunity={(type) => {
+            const next = [...(tokenImmunities[activeHudToken.id] ?? []), type]
+            setTokenImmunities(prev => ({ ...prev, [activeHudToken.id]: next }))
+            supabase.from('tokens').update({ immunities: next }).eq('id', activeHudToken.id)
+              .then(({ error }) => { if (error) console.error('[tokens] immunities persist error', error) })
+          }}
+          onRemoveImmunity={(type) => {
+            const next = (tokenImmunities[activeHudToken.id] ?? []).filter(r => r !== type)
+            setTokenImmunities(prev => ({ ...prev, [activeHudToken.id]: next }))
+            supabase.from('tokens').update({ immunities: next }).eq('id', activeHudToken.id)
+              .then(({ error }) => { if (error) console.error('[tokens] immunities persist error', error) })
+          }}
         />
       )}
     </div>

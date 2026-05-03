@@ -130,7 +130,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
     window.dispatchEvent(new CustomEvent('dnd721-conditions-updated', { detail: { map: actorConditions } }))
   }, [actorConditions])
 
-  // Listen for toggle requests from other components (e.g., Initiative list)
+  // Listen for toggle requests from other components (e.g., Initiative list, DMPanel)
   useEffect(() => {
     if (typeof window === 'undefined') return
 
@@ -144,6 +144,18 @@ export default function TableClient({ sessionId }: TableClientProps) {
         const existing = prev[key] ?? []
         const has = existing.includes(condition)
         const next = has ? existing.filter((c) => c !== condition) : [...existing, condition]
+
+        // HIGH-1: If key is 'token:<id>', persist conditions to tokens table so they
+        // survive page refreshes and are visible to other clients via realtime.
+        if (key.startsWith('token:')) {
+          const tokenId = key.slice(6)
+          supabase
+            .from('tokens')
+            .update({ conditions: next })
+            .eq('id', tokenId)
+            .then(({ error }) => { if (error) console.error('[conditions] persist error', error) })
+        }
+
         return { ...prev, [key]: next }
       })
     }
@@ -173,7 +185,10 @@ export default function TableClient({ sessionId }: TableClientProps) {
         const triggers: any[] = json.triggers ?? []
         if (triggers.length > 0) {
           // Fire the first active trigger found at this tile
-          window.dispatchEvent(new CustomEvent('dnd721-trigger-tripped', { detail: { trigger: triggers[0] } }))
+          // Include tokenId so PlayerSidebar can apply damage / conditions to the right token
+          window.dispatchEvent(new CustomEvent('dnd721-trigger-tripped', {
+            detail: { trigger: triggers[0], tokenId: ev.detail.tokenId ?? null },
+          }))
         }
       } catch { /* silent */ }
     }
@@ -908,25 +923,30 @@ export default function TableClient({ sessionId }: TableClientProps) {
     }
   }
 
-  // Bug 18: End Session — GM-only flow that marks session completed + posts system message
+  // HIGH-5: End Session — uses the lifecycle API so all side effects run:
+  // processSessionEndItems, stop recordings, end active encounters.
   async function handleEndSession() {
-    if (!session) return
+    if (!session || !walletLower) return
 
-    // Mark completed in DB
-    const { error: updateErr } = await supabase
-      .from('sessions')
-      .update({ status: 'completed' })
-      .eq('id', session.id)
+    const res = await fetch(`/api/sessions/${session.id}/status`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-wallet-address': walletLower,
+      },
+      body: JSON.stringify({ action: 'end_session' }),
+    })
 
-    if (updateErr) {
-      console.error('[EndSession] failed to update status', updateErr)
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}))
+      console.error('[EndSession] lifecycle API error', json)
       return
     }
 
     // Post a system chat message so all players see it
     await supabase.from('session_messages').insert({
       session_id: session.id,
-      sender_wallet: walletLower ?? 'gm',
+      sender_wallet: walletLower,
       sender_name: 'GM',
       body: '⏹ The GM has ended the session. Well adventured!',
       kind: 'system',

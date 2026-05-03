@@ -76,6 +76,8 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
   const [round, setRound] = useState(1);
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(false);
+  // Guard: do not write back to DB until we've loaded the server state
+  const [encounterLoaded, setEncounterLoaded] = useState(false);
 
   // Local-only per-entry state
   const [maxHpMap, setMaxHpMap] = useState<Record<string, number>>({});
@@ -87,7 +89,7 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
 
-  // Legendary / lair action state (local only)
+  // Legendary / lair action state (persisted to initiative_entries.legendary_used)
   type LegendaryState = { type: 'legendary' | 'lair'; usesMax: number; usesLeft: number };
   const [legendaryMap, setLegendaryMap] = useState<Record<string, LegendaryState>>({});
 
@@ -164,13 +166,65 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
     window.dispatchEvent(new CustomEvent('dnd721-conditions-updated', { detail: tokenConditions }));
   }, [condMap, entries]);
 
-  // Load entries + subscribe for this encounter
+  // ── Load encounter state (turn_index, round_number, combat_started) on mount ─
+  // Must happen before the persist effect starts writing so we don't overwrite
+  // in-progress combat with default values.
   useEffect(() => {
     if (!encounterId) {
-      setEntries([]);
+      setEncounterLoaded(false);
       setTurnIdx(0);
       setRound(1);
       setStarted(false);
+      lastResetEntryIdRef.current = null;
+      return;
+    }
+
+    setEncounterLoaded(false);
+
+    supabase
+      .from('encounters')
+      .select('turn_index, round_number, combat_started')
+      .eq('id', encounterId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) {
+          setTurnIdx((data as any).turn_index ?? 0);
+          setRound((data as any).round_number ?? 1);
+          setStarted((data as any).combat_started ?? false);
+        }
+        setEncounterLoaded(true);
+      });
+  }, [encounterId]);
+
+  // ── Subscribe to encounter changes for cross-device sync ────────────────────
+  // When another GM window (or the same GM after a re-mount) advances the turn,
+  // this subscription updates local state so all clients stay in sync.
+  useEffect(() => {
+    if (!encounterId) return;
+
+    const channel = supabase
+      .channel(`initiative-encounter-state-${encounterId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'encounters', filter: `id=eq.${encounterId}` },
+        (payload) => {
+          const rec = (payload as any).new as any;
+          // Applying the same value is a React no-op (no re-render), so this is
+          // safe to call even when WE originated the write.
+          setTurnIdx(rec.turn_index ?? 0);
+          setRound(rec.round_number ?? 1);
+          setStarted(rec.combat_started ?? false);
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [encounterId]);
+
+  // ── Load initiative entries + subscribe for this encounter ──────────────────
+  useEffect(() => {
+    if (!encounterId) {
+      setEntries([]);
       lastResetEntryIdRef.current = null;
       return;
     }
@@ -212,6 +266,17 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
           for (const e of entries) {
             if (e.death_saves && !(e.id in next)) {
               next[e.id] = { s: e.death_saves.s ?? 0, f: e.death_saves.f ?? 0 };
+            }
+          }
+          return next;
+        });
+        // Restore legendary_used from DB
+        setLegendaryMap(prev => {
+          const next = { ...prev };
+          for (const e of entries) {
+            const lu = (e as any).legendary_used ?? 0;
+            if (lu > 0 && !(e.id in next)) {
+              next[e.id] = { type: 'legendary', usesMax: 3, usesLeft: Math.max(0, 3 - lu) };
             }
           }
           return next;
@@ -283,20 +348,30 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
     );
   }, [current?.id, current?.name, current?.wallet_address]);
 
-  // Persist active turn to DB so players on other devices sync via realtime
+  // ── Persist full combat state to encounters (all columns) ───────────────────
+  // Guarded by `encounterLoaded` so we never overwrite server state with
+  // default values during the first render before the load finishes.
   useEffect(() => {
-    if (!encounterId) return;
+    if (!encounterId || !encounterLoaded) return;
 
     const entryId = started && current ? current.id : null;
 
     supabase
       .from('encounters')
-      .update({ active_entry_id: entryId })
+      .update({
+        active_entry_id: entryId,
+        active_wallet:   current?.wallet_address ?? null,
+        active_name:     current?.name ?? null,
+        turn_index:      started ? turnIdx : 0,
+        round_number:    round,
+        combat_started:  started,
+      })
       .eq('id', encounterId)
       .then(({ error }) => {
-        if (error) console.error('Failed to persist active_entry_id:', error);
+        if (error) console.error('Failed to persist encounter combat state:', error);
       });
-  }, [encounterId, started, current?.id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [encounterId, encounterLoaded, started, current?.id, turnIdx, round]);
 
   // Reset per-turn flags automatically when it becomes someone's turn
   async function resetPerTurnFlagsForCharacter(characterId: string) {
@@ -315,9 +390,12 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
 
     const nextState: Record<string, any> = {
       ...currentState,
-      sneak_used_turn: false,
-      move_used_ft: 0,
-      dashing: false,
+      // Reset all per-turn flags at the start of this character's turn
+      action_used_turn:  false,
+      bonus_used_turn:   false,
+      sneak_used_turn:   false,
+      dashing:           false,
+      move_used_ft:      0,
     };
 
     const { error: writeErr } = await supabase
@@ -519,35 +597,35 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
     setTurnIdx(0);
     setRound(1);
     lastResetEntryIdRef.current = null;
+    // The persist effect will pick up these new values and write to DB.
   }
 
   function nextTurn() {
     if (sortedEntries.length === 0) return;
-    setTurnIdx((prev) => {
-      const next = prev + 1;
-      if (next >= sortedEntries.length) {
-        setRound((r) => {
-          const newRound = r + 1;
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('dnd721-new-round', { detail: { round: newRound } }));
-          }
-          return newRound;
-        });
+    const len = sortedEntries.length;
+    const nextIdx = (turnIdx + 1) % len;
+    const isNewRound = turnIdx + 1 >= len;
+    const nextRound = isNewRound ? round + 1 : round;
+
+    setTurnIdx(nextIdx);
+    if (isNewRound) {
+      setRound(nextRound);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('dnd721-new-round', { detail: { round: nextRound } }));
       }
-      return next % sortedEntries.length;
-    });
+    }
+    // The persist effect will write turn_index, round_number, active_* to DB.
   }
 
   function prevTurn() {
     if (sortedEntries.length === 0) return;
-    setTurnIdx((prev) => {
-      let next = prev - 1;
-      if (next < 0) {
-        next = sortedEntries.length - 1;
-        setRound((r) => (r > 1 ? r - 1 : 1));
-      }
-      return next;
-    });
+    const len = sortedEntries.length;
+    const nextIdx = turnIdx - 1 < 0 ? len - 1 : turnIdx - 1;
+    const newRound = turnIdx - 1 < 0 && round > 1 ? round - 1 : round;
+
+    setTurnIdx(nextIdx);
+    if (newRound !== round) setRound(newRound);
+    // The persist effect will write to DB.
   }
 
   function resetCombat() {
@@ -555,6 +633,7 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
     setRound(1);
     setStarted(false);
     lastResetEntryIdRef.current = null;
+    // The persist effect will write combat_started=false, turn_index=0 to DB.
   }
 
   function toggleLegendary(entryId: string) {
@@ -572,7 +651,12 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
     setLegendaryMap(prev => {
       const current = prev[entryId];
       if (!current || current.usesLeft <= 0) return prev;
-      return { ...prev, [entryId]: { ...current, usesLeft: current.usesLeft - 1 } };
+      const next = { ...prev, [entryId]: { ...current, usesLeft: current.usesLeft - 1 } };
+      // Persist legendary_used to DB so it survives tab switches
+      const used = current.usesMax - (current.usesLeft - 1);
+      supabase.from('initiative_entries').update({ legendary_used: used }).eq('id', entryId)
+        .then(({ error }) => { if (error) console.error('legendary_used persist error', error); });
+      return next;
     });
   }
 
