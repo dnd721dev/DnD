@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { renderTilesToCanvas, type TileData } from '@/lib/tilemap'
+import { SESSION_GATES, type SessionStatus } from '@/lib/sessionGates'
 
 type Token = {
   id: string
@@ -33,6 +34,8 @@ type MapBoardViewProps = {
   gridSize?: number
   speedFeet?: number
   visionFeet?: number
+  /** Gates player token movement — tokens only movable when session is active */
+  sessionStatus?: SessionStatus | null
 }
 
 type Point = { x: number; y: number }
@@ -75,7 +78,10 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   gridSize = 50,
   speedFeet = 30,
   visionFeet = 30,
+  sessionStatus,
 }) => {
+  // Players can only move tokens when session is active; default permissive when no status given
+  const canInteract = !sessionStatus || SESSION_GATES.canInteractWithMap(sessionStatus)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const tokenCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -773,6 +779,7 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   const snapToGrid = (value: number) => Math.floor(value / gridSize) * gridSize + gridSize / 2
 
   const canMoveToken = (t: Token) => {
+    if (!canInteract) return false
     if (!ownerLower) return false
     if (t.owner_wallet?.toLowerCase() !== ownerLower) return false
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { SessionStatus } from '@/lib/sessionGates';
 import { supabase } from '@/lib/supabase';
 import MonsterLibrary from '@/components/table/MonsterLibrary';
 import InitiativeTracker from '@/components/table/InitiativeTracker';
@@ -18,7 +19,7 @@ type GMSidebarProps = {
   onRoll: (entry: any) => void;
   spawnMonsterToken: (monster: { id: string; name: string }) => void | Promise<void>;
   sessionType?: 'set_level' | 'caya' | null;
-  sessionStatus?: string | null;
+  sessionStatus?: SessionStatus | string | null;
   xpAwardedAlready?: number | null;
 };
 
@@ -255,7 +256,7 @@ export default function GMSidebar({
         {activeTab === 'combat' && (
           <div className="grid h-full grid-cols-1 gap-2 sm:grid-cols-2">
             <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
-              <InitiativeTracker encounterId={encounterId ?? null} sessionId={sessionId ?? null} onRoundChange={setCombatRound} />
+              <InitiativeTracker encounterId={encounterId ?? null} sessionId={sessionId ?? null} onRoundChange={setCombatRound} sessionStatus={(sessionStatus ?? null) as SessionStatus | null} />
             </div>
             <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
               {encounterId ? (
@@ -324,7 +325,7 @@ export default function GMSidebar({
             </div>
             <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
               {sessionId ? (
-                <TableChat sessionId={sessionId} senderWallet={address ?? null} senderName="GM" />
+                <TableChat sessionId={sessionId} senderWallet={address ?? null} senderName="GM" sessionStatus={(sessionStatus ?? null) as SessionStatus | null} />
               ) : (
                 <p className="text-[11px] text-slate-400">Session not loaded.</p>
               )}

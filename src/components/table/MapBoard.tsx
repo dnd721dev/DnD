@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { SESSION_GATES, type SessionStatus } from '@/lib/sessionGates';
 import { supabase } from '@/lib/supabase';
 import TokenHUD from '@/components/table/TokenHUD';
 import { renderTilesToCanvas, type TileData } from '@/lib/tilemap';
@@ -38,6 +39,8 @@ type MapBoardProps = {
   highlightTokenId?: string;
   /** Wallets to write fog_reveals for when using GM fog tools */
   sessionPlayerWallets?: string[];
+  /** Gates token dragging — GM can place/move tokens in setup, lobby, and active */
+  sessionStatus?: SessionStatus | null;
 };
 
 type Point = { x: number; y: number };
@@ -55,7 +58,10 @@ const MapBoard: React.FC<MapBoardProps> = ({
   gridSize = 50,
   highlightTokenId,
   sessionPlayerWallets = [],
+  sessionStatus,
 }) => {
+  // GM can place/move tokens in setup, lobby, and active; blocked only when completed/paused
+  const canMoveTokens = !sessionStatus || SESSION_GATES.dmCanPlaceTokens(sessionStatus)
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const tokenCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -784,7 +790,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
     const world = getWorldPoint(e);
     const hit = tokens.find((t) => Math.hypot(t.x - world.x, t.y - world.y) < gridSize * 0.5);
 
-    if (hit) {
+    if (hit && canMoveTokens) {
       setDragTokenId(hit.id);
       downTokenIdRef.current = hit.id;
       downTokenPosRef.current = { x: hit.x, y: hit.y };

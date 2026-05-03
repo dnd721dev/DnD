@@ -18,6 +18,7 @@ import type { InventoryItem } from '@/components/character-sheet/types'
 import { SKILLS, DIE_TYPES, type DieSides, DIE_CONFIG } from '@/lib/dnd5e'
 import { getActiveConditionMechanics, CONDITIONS as CONDITION_DEFS, type ConditionKey } from '@/lib/conditions'
 import { DiceShape } from '@/components/dice/DiceShape'
+import type { SessionStatus } from '@/lib/sessionGates'
 
 type AbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
 
@@ -41,6 +42,8 @@ type PlayerSidebarProps = {
   onRoll?: (roll: { label: string; formula: string; result: number; outcome?: string | null; individual_dice?: { die: string; value: number; dropped?: true }[] | null }) => void
   diceLog?: { id: string; roller: string; label: string; formula: string; result: number; timestamp: string }[]
   onOpenDiceLog?: () => void
+  /** Current session lifecycle status — shown as a banner at the top of the sidebar */
+  sessionStatus?: SessionStatus | null
 }
 
 type ActionState = {
@@ -111,6 +114,14 @@ type SheetPreview = Pick<
   | 'platinum'
 >
 
+const STATUS_CONFIG: Record<SessionStatus, { label: string; color: string; icon: string }> = {
+  setup:     { label: 'Session Starting Soon',  color: 'bg-gray-700',    icon: '⏳' },
+  lobby:     { label: 'Lobby Open — Get Ready', color: 'bg-blue-800',    icon: '🟡' },
+  active:    { label: 'Session Live',           color: 'bg-green-800',   icon: '🟢' },
+  paused:    { label: 'Session Paused',         color: 'bg-yellow-800',  icon: '⏸' },
+  completed: { label: 'Session Ended',          color: 'bg-gray-800',    icon: '✓'  },
+}
+
 export function PlayerSidebar({
   sessionId,
   address,
@@ -126,6 +137,7 @@ export function PlayerSidebar({
   onRoll,
   diceLog = [],
   onOpenDiceLog,
+  sessionStatus,
 }: PlayerSidebarProps) {
   const addressLower = useMemo(() => (address ? address.toLowerCase() : null), [address])
 
@@ -741,6 +753,18 @@ export function PlayerSidebar({
     })()}
 
     <aside className="pointer-events-auto flex flex-col rounded-t-xl border border-b-0 border-yellow-800/40 bg-slate-950/90 backdrop-blur-md text-xs">
+
+      {/* Session status banner */}
+      {sessionStatus && (() => {
+        const cfg = STATUS_CONFIG[sessionStatus]
+        if (!cfg) return null
+        return (
+          <div className={`flex items-center gap-1.5 rounded-t-xl px-3 py-1 text-[10px] font-semibold text-white/90 ${cfg.color}`}>
+            <span>{cfg.icon}</span>
+            <span>{cfg.label}</span>
+          </div>
+        )
+      })()}
 
       {/* Drag handle */}
       <div
@@ -1702,7 +1726,7 @@ export function PlayerSidebar({
                 <HandoutsPanel sessionId={sessionId} isGm={false} gmWallet={null} />
               </div>
               <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
-                <TableChat sessionId={sessionId} senderWallet={address} senderName={selectedCharacter?.name ?? undefined} />
+                <TableChat sessionId={sessionId} senderWallet={address} senderName={selectedCharacter?.name ?? undefined} sessionStatus={sessionStatus ?? null} />
               </div>
             </>
           ) : (

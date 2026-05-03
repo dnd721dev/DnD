@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { SESSION_GATES, type SessionStatus } from '@/lib/sessionGates'
 
 type Message = {
   id: string
@@ -23,9 +24,11 @@ type Props = {
   sessionId: string
   senderWallet: string | null
   senderName?: string
+  sessionStatus?: SessionStatus | null
 }
 
-export default function TableChat({ sessionId, senderWallet, senderName = 'Adventurer' }: Props) {
+export default function TableChat({ sessionId, senderWallet, senderName = 'Adventurer', sessionStatus }: Props) {
+  const canChat = !sessionStatus || SESSION_GATES.canChat(sessionStatus)
   const [messages, setMessages] = useState<Message[]>([])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
@@ -281,7 +284,11 @@ export default function TableChat({ sessionId, senderWallet, senderName = 'Adven
       </div>
 
       {/* Input */}
-      {senderWallet ? (
+      {senderWallet && !canChat ? (
+        <p className="text-center text-[10px] text-slate-500 pt-1 border-t border-slate-800 italic">
+          {sessionStatus === 'setup' ? 'Chat opens when the lobby starts.' : 'Chat unavailable.'}
+        </p>
+      ) : senderWallet ? (
         <div className="flex flex-col gap-1 pt-1 border-t border-slate-800">
           {/* Whisper recipient row — only shown in whisper mode */}
           {whisperMode && (

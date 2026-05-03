@@ -9,6 +9,7 @@ import { DiceRollOverlay } from './DiceRollOverlay'
 import { DiceCanvas3D } from '@/components/dice/DiceCanvas3D'
 import type { DiceEntry } from '../types'
 import type { SessionMap } from '../hooks/useMapManager'
+import type { SessionStatus } from '@/lib/sessionGates'
 
 export function MapSection(props: {
   // Map — either a full SessionMap or a fallback legacy URL
@@ -25,6 +26,8 @@ export function MapSection(props: {
   speedFeet?: number
   visionFeet?: number
   sessionPlayerWallets?: string[]
+  /** Current session lifecycle status — threaded down to MapBoard / MapBoardView */
+  sessionStatus?: SessionStatus | null
 
   showDiceLog: boolean
   diceLog: DiceEntry[]
@@ -62,9 +65,21 @@ export function MapSection(props: {
     rollerWallet,
     rollOverlay,
     mapControls,
+    sessionStatus,
   } = props
 
   const [isFullscreen, setIsFullscreen] = useState(false)
+
+  // Sync body class so the root-layout <header> and <main> padding hide/restore
+  useEffect(() => {
+    if (isFullscreen) {
+      document.body.classList.add('map-fullscreen')
+    } else {
+      document.body.classList.remove('map-fullscreen')
+    }
+    // Clean up on unmount (e.g. navigating away while fullscreen)
+    return () => { document.body.classList.remove('map-fullscreen') }
+  }, [isFullscreen])
 
   // Escape key exits fullscreen
   useEffect(() => {
@@ -98,7 +113,7 @@ export function MapSection(props: {
       >
         {isFullscreen ? '⛶ Exit' : '⛶'}
       </button>
-      <div className="relative w-full min-h-[calc(100vh-180px)] overflow-hidden bg-[radial-gradient(circle_at_top,_#1e293b,_#020617)] p-3">
+      <div className={`relative w-full overflow-hidden bg-[radial-gradient(circle_at_top,_#1e293b,_#020617)] p-3 ${isFullscreen ? 'h-full' : 'min-h-[calc(100vh-180px)]'}`}>
 
         {hasMap ? (
           encounterLoading || !encounterId ? (
@@ -123,6 +138,7 @@ export function MapSection(props: {
                 gridSize={50}
                 speedFeet={speedFeet}
                 visionFeet={visionFeet}
+                sessionStatus={sessionStatus}
               />
             ) : (
               <MapBoard
@@ -132,6 +148,7 @@ export function MapSection(props: {
                 mapId={mapId}
                 gridSize={50}
                 sessionPlayerWallets={sessionPlayerWallets}
+                sessionStatus={sessionStatus}
               />
             )
           ) : (
@@ -146,6 +163,7 @@ export function MapSection(props: {
               gridSize={50}
               speedFeet={speedFeet}
               visionFeet={visionFeet}
+              sessionStatus={sessionStatus}
             />
           )
         ) : (

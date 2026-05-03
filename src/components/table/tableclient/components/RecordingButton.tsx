@@ -24,12 +24,16 @@ type Marker = {
   offset_sec: number
 }
 
+import { SESSION_GATES, type SessionStatus } from '@/lib/sessionGates'
+
 interface Props {
   sessionId: string
   roomName: string
+  sessionStatus?: SessionStatus | null
 }
 
-export function RecordingButton({ sessionId, roomName }: Props) {
+export function RecordingButton({ sessionId, roomName, sessionStatus }: Props) {
+  const canRecord = !sessionStatus || SESSION_GATES.canRecord(sessionStatus)
   const [recordings, setRecordings]   = useState<RecordingRow[]>([])
   const [recording, setRecording]     = useState<RecordingRow | null>(null)
   const [loading, setLoading]         = useState(false)
@@ -226,7 +230,7 @@ export function RecordingButton({ sessionId, roomName }: Props) {
             </div>
           )}
         </div>
-      ) : (
+      ) : canRecord ? (
         /* ── Start buttons ── */
         <div className="flex items-center gap-1">
           <button
@@ -255,7 +259,7 @@ export function RecordingButton({ sessionId, roomName }: Props) {
             </button>
           )}
         </div>
-      )}
+      ) : null}
 
       {/* ── Recording history panel ── */}
       {showHistory && pastRecordings.length > 0 && (

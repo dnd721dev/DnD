@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, type ChangeEvent, useMemo, useRef } from 'react'
+import { useEffect, useState, type ChangeEvent, useMemo, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { useAccount } from 'wagmi'
 import { useMounted } from '@/hooks/useMounted'
 import { supabase } from '@/lib/supabase'
@@ -27,6 +28,7 @@ import {
   getCharacterMaxHP,
   parseMaybeNumber,
 } from '@/components/table/tableclient/utils'
+import { type SessionStatus } from '@/lib/sessionGates'
 
 interface TableClientProps {
   sessionId: string
@@ -56,6 +58,7 @@ type SessionPlayerRow = {
 
 export default function TableClient({ sessionId }: TableClientProps) {
   const { address } = useAccount()
+  const router = useRouter()
 
   // ✅ always use lowercased wallet for DB compares / RLS functions
   const walletLower = useMemo(() => (address ? address.trim().toLowerCase() : null), [address])
@@ -72,6 +75,36 @@ export default function TableClient({ sessionId }: TableClientProps) {
     const gm = (session?.gm_wallet ?? '').trim().toLowerCase()
     return Boolean(gm && gm === walletLower)
   }, [walletLower, session?.gm_wallet])
+
+  // ── Idle redirect (players only) ──────────────────────────────
+  // If a player has not interacted with the page for 30 seconds,
+  // redirect them to the campaign page. GM is exempt.
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const resetIdleTimer = useCallback(() => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+    idleTimerRef.current = setTimeout(() => {
+      const target = campaignId ? `/campaigns/${campaignId}` : '/campaigns'
+      router.push(target)
+    }, 30_000)
+  }, [campaignId, router])
+
+  useEffect(() => {
+    // Only arm the timer for players (not GMs)
+    if (isGm) return
+    if (!hasMounted) return
+
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'] as const
+    const handle = () => resetIdleTimer()
+
+    resetIdleTimer()
+    events.forEach((ev) => window.addEventListener(ev, handle, { passive: true }))
+
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+      events.forEach((ev) => window.removeEventListener(ev, handle))
+    }
+  }, [isGm, hasMounted, resetIdleTimer])
 
   // Encounter is session-scoped; hook only needs the session.
   const { encounterId, encounterLoading, encounterError } = useEncounter(session)
@@ -911,6 +944,69 @@ export default function TableClient({ sessionId }: TableClientProps) {
     setTimeout(() => setShopToast(null), 4000)
   }
 
+  // ── Session lifecycle status ───────────────────────────────────────────────
+  // Derive initial status from loaded session; keep in sync via realtime.
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(null)
+  const prevStatusRef = useRef<SessionStatus | null>(null)
+  const [showPauseOverlay, setShowPauseOverlay] = useState(false)
+  const [sessionToast, setSessionToast] = useState<string | null>(null)
+
+  function showSessionToast(msg: string) {
+    setSessionToast(msg)
+    setTimeout(() => setSessionToast(null), 4000)
+  }
+
+  // Seed status from session once loaded
+  useEffect(() => {
+    if (!session?.status) return
+    const s = session.status as SessionStatus
+    setSessionStatus(s)
+    prevStatusRef.current = s
+    if (s === 'paused') setShowPauseOverlay(true)
+  }, [session?.id])  // only re-seed when session ID changes (not every re-render)
+
+  // Realtime subscription for session status changes (Fix 7)
+  useEffect(() => {
+    if (!sessionId) return
+
+    const channel = supabase
+      .channel(`session-status-${sessionId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'sessions', filter: `id=eq.${sessionId}` },
+        (payload) => {
+          const newStatus = (payload.new as any).status as SessionStatus
+          const prev = prevStatusRef.current
+          prevStatusRef.current = newStatus
+          setSessionStatus(newStatus)
+
+          // Sync local session object so status badge updates immediately
+          setSession((s) => s ? { ...s, status: newStatus } : s)
+
+          // Transition-specific UI
+          if (newStatus === 'lobby' && prev === 'setup') {
+            showSessionToast('🟡 Lobby is open! Voice chat is available.')
+          }
+          if (newStatus === 'active' && (prev === 'lobby' || prev === 'setup')) {
+            showSessionToast('⚔️ Session has started!')
+          }
+          if (newStatus === 'paused') {
+            setShowPauseOverlay(true)
+          }
+          if (newStatus === 'active' && prev === 'paused') {
+            setShowPauseOverlay(false)
+            showSessionToast('▶ Session resumed!')
+          }
+          if (newStatus === 'completed') {
+            setShowPauseOverlay(false)
+          }
+        }
+      )
+      .subscribe()
+
+    return () => { void supabase.removeChannel(channel) }
+  }, [sessionId])
+
   const topBar = (
     <>
       <TableTopBar
@@ -923,11 +1019,12 @@ export default function TableClient({ sessionId }: TableClientProps) {
         onToggleDiceLog={() => setShowDiceLog((v) => !v)}
         onEndSession={isGm ? handleEndSession : undefined}
         onOpenShop={() => setShowShop(true)}
+        sessionStatus={sessionStatus}
       />
-      {/* Shop toast notification */}
-      {shopToast && (
+      {/* Shop / session toast notifications */}
+      {(shopToast || sessionToast) && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-xl border border-amber-700/60 bg-slate-900 px-4 py-2.5 text-sm font-medium text-amber-200 shadow-xl">
-          {shopToast}
+          {sessionToast ?? shopToast}
         </div>
       )}
     </>
@@ -956,6 +1053,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
       visionFeet={visionFeet}
       speedFeet={speedFeet}
       sessionPlayerWallets={sessionPlayers.map((p) => p.wallet_address)}
+      sessionStatus={sessionStatus}
     />
   )
 
@@ -990,6 +1088,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
             sessionId={sessionId}
             onClose={() => setShowShop(false)}
             onPurchase={handleShopPurchase}
+            sessionStatus={sessionStatus}
           />
         )}
 
@@ -1154,7 +1253,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
           {/* GM overlay panel */}
           <div className="absolute bottom-0 left-0 right-0 z-30 pointer-events-none">
-            <GMSidebar sessionId={session?.id ?? null} encounterId={encounterId} address={walletLower ?? null} activeMapId={currentMapId} onRoll={handleExternalRoll} spawnMonsterToken={spawnMonsterToken} sessionType={(session as any)?.session_type ?? null} sessionStatus={session?.status ?? null} xpAwardedAlready={(session as any)?.xp_award ?? null} />
+            <GMSidebar sessionId={session?.id ?? null} encounterId={encounterId} address={walletLower ?? null} activeMapId={currentMapId} onRoll={handleExternalRoll} spawnMonsterToken={spawnMonsterToken} sessionType={(session as any)?.session_type ?? null} sessionStatus={sessionStatus ?? session?.status ?? null} xpAwardedAlready={(session as any)?.xp_award ?? null} />
           </div>
         </div>
       </div>
@@ -1183,7 +1282,19 @@ export default function TableClient({ sessionId }: TableClientProps) {
           sessionId={sessionId}
           onClose={() => setShowShop(false)}
           onPurchase={handleShopPurchase}
+          sessionStatus={sessionStatus}
         />
+      )}
+
+      {/* Pause overlay */}
+      {showPauseOverlay && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="rounded-2xl border border-yellow-700/50 bg-slate-900 p-8 text-center shadow-2xl">
+            <p className="text-4xl mb-3">⏸</p>
+            <p className="text-lg font-bold text-yellow-200">Session Paused</p>
+            <p className="mt-1 text-sm text-slate-400">Waiting for the GM to resume…</p>
+          </div>
+        </div>
       )}
 
       <div className="relative flex-1 min-h-0 min-w-0">
@@ -1210,6 +1321,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
             onRoll={handleExternalRoll}
             diceLog={diceLog}
             onOpenDiceLog={() => setShowDiceLog(true)}
+            sessionStatus={sessionStatus}
           />
         </div>
       </div>

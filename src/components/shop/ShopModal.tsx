@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { DND721_TOKEN_ADDRESS, DND721_TOKEN_ABI } from '@/lib/dnd721Token'
 import { usdToDnd721Tokens, usdToDnd721Wei, formatTokens, formatCountdown, secondsUntilMidnightUTC } from '@/lib/shopPricing'
 import type { ShopItem, ShopTier } from '@/lib/shopData'
+import { SESSION_GATES, type SessionStatus } from '@/lib/sessionGates'
 
 const TREASURY = (process.env.NEXT_PUBLIC_TREASURY_WALLET ?? '') as `0x${string}`
 const BASE_CHAIN_ID = 8453
@@ -60,17 +61,19 @@ const TIER_HEADING: Record<ShopTier, string> = {
 
 export interface ShopModalProps {
   /** When false: renders inline (standalone page). When true: modal overlay. */
-  isModal?:    boolean
+  isModal?:       boolean
   /** Active session context — used for Tier A free claim tracking. */
-  sessionId?:  string | null
-  onClose?:    () => void
+  sessionId?:     string | null
+  onClose?:       () => void
   /** Fired when any purchase completes (for table toast). */
-  onPurchase?: (itemName: string) => void
+  onPurchase?:    (itemName: string) => void
+  /** Current session lifecycle status — gates free claims and paid purchases */
+  sessionStatus?: SessionStatus | null
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ShopModal({ isModal = false, sessionId, onClose, onPurchase }: ShopModalProps) {
+export function ShopModal({ isModal = false, sessionId, onClose, onPurchase, sessionStatus }: ShopModalProps) {
   const { address, isConnected } = useAccount()
   const chainId                  = useChainId()
   const { switchChain }          = useSwitchChain()
@@ -96,6 +99,17 @@ export function ShopModal({ isModal = false, sessionId, onClose, onPurchase }: S
   // Keep a ref to active for use inside effects without stale closure
   const activeRef = useRef(active)
   useEffect(() => { activeRef.current = active }, [active])
+
+  // ── Session lifecycle gates ────────────────────────────────────────────────
+  const sessionGateMsg: string | null = (() => {
+    if (!sessionStatus) return null
+    if (sessionStatus === 'setup')     return 'Items can be claimed once the lobby opens.'
+    if (sessionStatus === 'completed') return 'Session ended — no new purchases.'
+    if (sessionStatus === 'paused')    return 'Session is paused.'
+    return null
+  })()
+  const canClaimFree  = !sessionStatus || SESSION_GATES.canClaimFreeItems(sessionStatus)
+  const canPurchase   = !sessionStatus || SESSION_GATES.canPurchaseItems(sessionStatus)
 
   // ── Load inventory + price ─────────────────────────────────────────────────
 
@@ -365,6 +379,14 @@ export function ShopModal({ isModal = false, sessionId, onClose, onPurchase }: S
             <span className="rounded bg-slate-800 px-3 py-1.5 text-xs text-slate-500 min-h-[36px] flex items-center">
               Claimed ✓
             </span>
+          ) : isFree && !canClaimFree ? (
+            <span className="rounded bg-slate-800 px-3 py-1.5 text-xs text-slate-500 min-h-[36px] flex items-center" title={sessionGateMsg ?? undefined}>
+              {sessionStatus === 'lobby' ? 'Available when session starts' : sessionGateMsg ?? 'Unavailable'}
+            </span>
+          ) : !isFree && !canPurchase ? (
+            <span className="rounded bg-slate-800 px-3 py-1.5 text-xs text-slate-500 min-h-[36px] flex items-center" title={sessionGateMsg ?? undefined}>
+              {sessionGateMsg ?? 'Unavailable'}
+            </span>
           ) : cur?.stage === 'success' ? (
             <span className="text-xs font-semibold text-emerald-400 min-h-[36px] flex items-center">
               ✓ Added!
@@ -469,7 +491,14 @@ export function ShopModal({ isModal = false, sessionId, onClose, onPurchase }: S
         <div className="mx-4 mt-3 rounded-md border border-emerald-800/40 bg-emerald-900/15 px-3 py-1.5 text-xs text-emerald-300">
           🎲 You are in:{' '}
           <span className="font-semibold">{effectiveSession.title ?? 'Active Session'}</span>
-          {' — '}Free items available
+          {sessionStatus === 'active' ? ' — Free items available' : sessionStatus === 'lobby' ? ' — Lobby open' : ''}
+        </div>
+      )}
+
+      {/* Session gate banner */}
+      {sessionGateMsg && (
+        <div className="mx-4 mt-2 rounded-md border border-amber-800/40 bg-amber-900/20 px-3 py-1.5 text-xs text-amber-300">
+          ⚠ {sessionGateMsg}
         </div>
       )}
 

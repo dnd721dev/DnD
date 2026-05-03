@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { SESSION_GATES, type SessionStatus } from '@/lib/sessionGates';
 
 type InitiativeEntry = {
   id: string;
@@ -65,9 +66,11 @@ type InitiativeTrackerProps = {
   /** Session ID — required for the Roll Initiative button to call /api/roll */
   sessionId?: string | null;
   onRoundChange?: (round: number) => void;
+  /** Current session lifecycle status — gates Start Combat button */
+  sessionStatus?: SessionStatus | null;
 };
 
-export default function InitiativeTracker({ encounterId, sessionId, onRoundChange }: InitiativeTrackerProps) {
+export default function InitiativeTracker({ encounterId, sessionId, onRoundChange, sessionStatus }: InitiativeTrackerProps) {
   const [entries, setEntries] = useState<InitiativeEntry[]>([]);
   const [turnIdx, setTurnIdx] = useState(0);
   const [round, setRound] = useState(1);
@@ -672,7 +675,8 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
         <button
           type="button"
           onClick={() => (started ? nextTurn() : startCombat())}
-          disabled={sortedEntries.length === 0}
+          disabled={sortedEntries.length === 0 || (!started && sessionStatus != null && !SESSION_GATES.canUseCombat(sessionStatus))}
+          title={!started && sessionStatus != null && !SESSION_GATES.canUseCombat(sessionStatus) ? 'Combat can only start when session is active' : undefined}
           className="rounded bg-emerald-700 px-3 py-1 text-[11px] font-semibold text-emerald-50 hover:bg-emerald-600 disabled:opacity-40"
         >
           {started ? 'Next ▶' : '⚔ Start'}

@@ -6,6 +6,7 @@ import { RecordingButton } from './RecordingButton'
 import { SrdSearchOverlay } from '@/components/table/SrdSearchOverlay'
 import type { SessionWithCampaign } from '../types'
 import { formatDateTime } from '../utils'
+import type { SessionStatus } from '@/lib/sessionGates'
 
 export function TableTopBar(props: {
   session: SessionWithCampaign
@@ -20,8 +21,10 @@ export function TableTopBar(props: {
   onEndSession?: () => Promise<void>
   /** Open the in-session shop modal */
   onOpenShop?: () => void
+  /** Current session lifecycle status — used to gate features */
+  sessionStatus?: SessionStatus | null
 }) {
-  const { session, isGm, address, displayName, roomName, showDiceLog, onToggleDiceLog, onEndSession, onOpenShop } = props
+  const { session, isGm, address, displayName, roomName, showDiceLog, onToggleDiceLog, onEndSession, onOpenShop, sessionStatus } = props
   const [srdOpen, setSrdOpen] = useState(false)
   const [confirmEnd, setConfirmEnd] = useState(false)
   const [endingSession, setEndingSession] = useState(false)
@@ -52,7 +55,7 @@ export function TableTopBar(props: {
       <div className="flex flex-col items-start gap-2 text-xs text-slate-300 sm:items-end">
         <div className="flex items-center gap-2">
           {isGm && (
-            <RecordingButton sessionId={session.id} roomName={roomName} />
+            <RecordingButton sessionId={session.id} roomName={roomName} sessionStatus={sessionStatus} />
           )}
           <button
             type="button"

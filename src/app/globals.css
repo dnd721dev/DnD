@@ -1,3 +1,15 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ── Fullscreen map mode ─────────────────────────────────────── */
+/* When the map is in fullscreen, hide the site header and strip  */
+/* the padding from <main> so the canvas can fill the viewport.   */
+body.map-fullscreen header,
+body.map-fullscreen nav {
+  display: none !important;
+}
+
+body.map-fullscreen main {
+  padding: 0 !important;
+}

@@ -1,9 +1,10 @@
-export type SessionStatus = 'planned' | 'in_progress' | 'completed' | 'cancelled'
+// Re-export from sessionGates so the rest of the table code can import from here
+export type { SessionStatus } from '@/lib/sessionGates'
 
 export type SessionWithCampaign = {
   id: string
   title: string | null
-  status: SessionStatus
+  status: string  // broad string — actual values are SessionStatus from sessionGates
   scheduled_start: string | null
   duration_minutes: number
   campaign_id: string | null
