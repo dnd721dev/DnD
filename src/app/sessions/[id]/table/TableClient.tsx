@@ -7,7 +7,6 @@ import { useMounted } from '@/hooks/useMounted'
 import { supabase } from '@/lib/supabase'
 import GMSidebar from '@/components/table/GMSidebar'
 import { PlayerSidebar } from '@/components/table/PlayerSidebar'
-import { MonsterStatPanel } from '@/components/table/MonsterStatPanel'
 import { MapBuilder } from '@/components/table/MapBuilder'
 import { MONSTERS } from '@/lib/monsters'
 
@@ -18,7 +17,6 @@ import { MapSection } from '@/components/table/tableclient/components/MapSection
 import { useSessionWithCampaign } from '@/components/table/tableclient/hooks/useSessionWithCampaign'
 import { useEncounter } from '@/components/table/tableclient/hooks/useEncounter'
 import { useSessionRolls } from '@/components/table/tableclient/hooks/useSessionRolls'
-import { useMonsterPanel } from '@/components/table/tableclient/hooks/useMonsterPanel'
 import { useMapManager } from '@/components/table/tableclient/hooks/useMapManager'
 import {
   abilityMod,
@@ -114,9 +112,6 @@ export default function TableClient({ sessionId }: TableClientProps) {
     sessionId,
     hasMounted,
   })
-
-  // Monster stat panel
-  const { openMonsterToken, setOpenMonsterToken, openMonsterData, setOpenMonsterData } = useMonsterPanel()
 
   // Combat conditions (local, shared across UI via window events)
   // Key format:
@@ -1186,29 +1181,6 @@ export default function TableClient({ sessionId }: TableClientProps) {
         )}
 
         <div className="relative flex-1 min-h-0 min-w-0">
-          {/* Monster Stat Panel — floats as overlay */}
-          {openMonsterToken && (
-            <MonsterStatPanel
-              token={openMonsterToken}
-              monster={openMonsterData}
-              conditions={actorConditions[`token:${String(openMonsterToken.id)}`] ?? []}
-              onToggleCondition={(condition) => {
-                const key = `token:${String(openMonsterToken.id)}`
-                setActorConditions((prev) => {
-                  const existing = prev[key] ?? []
-                  const has = existing.includes(condition)
-                  const next = has ? existing.filter((c) => c !== condition) : [...existing, condition]
-                  return { ...prev, [key]: next }
-                })
-              }}
-              onClose={() => {
-                setOpenMonsterToken(null)
-                setOpenMonsterData(null)
-              }}
-              onRoll={handleExternalRoll}
-            />
-          )}
-
           <div className="absolute inset-0 flex flex-col overflow-hidden">
             {/* GM control bar: View As + Map selector */}
             <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-slate-300">

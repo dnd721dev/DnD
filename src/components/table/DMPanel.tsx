@@ -7,6 +7,8 @@ import { DiceShape } from '@/components/dice/DiceShape'
 import { calculateEncounterDifficulty, CR_OPTIONS, type CRKey, type Difficulty } from '@/lib/encounter'
 import { PlaceCharactersPanel } from '@/components/table/PlaceCharactersPanel'
 import { supabase } from '@/lib/supabase'
+import { MonsterStatPanel } from '@/components/table/MonsterStatPanel'
+import { MONSTERS } from '@/lib/monsters'
 
 type ExternalRoll = {
   label: string
@@ -52,6 +54,7 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
   const [selectedToken, setSelectedToken] = useState<any | null>(null)
   const [targetConditions, setTargetConditions] = useState<string[]>([])
   const [hpDeltaInput, setHpDeltaInput] = useState('')
+  const [monsterData, setMonsterData] = useState<any | null>(null)
 
   // Listen for token clicks on the map — auto-switch to Combat tab
   useEffect(() => {
@@ -61,11 +64,55 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
       if (!tok) return
       setSelectedToken(tok)
       setTargetConditions([])    // reset conditions when a new token is targeted
+      setMonsterData(null)       // clear previous monster data until reload
       setDmTab('combat')         // jump to Combat tab so GM sees it immediately
     }
     window.addEventListener('dnd721-target-selected', handler)
     return () => window.removeEventListener('dnd721-target-selected', handler)
   }, [])
+
+  // Load monster stat data whenever the selected token changes
+  useEffect(() => {
+    async function loadMonster() {
+      if (selectedToken?.type !== 'monster' || !selectedToken?.monster_id) {
+        setMonsterData(null)
+        return
+      }
+
+      const monsterId = String(selectedToken.monster_id)
+
+      // SRD monster from bundled MONSTERS list
+      if (monsterId.startsWith('srd:')) {
+        const key = monsterId.replace('srd:', '')
+        const found = (MONSTERS as any[]).find(
+          (m: any) =>
+            m.id === key ||
+            m.slug === key ||
+            m.name?.toLowerCase() === selectedToken.label?.toLowerCase()
+        )
+        setMonsterData(found ?? null)
+        return
+      }
+
+      // Custom monster stored in Supabase monsters table
+      if (monsterId.startsWith('db:')) {
+        const dbId = monsterId.replace('db:', '')
+        const { data, error } = await supabase
+          .from('monsters')
+          .select('*')
+          .eq('id', dbId)
+          .limit(1)
+          .maybeSingle()
+        if (error) console.error('[DMPanel] Error loading monster from DB', error)
+        setMonsterData(data ?? null)
+        return
+      }
+
+      setMonsterData(null)
+    }
+
+    void loadMonster()
+  }, [selectedToken])
 
   async function adjustTargetHp(delta: number) {
     if (!selectedToken?.id) return
@@ -286,7 +333,7 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
                   </div>
                   <button
                     type="button"
-                    onClick={() => { setSelectedToken(null); setTargetConditions([]) }}
+                    onClick={() => { setSelectedToken(null); setTargetConditions([]); setMonsterData(null) }}
                     className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400 hover:text-slate-200"
                   >
                     Clear
@@ -388,6 +435,17 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
                   })}
                 </div>
               </section>
+              {/* Monster Stat Block — inline below conditions when token is a monster */}
+              {monsterData && (
+                <MonsterStatPanel
+                  token={selectedToken}
+                  monster={monsterData}
+                  conditions={targetConditions}
+                  onToggleCondition={toggleTargetCondition}
+                  onClose={() => setMonsterData(null)}
+                  onRoll={onRoll}
+                />
+              )}
             </>
           )}
         </div>
