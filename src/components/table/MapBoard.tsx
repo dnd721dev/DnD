@@ -116,6 +116,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
   // Fog of war GM tools
   const [fogToolActive, setFogToolActive] = useState(false);
   const [fogRevealSet, setFogRevealSet] = useState<Set<string>>(new Set());
+  const [isRevealingAll, setIsRevealingAll] = useState(false);
   const isFogPaintingRef = useRef(false);
 
   // Multi-touch pinch-to-zoom tracking
@@ -607,29 +608,36 @@ const MapBoard: React.FC<MapBoardProps> = ({
 
   /** Reveal every tile on the current map for all players */
   const handleRevealAll = async () => {
-    if (!canvasSize || sessionPlayerWallets.length === 0) return;
-    const cols = Math.ceil(canvasSize.width / gridSize);
-    const rows = Math.ceil(canvasSize.height / gridSize);
-    const allRows: { encounter_id: string; viewer_wallet: string; map_id: string | null; tile_x: number; tile_y: number }[] = [];
-    const nextSet = new Set<string>();
-    for (let tx = 0; tx < cols; tx++) {
-      for (let ty = 0; ty < rows; ty++) {
-        nextSet.add(keyTile(tx, ty));
-        for (const w of sessionPlayerWallets) {
-          allRows.push({ encounter_id: encounterId, viewer_wallet: w.toLowerCase(), map_id: mapId ?? null, tile_x: tx, tile_y: ty });
+    if (!canvasSize) return;
+    if (!window.confirm('Reveal entire map for all players?')) return;
+    setIsRevealingAll(true);
+    try {
+      const cols = Math.ceil(canvasSize.width / gridSize);
+      const rows = Math.ceil(canvasSize.height / gridSize);
+      const allRows: { encounter_id: string; viewer_wallet: string; map_id: string | null; tile_x: number; tile_y: number }[] = [];
+      const nextSet = new Set<string>();
+      for (let tx = 0; tx < cols; tx++) {
+        for (let ty = 0; ty < rows; ty++) {
+          nextSet.add(keyTile(tx, ty));
+          for (const w of sessionPlayerWallets) {
+            allRows.push({ encounter_id: encounterId, viewer_wallet: w.toLowerCase(), map_id: mapId ?? null, tile_x: tx, tile_y: ty });
+          }
         }
       }
-    }
-    setFogRevealSet(nextSet);
-    // Upsert in batches of 500 to avoid request size limits
-    for (let i = 0; i < allRows.length; i += 500) {
-      const { error } = await supabase.from('fog_reveals').upsert(allRows.slice(i, i + 500), { ignoreDuplicates: true });
-      if (error) { console.error('reveal all failed:', error); break; }
+      setFogRevealSet(nextSet);
+      // Upsert in batches of 500 to avoid request size limits
+      for (let i = 0; i < allRows.length; i += 500) {
+        const { error } = await supabase.from('fog_reveals').upsert(allRows.slice(i, i + 500), { ignoreDuplicates: true });
+        if (error) { console.error('reveal all failed:', error); break; }
+      }
+    } finally {
+      setIsRevealingAll(false);
     }
   };
 
   /** Delete all fog reveals for this encounter/map */
   const handleResetFog = async () => {
+    if (!window.confirm('Reset all fog of war? This cannot be undone.')) return;
     let q = supabase.from('fog_reveals').delete().eq('encounter_id', encounterId);
     if (mapId) q = (q as any).eq('map_id', mapId);
     else q = (q as any).is('map_id', null);
@@ -1069,38 +1077,35 @@ const MapBoard: React.FC<MapBoardProps> = ({
           📏 Ruler
         </button>
 
-        {sessionPlayerWallets.length > 0 && (
-          <>
-            <button
-              type="button"
-              onClick={() => setFogToolActive((v) => !v)}
-              className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold shadow transition ${
-                fogToolActive
-                  ? 'border-sky-500/80 bg-sky-950/90 text-sky-200 shadow-[0_0_8px_rgba(56,189,248,0.4)]'
-                  : 'border-slate-700/60 bg-slate-950/80 text-slate-300 hover:border-slate-500'
-              }`}
-              title="Fog Brush — click/drag to reveal tiles for players"
-            >
-              🌫 Fog Brush
-            </button>
-            <button
-              type="button"
-              onClick={handleRevealAll}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-700/60 bg-slate-950/80 px-2.5 py-1.5 text-[11px] font-semibold text-slate-300 shadow transition hover:border-emerald-500/60 hover:text-emerald-300"
-              title="Reveal entire map for all players"
-            >
-              👁 Reveal All
-            </button>
-            <button
-              type="button"
-              onClick={handleResetFog}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-700/60 bg-slate-950/80 px-2.5 py-1.5 text-[11px] font-semibold text-slate-300 shadow transition hover:border-red-500/60 hover:text-red-300"
-              title="Re-fog the entire map for all players"
-            >
-              🚫 Reset Fog
-            </button>
-          </>
-        )}
+        <button
+          type="button"
+          onClick={() => setFogToolActive((v) => !v)}
+          className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold shadow transition ${
+            fogToolActive
+              ? 'border-sky-500/80 bg-sky-950/90 text-sky-200 shadow-[0_0_8px_rgba(56,189,248,0.4)]'
+              : 'border-slate-700/60 bg-slate-950/80 text-slate-300 hover:border-slate-500'
+          }`}
+          title="Fog Brush — click/drag to reveal tiles for players"
+        >
+          🌫 Fog Brush
+        </button>
+        <button
+          type="button"
+          onClick={handleRevealAll}
+          disabled={!canvasSize || isRevealingAll}
+          className="flex items-center gap-1.5 rounded-lg border border-slate-700/60 bg-slate-950/80 px-2.5 py-1.5 text-[11px] font-semibold text-slate-300 shadow transition hover:border-emerald-500/60 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+          title="Reveal entire map for all players"
+        >
+          {isRevealingAll ? '⏳ Revealing…' : '👁 Reveal All'}
+        </button>
+        <button
+          type="button"
+          onClick={handleResetFog}
+          className="flex items-center gap-1.5 rounded-lg border border-slate-700/60 bg-slate-950/80 px-2.5 py-1.5 text-[11px] font-semibold text-slate-300 shadow transition hover:border-red-500/60 hover:text-red-300"
+          title="Re-fog the entire map for all players"
+        >
+          🚫 Reset Fog
+        </button>
       </div>
 
       {/* Ruler SVG overlay */}
@@ -1179,6 +1184,13 @@ const MapBoard: React.FC<MapBoardProps> = ({
           >
             Cancel (Esc)
           </button>
+        </div>
+      )}
+
+      {/* Fog brush active banner */}
+      {fogToolActive && (
+        <div className="pointer-events-none absolute left-3 top-3 z-20 rounded-lg border border-sky-600/60 bg-slate-950/90 px-3 py-1.5 text-xs text-sky-200 shadow-lg">
+          🌫 Fog Brush active — click and drag to reveal tiles (Esc to cancel)
         </div>
       )}
 

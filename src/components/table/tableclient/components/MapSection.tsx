@@ -139,6 +139,8 @@ export function MapSection(props: {
                 speedFeet={speedFeet}
                 visionFeet={visionFeet}
                 sessionStatus={sessionStatus}
+                isGm={true}
+                sessionPlayerWallets={sessionPlayerWallets}
               />
             ) : (
               <MapBoard

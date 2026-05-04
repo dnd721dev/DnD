@@ -36,6 +36,10 @@ type MapBoardViewProps = {
   visionFeet?: number
   /** Gates player token movement — tokens only movable when session is active */
   sessionStatus?: SessionStatus | null
+  /** When true, renders the GM fog control toolbar (Reveal All + Reset Fog) */
+  isGm?: boolean
+  /** Player wallet addresses — used by GM Reveal All to upsert tiles for all players */
+  sessionPlayerWallets?: string[]
 }
 
 type Point = { x: number; y: number }
@@ -79,6 +83,8 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   speedFeet = 30,
   visionFeet = 30,
   sessionStatus,
+  isGm = false,
+  sessionPlayerWallets = [],
 }) => {
   // Players can only move tokens when session is active; default permissive when no status given
   const canInteract = !sessionStatus || SESSION_GATES.canInteractWithMap(sessionStatus)
@@ -140,6 +146,42 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     if (img) return { width: img.width, height: img.height }
     return null
   }, [tileData, img, gridSize])
+
+  // GM fog controls — only used when isGm=true (View As mode)
+  const [isRevealingAll, setIsRevealingAll] = useState(false)
+
+  const handleGmRevealAll = async () => {
+    if (!canvasSize) return
+    if (!window.confirm('Reveal entire map for all players?')) return
+    setIsRevealingAll(true)
+    try {
+      const cols = Math.ceil(canvasSize.width / gridSize)
+      const rows = Math.ceil(canvasSize.height / gridSize)
+      const allRows: { encounter_id: string; viewer_wallet: string; map_id: string | null; tile_x: number; tile_y: number }[] = []
+      for (let tx = 0; tx < cols; tx++) {
+        for (let ty = 0; ty < rows; ty++) {
+          for (const w of sessionPlayerWallets) {
+            allRows.push({ encounter_id: encounterId, viewer_wallet: w.toLowerCase(), map_id: mapId ?? null, tile_x: tx, tile_y: ty })
+          }
+        }
+      }
+      for (let i = 0; i < allRows.length; i += 500) {
+        const { error } = await supabase.from('fog_reveals').upsert(allRows.slice(i, i + 500), { ignoreDuplicates: true })
+        if (error) { console.error('reveal all failed:', error); break }
+      }
+    } finally {
+      setIsRevealingAll(false)
+    }
+  }
+
+  const handleGmResetFog = async () => {
+    if (!window.confirm('Reset all fog of war? This cannot be undone.')) return
+    let q = supabase.from('fog_reveals').delete().eq('encounter_id', encounterId)
+    if (mapId) q = (q as any).eq('map_id', mapId)
+    else q = (q as any).is('map_id', null)
+    const { error } = await q
+    if (error) console.error('reset fog failed:', error)
+  }
 
   // Subscribe to encounters.active_entry_id so all clients get the active turn via DB realtime
   useEffect(() => {
@@ -416,7 +458,6 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     // +1 so tiles exactly at the boundary distance are always included
     const rTiles = Math.ceil(visionPx / gridSize) + 1
 
-    console.log('[fog] revealAround', { center, visionPx, rTiles, originX, originY })
 
     // Map bounds in tiles — clamp to avoid negative coords or off-map DB rows.
     const maxTileX = canvasSize ? Math.floor(canvasSize.width  / gridSize) - 1 : Infinity
@@ -443,7 +484,6 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       }
     }
 
-    console.log('[fog] circleTiles count:', circleTiles.length)
 
     // CRITICAL: use functional state updates so that two concurrent
     // revealAround calls (e.g. fast left→right→left) merge their tiles
@@ -478,8 +518,6 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
 
     if (error) {
       logSupabaseError('Failed to persist fog reveals:', error)
-    } else {
-      console.log('[fog] upserted', payload.length, 'tiles to DB')
     }
   // setRevealSet / setReveals are stable React dispatch functions — no dep needed.
   // supabase is a module singleton — no dep needed.
@@ -502,7 +540,6 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     // Skip unpositioned tokens: snap() always produces multiples of gridSize,
     // so (0, 0) means "not yet placed" in almost all cases.
     if (px === 0 && py === 0) return
-    console.log('[fog] token reveal x=', px, 'y=', py, 'ownerLower=', ownerLower)
     void revealAround({ x: px, y: py })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ownerLower, tokenIds, revealAround])
@@ -1059,6 +1096,29 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
           className={`pointer-events-none absolute left-0 top-0 transition-opacity duration-300 ${fogsLoaded ? 'opacity-100' : 'opacity-0'}`}
         />
       </div>
+
+      {/* GM fog toolbar — shown when viewing as a player (View As mode) */}
+      {isGm && (
+        <div className="pointer-events-auto absolute right-3 top-3 z-10 flex flex-col items-end gap-1.5">
+          <button
+            type="button"
+            onClick={handleGmRevealAll}
+            disabled={!canvasSize || isRevealingAll}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-700/60 bg-slate-950/80 px-2.5 py-1.5 text-[11px] font-semibold text-slate-300 shadow transition hover:border-emerald-500/60 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+            title="Reveal entire map for all players"
+          >
+            {isRevealingAll ? '⏳ Revealing…' : '👁 Reveal All'}
+          </button>
+          <button
+            type="button"
+            onClick={handleGmResetFog}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-700/60 bg-slate-950/80 px-2.5 py-1.5 text-[11px] font-semibold text-slate-300 shadow transition hover:border-red-500/60 hover:text-red-300"
+            title="Re-fog the entire map for all players"
+          >
+            🚫 Reset Fog
+          </button>
+        </div>
+      )}
 
       {/* Movement action bar — only shown on your turn */}
       {isMyTurn && characterId && (

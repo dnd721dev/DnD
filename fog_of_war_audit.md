@@ -1,503 +1,264 @@
-# Fog of War — Full Audit Report
-
-All files were read completely before writing this report. No code has been changed.
-
----
-
-## SECTION A — Canvas and coordinate system
-
-### A1. Exact pixel dimensions of the fog canvas element
-
-`MapBoardView.tsx` sets canvas HTML attributes directly inside the fog-draw `useEffect`:
-
-```tsx
-canvas.width  = canvasSize.width   // HTML attribute — sets drawing resolution
-canvas.height = canvasSize.height
-```
-
-`canvasSize` is:
-
-```tsx
-const canvasSize = useMemo(() => {
-  if (tileData) return { width: tileData.cols * gridSize, height: tileData.rows * gridSize }
-  if (img)      return { width: img.width, height: img.height }
-  return null
-}, [tileData, img, gridSize])
-```
-
-For image maps: `img.width × img.height` — the **natural** pixel dimensions of the image, not CSS display size.
-For tile maps: `cols × gridSize` by `rows × gridSize`.
-
-There are no CSS `width` or `height` properties set on the canvas elements — only Tailwind classes (`block`, `absolute left-0 top-0 pointer-events-none`). So the canvas renders at its natural pixel dimensions.
-
-### A2. Exact pixel dimensions of the map image element
-
-The map canvas (`mapCanvasRef`) is also drawn at natural dimensions:
-
-```tsx
-canvas.width  = img.width
-canvas.height = img.height
-ctx.drawImage(img, 0, 0)
-```
-
-No CSS scaling is applied to the canvas element. It renders at `img.width × img.height`.
-
-### A3. Do fog canvas HTML attributes match map image rendered pixel dimensions?
-
-**Yes — they match exactly.** Both `mapCanvasRef` and `fogCanvasRef` are set to `canvasSize.width × canvasSize.height`, which is derived from the same source (image natural size or tile grid). No mismatch.
-
-### A4. CSS transform, scale, zoom, or matrix
-
-A CSS transform is applied to the inner wrapper `<div>` that contains **all three** canvases (map, token, fog):
-
-```tsx
-const transformStyle = {
-  transform: `translate(${translate.x}px, ${translate.y}px) scale(${zoom})`,
-  transformOrigin: 'top left' as const,
-}
-// …
-<div className="relative inline-block" style={transformStyle}>
-  <canvas ref={mapCanvasRef} className="block" />
-  <canvas ref={tokenCanvasRef} className="pointer-events-none absolute left-0 top-0" />
-  <canvas ref={fogCanvasRef}   className="pointer-events-none absolute left-0 top-0" />
-</div>
-```
-
-All three canvases receive the **same** transform. No inconsistency.
-
-### A5. Pan/scroll offset consistency
-
-Panning is implemented via `translate: { x, y }` state. All three canvases are children of the transformed `<div>`, so pan is applied identically to all three.
-
-Token positions (`t.x`, `t.y`) are stored in **world space** (natural canvas pixels). `revealAround` is called with `{ x: tok.x, y: tok.y }` — also world space. The fog drawing iterates over `reveals` and calls `ctx.fillRect(r.tile_x * gridSize, ...)` — also world space.
-
-Pan/zoom are applied only at the DOM level via CSS transform. Drawing code always operates in world/natural pixel coordinates. **Consistency is correct.**
-
-### A6. gridSize value
-
-`gridSize = 50` pixels per tile. Defined as:
-- Default parameter in both `MapBoard.tsx` (`gridSize = 50`) and `MapBoardView.tsx` (`gridSize = 50`)
-- Hardcoded when `MapBoardView` is instantiated in `MapSection.tsx`: `gridSize={50}`
-- Never passed from the DB or any configurable source — it is always 50.
-
-### A7. Tile coordinate → pixel coordinate conversion (current formula)
-
-In `revealAround` (MapBoardView.tsx):
-```
-cx      = Math.floor(center.x / gridSize)         // tile column (integer)
-cy      = Math.floor(center.y / gridSize)          // tile row (integer)
-originX = (cx + 0.5) * gridSize                    // pixel center of token's tile
-originY = (cy + 0.5) * gridSize
-
-rTiles  = Math.ceil(visionPx / gridSize) + 1       // tile radius (inclusive buffer)
-
-for dx in [-rTiles, rTiles], dy in [-rTiles, rTiles]:
-  tx  = cx + dx
-  ty  = cy + dy
-  px  = (tx + 0.5) * gridSize                      // pixel center of candidate tile
-  py  = (ty + 0.5) * gridSize
-  if dist(origin, candidate) <= visionPx → include tile
-```
-
-In fog draw:
-```
-ctx.fillRect(r.tile_x * gridSize, r.tile_y * gridSize, gridSize, gridSize)
-```
-(top-left corner of each tile, size = gridSize × gridSize)
-
-### A8. Canvas positioning
-
-```tsx
-<canvas ref={fogCanvasRef} className="pointer-events-none absolute left-0 top-0" />
-```
-
-Positioned `absolute, left-0, top-0` within the `relative inline-block` inner div. Identical to the token canvas. Both sit exactly on top of the map canvas. **Correct.**
+# Fog of War System Audit
+_Files read: FogOfWarOverlay.tsx (DOES NOT EXIST), MapBoard.tsx (1228 lines),
+MapBoardView.tsx (1101 lines), DMPanel.tsx (727 lines), GMSidebar.tsx (439 lines),
+MapSection.tsx (197 lines), TableTopBar.tsx (157 lines), useMapManager.ts (91 lines),
+useEncounter.ts (63 lines), useSessionCharacters.ts (79 lines), types.ts, TokenHUD.tsx,
+TableClient.tsx (1351 lines), globals.css, supabase.ts, supabaseAdmin.ts,
+add_fog_of_war.sql, 015_fog_reveals_realtime.sql, 002_rebuild_backend.sql_
 
 ---
 
-## SECTION B — Fog initialization
+## SECTION A — DM fog control buttons
 
-### B9. Initial fog canvas state
+### A1. Search results for fog-button-related terms
 
-When `MapBoardView` first mounts, the fog-draw effect runs with `reveals = []` (the initial state). It draws:
-1. Full-coverage dark rectangle: `ctx.fillRect(0, 0, canvas.width, canvas.height)` with `rgba(2,6,23,0.92)`
-2. No reveals to erase (empty array)
+Every match is in **`MapBoard.tsx`** only. No fog buttons exist in any other file.
 
-**Player sees fully opaque dark fog on first render.** This is correct intent, but there is a visible flash before saved reveals load (see B12).
+| Term | File | What it is | Connected? | Hidden? |
+|---|---|---|---|---|
+| `Fog Brush` | MapBoard.tsx:1084 | Button label | ✓ `onClick={() => setFogToolActive(v => !v)}` | Conditionally — see below |
+| `fogToolActive` | MapBoard.tsx:117 | Boolean state | ✓ Used in pointer handlers | — |
+| `Reveal All` | MapBoard.tsx:1092 | Button label | ✓ `onClick={handleRevealAll}` | Conditionally |
+| `Reset Fog` | MapBoard.tsx:1100 | Button label | ✓ `onClick={handleResetFog}` | Conditionally |
+| `handleRevealAll` | MapBoard.tsx:609 | Function | ✓ Live | No |
+| `handleResetFog` | MapBoard.tsx:632 | Function | ✓ Live | No |
+| `isFogPaintingRef` | MapBoard.tsx:119 | Drag-paint tracking ref | ✓ Used in onMove/onUp | No |
+| `paintFogAt` | MapBoard.tsx:588 | Paints one tile for all players | ✓ Called on pointer events | No |
 
-### B10. First draw function and parameters
+`FogBrush`, `revealAll`, `resetFog`, `fog_brush` — **zero matches** across all of `src/`.
 
-The fog draw effect (lines ~579–601 in MapBoardView.tsx):
-```
-canvas.width  = canvasSize.width
-canvas.height = canvasSize.height
-ctx.clearRect(0, 0, canvas.width, canvas.height)
-ctx.fillStyle = 'rgba(2,6,23,0.92)'
-ctx.fillRect(0, 0, canvas.width, canvas.height)         // fill full canvas dark
-ctx.save()
-ctx.globalCompositeOperation = 'destination-out'
-ctx.fillStyle = 'rgba(0,0,0,1)'
-for (r of reveals):
-  ctx.fillRect(r.tile_x * gridSize, r.tile_y * gridSize, gridSize, gridSize)  // erase revealed tiles
-ctx.restore()
-```
+### A2. DMPanel.tsx — fog section
 
-### B11. fog_reveals load on mount
+No fog-of-war section in any tab. No commented-out fog controls. DMPanel has never had fog controls.
 
-Yes. The `loadReveals()` function runs inside a `useEffect` on `[encounterId, ownerLower, mapId]`:
+### A3. TableTopBar.tsx — fog buttons
+
+TableTopBar contains: RecordingButton, SRD search, Bishop's Shop, Dice Log toggle, VoiceChat, End Session. **No fog buttons were ever in the top bar.** Zero fog references.
+
+### A4. MapSection.tsx — map toolbar
+
+MapSection renders MapBoard or MapBoardView. **MapSection itself has no fog toolbar.** The fog toolbar is rendered *inside* MapBoard as part of that component. MapSection has only a fullscreen toggle button.
+
+### A5. GMSidebar.tsx — fog controls
+
+GMSidebar has Combat, Tools, Session, Admin tabs. **No fog controls in any tab.** The fog controls are on the map canvas only.
+
+### A6. FogOfWarOverlay.tsx
+
+**This file does not exist.** There is no `FogOfWarOverlay.tsx` anywhere in the project. The fog overlay is a plain `<canvas ref={fogCanvasRef}>` rendered inline inside MapBoard and MapBoardView — not a separate component file.
+
+### A7. Current state of fog buttons — definitive answer
+
+The fog buttons **exist and are functional** in `MapBoard.tsx` lines 1053–1103 as an
+`<div className="pointer-events-auto absolute right-3 top-3 z-10">` toolbar.
+
+**The Ruler is always visible. The three fog tools are conditionally hidden:**
 ```tsx
-async function loadReveals() {
-  let query = supabase.from('fog_reveals')
-    .select('tile_x, tile_y')
-    .eq('encounter_id', encounterId)
-    .eq('viewer_wallet', ownerLower)
-  if (mapId) query = query.eq('map_id', mapId)
-  else       query = query.is('map_id', null)
-  const { data } = await query
-  setReveals(rows)        // triggers fog redraw
-  setRevealSet(…)
-}
+{sessionPlayerWallets.length > 0 && (
+  <>
+    <button>🌫 Fog Brush</button>
+    <button>👁 Reveal All</button>
+    <button>🚫 Reset Fog</button>
+  </>
+)}
 ```
+They only render when `sessionPlayerWallets.length > 0` — i.e., when at least one
+player has joined the session. If no players have joined, all three fog tools are invisible.
 
-The query runs after the component mounts and after the image loads (because `canvasSize` depends on `img`).
-
-### B12. Race condition between canvas init and fog_reveals loading
-
-**YES — a race condition exists.** Sequence:
-
-1. Component mounts → `reveals = []` → fog draw effect fires → **full black fog rendered**
-2. `loadReveals()` async call in flight
-3. Supabase responds → `setReveals(rows)` → fog draw effect re-fires → **saved reveals cleared**
-
-Between steps 1 and 3, the player sees fully fogged map. The duration equals Supabase round-trip latency (~100–300 ms). Player sees a brief "flash" of full fog before their saved revealed areas appear.
-
-There is no "invisible until loaded" mechanism. The canvas is always visible from first render.
-
-### B13. GM "View As" reinitialization
-
-When the GM changes `gmViewWallet`, `MapSection` unmounts `MapBoard` and mounts `MapBoardView` with `ownerWallet={povWallet}`. The new `MapBoardView` instance has fresh state: `reveals = []`, `revealedOnceRef = false`. The `loadReveals()` effect runs with the new `ownerLower`, fetching that player's `fog_reveals`. **Correct reload.** No stale cached data is used.
+**Second hiding condition:** the fog tools are only inside `MapBoard` (GM free-view component). When the GM selects "View As" a player, `MapBoardView` is rendered instead — which has **zero fog tools**, not even the Ruler. The GM loses all map tools in "View As" mode.
 
 ---
 
-## SECTION C — Token placement fog reveal
-
-### C14. Function called when token is placed
-
-In `MapBoard.tsx` (GM's browser), after the `tokens.insert()` resolves:
-```tsx
-window.dispatchEvent(new CustomEvent('dnd721-pc-token-placed', {
-  detail: { ownerWallet: payload.ownerWallet, x, y },
-}))
-```
-
-In `MapBoardView.tsx`, a `useEffect` listens for this event and calls `revealAround({ x: px, y: py })`.
-
-**However:** this window event is local to the GM's browser tab. It never reaches the player's browser (different computer). The placement reveal for the player happens via a separate fallback path (see C15, C16).
-
-### C15. Values of tile_x, tile_y at placement time
-
-```tsx
-const x = snap(world.x)   // snap = Math.floor(v/gridSize)*gridSize + gridSize/2
-const y = snap(world.y)
-```
-
-`x` and `y` are confirmed placement coordinates from the DM's click, snapped to the **center** of a tile. They are always valid (never 0,0 unless the DM clicks tile (0,0), which is guarded by the `if (px === 0 && py === 0) return` check in the listener).
-
-The event fires inside the `.then()` of the `tokens.insert()` call, so `x` and `y` are the same values written to the DB. **No async gap issue for the values themselves.**
-
-### C16. Placement reveal function vs movement reveal function
-
-Both call `revealAround(center: Point)` — the **same function**. The difference is HOW the center is obtained:
-
-**Placement path (GM's browser only):**
-```
-MapBoard.tsx places token
-  → dispatches window event dnd721-pc-token-placed with {x, y}
-  → MapBoardView (if present in same browser) catches it
-  → revealAround({ x, y })
-```
-
-**Placement path (player's browser — actual working path):**
-```
-tokens INSERT lands in DB
-  → player's realtime subscription fires loadTokens()
-  → tokens state updated with new PC token
-  → fallback initial-reveal useEffect runs (tokens.length dependency)
-  → finds PC token: myPc.x, myPc.y
-  → revealAround({ x: myPc.x, y: myPc.y })
-```
-
-**Movement path (player's browser):**
-```
-handleMouseUp fires
-  → move_my_token RPC persists new x, y
-  → revealAround({ x: tok.x, y: tok.y })
-```
-
-All paths end in the same `revealAround` function. ✅
-
-### C17. What tile_x, tile_y values produce the "left half cleared" symptom
-
-**tile_x = 0, tile_y = 0** combined with a **large vision radius** produces this symptom.
-
-With `visionFeet = 30` → `visionPx = 300` → radius = 6 tiles: a circle at tile (0,0) with center at pixel (25, 25) would clear tiles (-6,-6) to (6,6). Tiles with negative coordinates are drawn off-canvas (harmless). On-screen the cleared area looks like a partial arc covering the top-left corner.
-
-**With `visionFeet = 120` (GM's erroneously-applied vision — see C18) → `visionPx = 1200` → radius = 24 tiles.** A circle centered at pixel (25, 25) with radius 1200 pixels extends ~1200px to the right and downward, clearing a huge area on the left/top of the map. On a typical 2000×1500 map this clears the entire left portion — **matching the "left half cleared" symptom exactly.**
-
-The old corner-snap function (`Math.round(v / gridSize) * gridSize`, which puts tokens on grid intersections at x=0 for near-origin clicks) would place the token at x=0, not x=25, giving:
-- `cx = Math.floor(0/50) = 0` — same tile, so same bug
-
-The current tile-center snap (`Math.floor(v/gridSize)*gridSize + gridSize/2`) places tokens at (25, 25) for tile (0,0), but the tile index is still (0,0). The snap only affects where the token visually sits on the grid; the tile lookup is the same.
-
-### C18. Vision range at placement time
-
-`visionFeet` is computed in `TableClient.tsx`:
-```tsx
-const visionFeet = useMemo(() => {
-  if (isGm) return 120    // ← BUG: always 120 for GM, including View As mode
-  if (!selectedCharacter) return 30
-  const raw = (selectedCharacter as any)?.vision
-  …
-})
-```
-
-When the GM is in **View As** mode, `isGm = true` → `visionFeet = 120`. This is passed to `MapBoardView`. The player's actual vision (stored in `characters.vision`, defaulting to 30) is **not used**. The GM's `MapBoardView` reveals a 24-tile radius circle instead of the player's 6-tile (30ft) circle. This is the primary cause of the "left half cleared" symptom.
-
----
-
-## SECTION D — Token movement fog reveal
-
-### D19. Function called when token moves
-
-In `MapBoardView.tsx`, `handleMouseUp`:
-```tsx
-const { error: moveErr } = await supabase.rpc('move_my_token', { p_token_id, p_x, p_y })
-if (!moveErr) {
-  void revealAround({ x: tok.x, y: tok.y })  // same function as placement
-}
-```
-
-### D20. tile_x, tile_y at movement time
-
-`tok.x` and `tok.y` are the **new** snapped position after the drag, set by:
-```tsx
-const desired = { x: snapToGrid(world.x), y: snapToGrid(world.y) }
-```
-where `snapToGrid = Math.floor(value/gridSize)*gridSize + gridSize/2`. These are confirmed tile-center coordinates of the new position. **Always correct.**
-
-### D21. Why movement reveals work correctly but placement did not
-
-Movement calls `revealAround` directly in the **player's own `MapBoardView`** with the token's new position. No window events, no async gaps, no wrong vision radius — the player's `visionFeet` is read from their character data.
-
-Placement via the GM uses `visionFeet = 120` (GM's inflated value) when the GM's `MapBoardView` in View As mode calls `revealAround`. **This is why placement reveals too much.**
-
-The player's own movement reveal uses `visionFeet = selectedCharacter.vision` (correctly loaded from the characters table). **This is why movement reveals work correctly.**
-
-### D22. Movement fog accumulation
-
-**Yes — fog reveals accumulate.** The fog draw effect uses the full `reveals` array:
-```tsx
-setReveals(prev => [...prev, ...circleTiles])   // append, never remove
-```
-And the fog draw:
-```tsx
-ctx.fillRect(0, 0, canvas.width, canvas.height)   // full dark
-for (r of reveals):
-  ctx.fillRect(r.tile_x * gridSize, …)             // destination-out each tile
-```
-Every tile ever revealed remains cleared. Moving the token never re-fogs previous areas. ✅
-
-### D23. Write frequency to fog_reveals
-
-Every movement triggers `revealAround`, which immediately upserts all tiles in the vision circle to `fog_reveals`:
-```tsx
-await supabase.from('fog_reveals').upsert(payload, { ignoreDuplicates: true })
-```
-This fires on **every drag-end** (mouseUp). No debounce. With 113 tiles per 30ft circle and many movements, this can generate many DB writes. `ignoreDuplicates: true` prevents duplicate errors but doesn't reduce write volume.
-
----
-
-## SECTION E — Fog reveal calculation
-
-### E24. Complete current reveal calculation
-
-```
-// Inputs: center (world pixels), visionPx (pixels), gridSize (50)
-
-cx      = Math.floor(center.x / gridSize)           // token tile X
-cy      = Math.floor(center.y / gridSize)           // token tile Y
-originX = (cx + 0.5) * gridSize                     // tile center pixel X
-originY = (cy + 0.5) * gridSize                     // tile center pixel Y
-
-rTiles  = Math.ceil(visionPx / gridSize) + 1        // search radius in tiles
-
-// Collect tiles whose center is within visionPx of origin
-for dx = -rTiles to +rTiles:
-  for dy = -rTiles to +rTiles:
-    tx = cx + dx
-    ty = cy + dy
-    px = (tx + 0.5) * gridSize
-    py = (ty + 0.5) * gridSize
-    if sqrt((px-originX)² + (py-originY)²) <= visionPx → add (tx, ty)
-
-// Draw (in fog-draw effect):
-ctx.fillRect(0,0,W,H)                               // dark overlay
-ctx.save()
-ctx.globalCompositeOperation = 'destination-out'
-ctx.fillStyle = 'rgba(0,0,0,1)'
-for each revealed tile:
-  ctx.fillRect(tile_x * gridSize, tile_y * gridSize, gridSize, gridSize)
-ctx.restore()
-```
-
-### E25. Composite operation
-
-`destination-out` — correct. This erases the fog layer where revealed tiles are drawn.
-`ctx.save()` and `ctx.restore()` bracket the composite operation change. **Correctly reset.** ✅
-
-### E26. Fog drawing approach
-
-**Approach (a) modified**: A dark rectangle covers the whole canvas, then individual tile-sized rectangles are cleared with `destination-out`. Reveals are **tile-based rectangles**, not circular arcs. The circle shape is computed at the tile level; drawing is per-tile fillRect.
-
-### E27. save/restore around composite operation
-
-**Yes — ctx.save() and ctx.restore() are used correctly.** Lines 594–600 of MapBoardView.tsx. ✅
-
-### E28. Fog canvas redrawn from scratch on every update
-
-**Yes — always redrawn from scratch.** The entire dark overlay is repainted, then all `reveals` tiles are cleared. Previously revealed tiles are preserved because the `reveals` array accumulates all tiles ever revealed (locally), and is periodically replaced with the full DB snapshot when `loadReveals()` fires. No reveals are ever lost.
-
----
-
-## SECTION F — Multi-player fog isolation
-
-### F29. Per-player isolation
-
-Each player has their own `viewer_wallet` scope in `fog_reveals`. The SELECT query filters by `viewer_wallet = ownerLower`. Each `MapBoardView` instance renders fog for one wallet only. **Correctly isolated.**
-
-### F30. GM Free View
-
-When `gmViewWallet = null`, `MapSection` renders `MapBoard` (the GM version) which has **no fog canvas for the player**. The GM's fog canvas in `MapBoard.tsx` is the GM-overlay tool view (shows revealed vs unrevealed tiles in a green tint/dark grid for the fog brush). It is not a player fog overlay.
-
-The GM sees the full map with the fog tool overlay. When fog tool is inactive (`fogToolActive = false`), the fog canvas in `MapBoard.tsx` is cleared entirely (see lines 501–519: `if (!fogToolActive) return`). So in GM Free View with fog tool off, no fog is drawn at all. ✅
-
-### F31. GM "View As" fog reload
-
-When the GM switches `gmViewWallet` to a player wallet:
-- `MapSection` unmounts `MapBoard` and mounts a fresh `MapBoardView` with `ownerWallet={povWallet}`
-- Fresh component state: `reveals = []`, new `ownerLower = povWallet.toLowerCase()`
-- `loadReveals()` runs immediately with the new wallet — fetches that player's `fog_reveals` from Supabase
-
-No stale data is reused. ✅
-
-### F32. RLS — can Player A see Player B's reveals?
-
-The `fog_reveals_open` policy:
-```sql
-CREATE POLICY "fog_reveals_open" ON fog_reveals
-  USING (true)
-  WITH CHECK (true);
-```
-
-**This is an OPEN policy — any authenticated user can SELECT all rows.** There is no `viewer_wallet = current_wallet()` restriction on SELECT. A player could in theory query another player's fog_reveals if they knew the encounter_id.
-
-However: `MapBoardView` only queries `WHERE viewer_wallet = ownerLower` (their own wallet). The client code does not expose other players' reveals in any UI. A malicious client could query directly, but the UI itself is isolated correctly.
-
----
-
-## SECTION G — Supabase fog_reveals table
-
-### G33. Exact table schema
+## SECTION B — Current fog of war rendering
+
+### B8. Rendering approach
+
+**Two entirely separate implementations — one for GM, one for players.**
+
+**MapBoard (GM free-view — no "view as" selected):**
+- Three stacked canvas elements inside a pan/zoom transform div:
+  1. `mapCanvasRef` — base map image + grid
+  2. `tokenCanvasRef` — all tokens, trigger icons (`pointer-events-none`)
+  3. `fogCanvasRef` — GM fog overview (`pointer-events-none`, always static)
+- `fogCanvasRef` is CSS-class `pointer-events-none absolute left-0 top-0` — **never changed dynamically**
+- When `fogToolActive = false`: canvas is fully `clearRect` (transparent — GM sees full map)
+- When `fogToolActive = true`: tile grid drawn with two colours:
+  - Unrevealed: `rgba(2,6,23,0.6)` (dark)
+  - Revealed by any player: `rgba(74,222,128,0.12)` (subtle green tint)
+- This is a GM **editorial overlay** — not player fog. GM always sees all tokens.
+
+**MapBoardView (player view OR GM "view as"):**
+- Same three-canvas stack in same order
+- `fogCanvasRef` class: `pointer-events-none absolute left-0 top-0 transition-opacity duration-300 ${fogsLoaded ? 'opacity-100' : 'opacity-0'}`
+  - Starts transparent until `loadReveals()` resolves → prevents flash
+- Drawing algorithm:
+  1. `ctx.fillStyle = 'rgba(2,6,23,0.92)'` → fill entire canvas (full dark fog)
+  2. `ctx.save(); ctx.globalCompositeOperation = 'destination-out'` → switch to erase mode
+  3. Loop `reveals` array → `ctx.fillRect(tile_x * gridSize, tile_y * gridSize, gridSize, gridSize)` per tile → punches hole in fog
+  4. `ctx.restore()` → restore composite mode
+- No canvas state or pointer-events changes at any time
+
+### B9. How revealed tiles are stored
+
+One row per tile per viewer wallet per encounter per map in `fog_reveals`:
 
 ```sql
-CREATE TABLE IF NOT EXISTS fog_reveals (
-  encounter_id UUID NOT NULL REFERENCES encounters(id) ON DELETE CASCADE,
-  viewer_wallet TEXT NOT NULL,
-  map_id        UUID REFERENCES maps(id) ON DELETE CASCADE,
-  tile_x        INT NOT NULL,
-  tile_y        INT NOT NULL,
-  CONSTRAINT fog_reveals_unique
-    UNIQUE NULLS NOT DISTINCT (encounter_id, viewer_wallet, map_id, tile_x, tile_y)
-);
+encounter_id  UUID  NOT NULL  -- FK → encounters(id) CASCADE DELETE
+viewer_wallet TEXT  NOT NULL  -- lowercase wallet address of the player
+map_id        UUID            -- NULL for legacy single-map sessions
+tile_x        INT   NOT NULL
+tile_y        INT   NOT NULL
+UNIQUE NULLS NOT DISTINCT (encounter_id, viewer_wallet, map_id, tile_x, tile_y)
 ```
 
-No primary key column. Unique constraint covers all 5 columns (NULLS NOT DISTINCT for `map_id`).
+- Keyed by **`viewer_wallet`** — one record set per player wallet, not per character
+- One row per tile (not a JSONB array)
+- Realtime publication: `ALTER PUBLICATION supabase_realtime ADD TABLE fog_reveals` (migration 015)
+- MapBoardView subscription: `filter: encounter_id=eq.${encounterId}`, calls `loadReveals()` on any change
 
-### G34. Row structure
+### B10. When fog reveal happens
 
-**One row per revealed tile per player per map.** A character with 30ft vision revealing a 6-tile circle writes ~113 rows per position. After many movements, thousands of rows accumulate. `ignoreDuplicates: true` on upsert prevents re-inserting already-revealed tiles.
+| Trigger | Implemented? | Code path |
+|---|---|---|
+| Token placement via InitiativeTracker "📍 Place" | ✓ | Realtime INSERT → `tokenIds` effect → `revealAround` |
+| Token drag-move (player) | ✓ | `commitMoveToTarget` → `revealAround` |
+| Token tap-to-move (mobile) | ✓ | `commitMoveToTarget` → `revealAround` |
+| Arrow-key move | ✓ | `commitMoveToTarget` → `revealAround` |
+| GM clicks Reveal All | ✓ | `handleRevealAll` — inserts all tiles × all player wallets |
+| DM uses Fog Brush | ✓ | `paintFogAt` on pointer events |
+| Player joins and token already on map | ✓ | `tokenIds` effect fires on mount → `revealAround` |
 
-### G35. Write query (reveal operation)
+**All paths are implemented.**
 
-```tsx
-await supabase.from('fog_reveals').upsert(payload, { ignoreDuplicates: true })
-```
-Where `payload` is an array of `{ encounter_id, viewer_wallet, map_id, tile_x, tile_y }` objects. One upsert per `revealAround` call (all circle tiles in one batch).
+### B11. fog_reveals table schema
 
-### G36. Read query (mount)
+See B9. No JSONB array. One row per tile. No `character_id` column.
 
-```tsx
-supabase.from('fog_reveals')
-  .select('tile_x, tile_y')
-  .eq('encounter_id', encounterId)
-  .eq('viewer_wallet', ownerLower)
-  .eq('map_id', mapId)          // or .is('map_id', null) if no mapId
-```
+### B12. Per-player fog state
 
-### G37. Realtime subscription on fog_reveals
+Yes — each player's reveals are stored with their `viewer_wallet`. MapBoardView loads
+only rows for `ownerLower` (the current player's wallet). Players see only what their
+token has revealed.
 
-A Supabase realtime subscription exists in both `MapBoard.tsx` (GM union view) and `MapBoardView.tsx` (player view):
-```tsx
-.on('postgres_changes', { event: '*', table: 'fog_reveals', filter: `encounter_id=eq.${encounterId}` }, callback)
-```
+DM free view: no fog applied (all transparent). GM always sees full map.
 
-**HOWEVER:** There is no migration that adds `fog_reveals` to the `supabase_realtime` publication. Comparing:
-- `session_rolls` was added in `013_session_rolls_realtime.sql` ✅
-- `session_players` was added in `011_character_sheet_columns.sql` ✅
-- `fog_reveals`: **no `ALTER PUBLICATION supabase_realtime ADD TABLE fog_reveals;` found in any migration** ❌
-
-If `fog_reveals` is not in the publication, realtime events never fire for it. The GM's Fog Brush writes to `fog_reveals` but the player's subscription callback never fires — the player's fog does not update without a page refresh.
-
-### G38. RLS policy gaps
-
-**Open policy — all authenticated users can read/write:**
-```sql
-CREATE POLICY "fog_reveals_open" ON fog_reveals
-  USING (true)
-  WITH CHECK (true);
-```
-
-- Players can INSERT their own reveals ✅ (and other players' reveals ⚠)
-- Players can SELECT their own reveals ✅ (and other players' reveals ⚠)
-- DM can INSERT/UPDATE reveals for any character ✅
-- No silent write failures ✅ (policy is fully open)
-- Security gap: no wallet enforcement on write — a player could theoretically write reveals for a different player's wallet
-
-In practice, the open policy works for a trusted-group D&D app. But if tighter security is needed, `WITH CHECK (viewer_wallet = current_wallet())` would enforce ownership.
+DM "View As" mode: renders MapBoardView with `ownerWallet = selectedPlayerWallet` —
+shows exactly that player's fog state. Correct behaviour.
 
 ---
 
-## Cross-cutting observations
+## SECTION C — Player token movement after Reveal All
 
-### How the "left half cleared" symptom is produced
+### C13. What Reveal All actually does
 
-The symptom is caused by **Bug 1** (GM's `visionFeet = 120` in View As mode):
+`handleRevealAll` (MapBoard.tsx lines 609–629):
+1. Checks `!canvasSize || sessionPlayerWallets.length === 0` → early return if canvas not ready or no players
+2. Computes all tiles from canvasSize
+3. Builds `allRows` array: all tiles × all `sessionPlayerWallets`
+4. Sets `fogRevealSet` to all tiles (updates GM canvas)
+5. Batched upserts to `fog_reveals` in groups of 500
 
-1. GM switches to View As (Player A)
-2. GM places Player A's token near tile (1, 1)
-3. GM's `MapBoardView` receives `dnd721-pc-token-placed` event
-4. `visionFeet = 120` (isGm=true) → `visionPx = 1200` → radius = 24 tiles
-5. `revealAround` collects ~1800 tiles in a 24-tile circle
-6. Upserts to `fog_reveals` with Player A's wallet
-7. Player A's realtime subscription (if working) fires `loadReveals()` → shows huge reveal
-8. Or: Player A's fallback via `tokens.length` reveals with their own `visionFeet=30` — BUT the GM's previous upsert already wrote the large circle to the DB, so `loadReveals()` returns all of it
+**Does NOT:** set any flag, change pointer-events, write to tokens/encounters/sessions, set loading state.
 
-For a map with gridSize=50 and a 2000px-wide map (40 tiles), a 24-tile radius circle at tile (1,1) would reach tile 25 to the right — covering most of the map. This looks exactly like "the left half of the map cleared."
+### C14. Movement checks in MapBoardView
 
-### Why movement works correctly
+`canMoveToken(t)` checks only:
+1. `canInteract` — session status must be `'active'`
+2. `ownerLower` must be set
+3. `t.owner_wallet` must equal `ownerLower`
+4. If initiative active: only active player's wallet can move
+5. If in combat and `remainingMovePx <= 0`: blocked
 
-Player moves their own token → `revealAround` runs in the player's own `MapBoardView` with `visionFeet` = player's actual character vision (e.g., 30) → 6-tile radius circle → symmetric reveal around token. No inflated GM vision involved.
+**Zero fog checks.** `fog_reveals` is never read by any movement handler.
 
-### Fallback placement reveal works cross-browser
+### C15. mapMode / mapState / fogMode / brushMode
 
-Even though the window event doesn't cross browsers, the `tokens.length` effect in the player's `MapBoardView` IS triggered by the DB realtime event when the GM places a token. This calls `revealAround` in the player's browser with the correct (small) vision radius. The placement reveal chain for players on separate browsers works correctly via this path.
+**None of these variables exist.** There is no `mapMode`, `mapState`, `isRevealing`, `isBrushing`, `fogMode`, or `brushMode` in any file. The only fog-relevant state is `fogToolActive` (boolean) in MapBoard. This is exclusively for the GM brush overlay — it has no effect on MapBoardView or player interaction.
+
+### C16. useMapManager stuck state
+
+`useMapManager` handles CRUD on the `maps` table only. Zero fog state. Cannot get stuck.
+
+### C17. Pointer-events after Reveal All
+
+**Impossible.** The `fogCanvasRef` canvas has Tailwind class `pointer-events-none` applied at render time. No code anywhere modifies `fogCanvasRef.current.style.pointerEvents`. This is never changed dynamically by any fog operation.
+
+### C18. Z-index after Reveal All
+
+No z-index changes occur during fog operations. The fog canvas has no explicit z-index class — it relies on DOM stacking order (map → tokens → fog, top to bottom in z-order). This does not change.
+
+### C19. Reveal All and rows checked by movement
+
+Movement checks read from: `sessions` (status), `encounters` (active_entry_id), `characters` (action_state). Reveal All writes only to `fog_reveals`. **No intersection.**
+
+### C20. Reveal All async / loading state
+
+`handleRevealAll` is async, no `setLoading`. No UI freeze. Does not set any state that affects movement. Batch inserts run in the background silently.
+
+**Root cause of "movement blocked after Reveal All":** Cannot be confirmed from source code. The fog system has no mechanism to block movement. The actual block likely comes from: session status not `'active'`, initiative turn restriction, or exhausted movement budget — none of which are fog-related.
+
+---
+
+## SECTION D — Fog Brush tool
+
+### D21–D23. Fog Brush implementation status
+
+**Fully implemented.** All brush functionality is in MapBoard.tsx:
+- Toggle: `fogToolActive` state → button at lines 1072–1085
+- Paint: `paintFogAt(world)` called on pointerdown + pointermove while `isFogPaintingRef.current = true`
+- DM-only: MapBoardView (player component) has no `fogToolActive` state
+- DB persistence: upserts one row per tile per `sessionPlayerWallets` entry
+- Realtime sync: players receive `postgres_changes` event → `loadReveals()` → canvas redraws within ~1–2s
+- Escape key cancels: `setFogToolActive(false); isFogPaintingRef.current = false`
+- No undo for individual brush strokes (Reset Fog nukes everything)
+
+---
+
+## SECTION E — Other fog observations
+
+### E24. Fog persistence between sessions
+
+Fog is scoped to `encounter_id`. `useEncounter` does SELECT-then-INSERT — if an encounter already exists for the session, it is reused. Result: fog persists across session resumptions. New session → new encounter → fresh fog. Resumed session → reused encounter → fog carries over. This is by design.
+
+### E25. Token placement 0,0 bug
+
+**Fixed.** Guard at MapBoardView line 503: `if (px === 0 && py === 0) return`. The `snapToGrid` function always produces `Math.floor(v / gridSize) * gridSize + gridSize / 2` (minimum value = `gridSize/2` = 25 for gridSize=50). No placed token will have px=0,py=0.
+
+### E26. Fog reveal accumulation
+
+**Correct.** `revealAround` appends new tiles to `reveals` state (only new tiles, via functional updater checking the existing set). Old revealed tiles are preserved indefinitely. Fog accumulates.
+
+### E27. Realtime sync
+
+**Working.** Migration 015 adds `fog_reveals` to realtime publication. All MapBoardView instances subscribe and `loadReveals()` on any event for the encounter.
+
+### E28. GM "View As" fog correctness
+
+Shows correct player fog. However GM loses all fog tools in this mode (MapBoardView has none).
+
+### E29. Fog reset per session
+
+Fog resets when a new encounter is created. Fog carries over when encounter is reused. Encounter is reused by default via `useEncounter`.
+
+### E30. Console errors and debug logs
+
+Four `console.log` debug statements remain in MapBoardView production code (lines 419, 446, 482, 505). These fire on every token movement and produce verbose output. No canvas context errors found.
+
+---
+
+## Summary table
+
+| Claim | Reality |
+|---|---|
+| FogOfWarOverlay.tsx exists | FALSE — file does not exist |
+| Fog buttons are missing | PARTIAL — they exist but hidden when no players or when GM is in "View As" mode |
+| Fog buttons were deleted in a refactor | FALSE — always been in MapBoard.tsx |
+| Fog buttons are in GMSidebar | FALSE — in MapBoard, above the map canvas |
+| Fog buttons are in TableTopBar | FALSE — never were |
+| Reveal All blocks token movement | CANNOT CONFIRM — no fog code path blocks movement |
+| Fog canvas intercepts clicks | FALSE — always pointer-events-none |
+| Fog brush is unimplemented | FALSE — fully implemented |
+| 0,0 origin bug | FIXED — guard + tile-center snap both in place |
+| Realtime fog sync works | TRUE — migration 015, subscription in MapBoardView |
+| Per-player fog state | TRUE — keyed by viewer_wallet |
+| DM free view sees full map | TRUE — fog canvas empty when fogToolActive=false |
