@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useAccount } from 'wagmi'
 import { supabase } from '@/lib/supabase'
+import MonstersTab from './MonstersTab'
 
 type HomebrewTab = 'monsters' | 'weapons' | 'armor' | 'items' | 'subclasses'
 
@@ -89,116 +90,6 @@ function SelectField({ label, value, onChange, options }: {
         ))}
       </select>
     </label>
-  )
-}
-
-// ─── MONSTERS TAB ─────────────────────────────────────────────────────────────
-
-type DbMonster = {
-  id: string
-  name: string
-  cr: number | null
-  armor_class: number | null
-  hit_points: number | null
-  owner_wallet: string | null
-}
-
-function MonstersTab({ wallet }: { wallet: string | null }) {
-  const [monsters, setMonsters] = useState<DbMonster[]>([])
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const [name, setName] = useState('')
-  const [cr, setCr] = useState('0')
-  const [hp, setHp] = useState('')
-  const [ac, setAc] = useState('')
-
-  useEffect(() => {
-    supabase
-      .from('monsters')
-      .select('id, name, cr, armor_class, hit_points, owner_wallet')
-      .order('name')
-      .then(({ data, error }) => {
-        setLoading(false)
-        if (!error) setMonsters((data ?? []) as DbMonster[])
-      })
-  }, [])
-
-  async function handleSave() {
-    if (!name.trim() || !wallet) return
-    setSaving(true)
-    setError(null)
-    const { data, error } = await supabase
-      .from('monsters')
-      .insert({
-        name: name.trim(),
-        cr: parseFloat(cr) || 0,
-        hit_points: hp ? parseInt(hp, 10) : null,
-        armor_class: ac ? parseInt(ac, 10) : null,
-        owner_wallet: wallet.toLowerCase(),
-      })
-      .select('id, name, cr, armor_class, hit_points, owner_wallet')
-      .limit(1)
-      .maybeSingle()
-    setSaving(false)
-    if (error) { setError(error.message); return }
-    setMonsters((prev) => [data as DbMonster, ...prev])
-    setName(''); setCr('0'); setHp(''); setAc('')
-  }
-
-  return (
-    <div className="space-y-4">
-      {wallet ? (
-        <SectionCard>
-          <h3 className="mb-3 text-sm font-semibold text-slate-200">Create Monster</h3>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div className="col-span-2 sm:col-span-2">
-              <InputField label="Name *" value={name} onChange={setName} placeholder="e.g. Shadow Drake" />
-            </div>
-            <InputField label="CR" value={cr} onChange={setCr} type="number" step="0.25" />
-            <InputField label="HP" value={hp} onChange={setHp} type="number" placeholder="optional" />
-            <InputField label="AC" value={ac} onChange={setAc} type="number" placeholder="optional" />
-          </div>
-          {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving || !name.trim()}
-            className="mt-3 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-50"
-          >
-            {saving ? 'Saving…' : 'Save Monster'}
-          </button>
-        </SectionCard>
-      ) : (
-        <SectionCard>
-          <p className="text-sm text-amber-400">Connect your wallet to create homebrew content.</p>
-        </SectionCard>
-      )}
-
-      <SectionCard>
-        <h3 className="mb-3 text-sm font-semibold text-slate-200">
-          Community Monsters <span className="text-slate-500">({monsters.length})</span>
-        </h3>
-        {loading ? (
-          <p className="text-xs text-slate-500">Loading…</p>
-        ) : (
-          <div className="space-y-1.5">
-            {monsters.map((m) => (
-              <div key={m.id} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm">
-                <span className="font-medium text-slate-200">{m.name}</span>
-                <div className="flex items-center gap-3 text-xs text-slate-400">
-                  {m.cr != null && <span>CR {m.cr}</span>}
-                  {m.armor_class != null && <span>AC {m.armor_class}</span>}
-                  {m.hit_points != null && <span>HP {m.hit_points}</span>}
-                </div>
-              </div>
-            ))}
-            {monsters.length === 0 && <p className="text-xs text-slate-500">No homebrew monsters yet.</p>}
-          </div>
-        )}
-      </SectionCard>
-    </div>
   )
 }
 
