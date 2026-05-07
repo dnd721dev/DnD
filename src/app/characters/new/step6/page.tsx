@@ -8,7 +8,7 @@ import type { CharacterDraft } from '../../../../types/characterDraft'
 import { RACE_LIST, getRace, type RaceKey } from '@/lib/races'
 import { BACKGROUNDS, type BackgroundKey } from '@/lib/backgrounds'
 import { proficiencyForLevel, calcAC } from '@/lib/rules'
-import { getSpellSlotsForClass, getSlotsForCasterType, getWarlockPactRow } from '@/lib/spellcastingProgression'
+import { getSpellSlotsForClass, getSlotsForCasterType, getWarlockPactRow, getDomainSpells } from '@/lib/spellcastingProgression'
 import { RACES } from '@/lib/races'
 import { supabase } from '@/lib/supabase'
 
@@ -439,14 +439,47 @@ export default function NewCharacterStep6Page() {
         // inventory
         inventory_items,
 
-        // spells (merge racial innate spells into known list)
+        // spells (merge racial innate spells + domain/oath/circle spells into known list)
         spells_known: (() => {
           const raceDataForSpells = (RACES as any)[raceKey as string]
           const innateAuto: string[] = (raceDataForSpells?.innateSpells?.auto ?? []).map((e: any) => e.spellName)
           const innateChoice: string[] = draft.racialCantripChoice ? [draft.racialCantripChoice] : []
-          return [...new Set([...(draft.knownSpells ?? []), ...innateAuto, ...innateChoice])]
+          // Domain/oath/circle spells granted by subclass (always known)
+          const maxSlotLevel = (() => {
+            if (classKey === 'warlock') {
+              const pact = getWarlockPactRow(level)
+              return pact?.pactSlotLevel ?? 1
+            }
+            const slots = SPELLCASTING_CLASSES.includes(classKey)
+              ? getSpellSlotsForClass(classKey as any, level)
+              : {}
+            const keys = Object.keys(slots).map(Number).filter(k => slots[k] > 0)
+            // Half-casters at level 1 have no slots yet but can know 1st-level spells
+            if (keys.length === 0 && (classKey === 'paladin' || classKey === 'ranger')) return 1
+            return keys.length > 0 ? Math.max(...keys) : 0
+          })()
+          const domainSpellNames = getDomainSpells(subclassKey, maxSlotLevel)
+          return [...new Set([...(draft.knownSpells ?? []), ...innateAuto, ...innateChoice, ...domainSpellNames])]
         })(),
-        spells_prepared: draft.preparedSpells ?? [],
+        spells_prepared: (() => {
+          const raceDataForSpells = (RACES as any)[raceKey as string]
+          const innateAuto: string[] = (raceDataForSpells?.innateSpells?.auto ?? []).map((e: any) => e.spellName)
+          const innateChoice: string[] = draft.racialCantripChoice ? [draft.racialCantripChoice] : []
+          const maxSlotLevel = (() => {
+            if (classKey === 'warlock') {
+              const pact = getWarlockPactRow(level)
+              return pact?.pactSlotLevel ?? 1
+            }
+            const slots = SPELLCASTING_CLASSES.includes(classKey)
+              ? getSpellSlotsForClass(classKey as any, level)
+              : {}
+            const keys = Object.keys(slots).map(Number).filter(k => slots[k] > 0)
+            if (keys.length === 0 && (classKey === 'paladin' || classKey === 'ranger')) return 1
+            return keys.length > 0 ? Math.max(...keys) : 0
+          })()
+          const domainSpellNames = getDomainSpells(subclassKey, maxSlotLevel)
+          return [...new Set([...(draft.preparedSpells ?? []), ...innateAuto, ...innateChoice, ...domainSpellNames])]
+        })(),
 
         // ✅ spellcasting stats — gates isMageUser on the character sheet
         spellcasting_ability: castingAbilityKey,

@@ -60,6 +60,10 @@ export function SpellsPanel({
     }
   }, [c.main_job])
 
+  // Prepared casters use ability mod + level formula for their spell cap.
+  // Ranger is intentionally excluded — Rangers are known-spell casters (they always
+  // have their chosen spells "prepared"). Adding Ranger here would incorrectly imply
+  // they swap spells on a rest. See spellcaster_bugs.md BUG 10.
   const isPreparedCaster = useMemo(() => {
     const job = String(c.main_job ?? '').toLowerCase().trim()
     return job === 'cleric' || job === 'druid' || job === 'wizard' || job === 'paladin'
@@ -288,6 +292,34 @@ export function SpellsPanel({
         {filteredSpells.length === 0 && (
           <p className="text-[11px] text-slate-500">No spells match your filters.</p>
         )}
+
+        {/* BUG 11: If a spell name can no longer be resolved from SRD_SPELLS (e.g. after
+            a name change), show a fallback chip so the player can see and remove it. */}
+        {[...knownList, ...preparedList]
+          .filter((n, i, arr) => arr.indexOf(n) === i) // dedupe
+          .filter(n => !SRD_SPELLS.some(s => s.name === n))
+          .map(n => (
+            <div key={`unknown-${n}`} className="mb-1 rounded-md bg-red-900/30 border border-red-700/40 px-2 py-1 text-left">
+              <div className="flex items-center justify-between text-[11px]">
+                <div>
+                  <span className="font-semibold text-red-300">Unknown spell: {n}</span>
+                  <div className="text-[10px] text-red-400/70">Not found in SRD data — may have been renamed or removed.</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => persistSpells(
+                    knownList.filter(x => x !== n),
+                    preparedList.filter(x => x !== n),
+                  )}
+                  disabled={saving}
+                  className="ml-2 rounded px-1.5 py-0.5 text-[10px] bg-red-900/50 text-red-300 hover:bg-red-900/70 disabled:opacity-50"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))
+        }
 
         {filteredSpells.map((spell) => {
           const isKnown = knownSpellNames.has(spell.name)
