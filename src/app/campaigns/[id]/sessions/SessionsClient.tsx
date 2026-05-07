@@ -153,7 +153,7 @@ export default function SessionsClient({ campaignId }: Props) {
         description: description.trim() || null,
         scheduled_start,
         duration_minutes: parsedDuration,
-        status: 'planned',
+        status: 'setup',
         // Use the connected GM wallet (lowercased) to satisfy the FK constraint.
         gm_wallet: gmWallet,
         session_type: sessionType,

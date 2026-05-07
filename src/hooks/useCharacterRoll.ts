@@ -111,7 +111,7 @@ export function useCharacterRoll(params: {
         .from('session_players')
         .select('session_id, sessions!inner(status)')
         .eq('character_id', cid)
-        .eq('sessions.status', 'in_progress')
+        .eq('sessions.status', 'active')
         .limit(1)
         .maybeSingle()
 

@@ -40,7 +40,7 @@ export default function SponsorPage() {
     supabase
       .from('sessions')
       .select('id, title, scheduled_start')
-      .eq('status', 'planned')
+      .eq('status', 'setup')
       .order('scheduled_start', { ascending: true })
       .then(({ data }) => setSessions((data ?? []) as SessionOption[]))
   }, [])
