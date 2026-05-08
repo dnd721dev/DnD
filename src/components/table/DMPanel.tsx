@@ -74,6 +74,21 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
   // Load monster stat data whenever the selected token changes
   useEffect(() => {
     async function loadMonster() {
+      // ── Homebrew token: has homebrew_monster_id set ────────────────────────
+      // Check this first — homebrew tokens have monster_id = null so the
+      // monster_id branches below would bail early without this check.
+      if (selectedToken?.homebrew_monster_id) {
+        const { data, error } = await supabase
+          .from('homebrew_monsters')
+          .select('*')
+          .eq('id', selectedToken.homebrew_monster_id)
+          .limit(1)
+          .maybeSingle()
+        if (error) console.error('[DMPanel] Error loading homebrew monster', error)
+        setMonsterData(data ?? null)
+        return
+      }
+
       if (selectedToken?.type !== 'monster' || !selectedToken?.monster_id) {
         setMonsterData(null)
         return
@@ -94,7 +109,7 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
         return
       }
 
-      // Custom monster stored in Supabase monsters table
+      // Custom monster stored in Supabase monsters table (old community system)
       if (monsterId.startsWith('db:')) {
         const dbId = monsterId.replace('db:', '')
         const { data, error } = await supabase

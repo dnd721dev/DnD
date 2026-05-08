@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionStatus } from '@/lib/sessionGates';
 import { supabase } from '@/lib/supabase';
-import MonsterLibrary from '@/components/table/MonsterLibrary';
+import MonsterLibrary, { type SpawnMonsterParams } from '@/components/table/MonsterLibrary';
 import InitiativeTracker from '@/components/table/InitiativeTracker';
 import DMPanel from '@/components/table/DMPanel';
 import { HandoutsPanel } from '@/components/table/HandoutsPanel';
@@ -18,7 +18,7 @@ type GMSidebarProps = {
   address?: string | null;
   activeMapId?: string | null;
   onRoll: (entry: any) => void;
-  spawnMonsterToken: (monster: { id: string; name: string }) => void | Promise<void>;
+  spawnMonsterToken: (monster: SpawnMonsterParams) => void | Promise<void>;
   sessionType?: 'set_level' | 'caya' | null;
   sessionStatus?: SessionStatus | string | null;
   xpAwardedAlready?: number | null;

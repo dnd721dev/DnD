@@ -9,6 +9,7 @@ import GMSidebar from '@/components/table/GMSidebar'
 import { PlayerSidebar } from '@/components/table/PlayerSidebar'
 import { MapBuilder } from '@/components/table/MapBuilder'
 import { MONSTERS } from '@/lib/monsters'
+import type { SpawnMonsterParams } from '@/components/table/MonsterLibrary'
 
 import type { DiceEntry, ExternalRoll } from '@/components/table/tableclient/types'
 import { TableTopBar } from '@/components/table/tableclient/components/TableTopBar'
@@ -802,7 +803,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
   }
 
   // ---------- Monster spawning helper ----------
-  async function spawnMonsterToken(monster: { id: string; name: string }) {
+  async function spawnMonsterToken(monster: SpawnMonsterParams) {
     if (!encounterId) return
 
     // Spread monster spawns so multiple tokens don't stack at the same pixel.
@@ -819,9 +820,16 @@ export default function TableClient({ sessionId }: TableClientProps) {
     let baseHp: number | null = null
     let baseAc: number | null = null
     let dexScore: number | null = null
+    // For homebrew monsters, the DB row UUID (used for the FK column)
+    const homebrewDbId = monster.homebrewMonsterDbId ?? null
 
     try {
-      if (monster.id.startsWith('srd:')) {
+      if (homebrewDbId) {
+        // ── Homebrew monster: data passed inline, no extra fetch needed ──────
+        baseHp = monster.hp ?? null
+        baseAc = monster.ac ?? null
+        dexScore = monster.dexScore ?? null
+      } else if (monster.id.startsWith('srd:')) {
         const key = monster.id.replace('srd:', '')
         const found = (MONSTERS as any[]).find((m: any) => {
           const nameMatch = m.name && typeof m.name === 'string' && m.name.toLowerCase() === monster.name.toLowerCase()
@@ -860,14 +868,14 @@ export default function TableClient({ sessionId }: TableClientProps) {
     const dexMod = dexScore != null ? abilityMod(dexScore) : 0
     const initTotal = d20 + dexMod
 
-    // 1) Spawn the token (associate with current active map so it stays on this map)
-    const { data: tokenRows, error } = await supabase
-      .from('tokens')
-      .insert({
+    // Build the token insert payload.
+    // homebrew tokens: monster_id = null, homebrew_monster_id = UUID
+    // SRD / community tokens: monster_id = 'srd:<id>' or 'db:<id>', homebrew_monster_id = null
+    const tokenPayload: Record<string, unknown> = {
       encounter_id: encounterId,
       map_id: currentMapId ?? null,
       type: 'monster',
-      monster_id: monster.id,
+      monster_id: homebrewDbId ? null : monster.id,
       name: monster.name,
       label: monster.name,
       x: startX,
@@ -875,7 +883,15 @@ export default function TableClient({ sessionId }: TableClientProps) {
       hp: baseHp,
       current_hp: baseHp,
       ac: baseAc,
-      })
+    }
+    if (homebrewDbId) {
+      tokenPayload.homebrew_monster_id = homebrewDbId
+    }
+
+    // 1) Spawn the token (associate with current active map so it stays on this map)
+    const { data: tokenRows, error } = await supabase
+      .from('tokens')
+      .insert(tokenPayload)
       .select('id, name, hp, current_hp')
 
     const token = (tokenRows && tokenRows[0]) as any | undefined
