@@ -307,7 +307,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
     async function loadTokens() {
       let query = supabase
         .from('tokens')
-        .select('id, label, x, y, color, hp, ac, current_hp, type, monster_id, homebrew_monster_id, token_image_url, character_id, conditions, resistances, immunities')
+        .select('*')
         .eq('encounter_id', encounterId);
 
       // GM free view: show tokens for current map + tokens with no map (PC tokens)
@@ -684,6 +684,13 @@ const MapBoard: React.FC<MapBoardProps> = ({
 
   /** Pointer events — handles mouse, touch, and stylus uniformly */
   const onDown = (e: React.PointerEvent) => {
+    // If the event originated inside a button / input / select (e.g. the TokenHUD),
+    // do NOT capture the pointer — pointer capture redirects pointerup to this
+    // container, which prevents the interactive element from receiving its matching
+    // pointerup and therefore its click event never fires.
+    const target = e.target as HTMLElement;
+    if (target.closest('button, input, select')) return;
+
     // Capture so pointermove / pointerup fire even when pointer leaves the element
     e.currentTarget.setPointerCapture(e.pointerId);
 
@@ -1013,7 +1020,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
       // Re-fetch tokens so local state is consistent with DB
       const { data: refetchedTokens } = await supabase
         .from('tokens')
-        .select('id, label, x, y, color, hp, ac, current_hp, type, monster_id, homebrew_monster_id, token_image_url, character_id')
+        .select('*')
         .eq('encounter_id', encounterId);
       if (refetchedTokens) {
         setTokens(refetchedTokens.map((t: any) => ({

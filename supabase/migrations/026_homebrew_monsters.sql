@@ -72,7 +72,13 @@ CREATE INDEX IF NOT EXISTS homebrew_monsters_published_idx  ON homebrew_monsters
 
 ALTER TABLE public.homebrew_monsters ENABLE ROW LEVEL SECURITY;
 
--- Anyone can read published monsters
+-- Drop policies before (re)creating so the migration is idempotent
+DROP POLICY IF EXISTS "homebrew_monsters_select_published" ON homebrew_monsters;
+DROP POLICY IF EXISTS "homebrew_monsters_insert_own"       ON homebrew_monsters;
+DROP POLICY IF EXISTS "homebrew_monsters_update_own"       ON homebrew_monsters;
+DROP POLICY IF EXISTS "homebrew_monsters_delete_own"       ON homebrew_monsters;
+
+-- Anyone can read published monsters (or their own drafts)
 CREATE POLICY "homebrew_monsters_select_published"
   ON homebrew_monsters FOR SELECT
   USING (is_published = true OR creator_wallet = lower(
