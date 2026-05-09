@@ -18,6 +18,14 @@ export type DerivedResource = {
   note?: string
 }
 
+/** Minimal homebrew feature row stored in homebrew_subclasses.features JSONB */
+export type HomebrewFeatureRow = {
+  level: string | number
+  name: string
+  description?: string
+  effects?: import('@/lib/subclassRules').SubclassEffect[]
+}
+
 export type CharacterLikeForSubclass = {
   /** Preferred field name in CharacterSheetData */
   subclass?: string | null
@@ -25,6 +33,9 @@ export type CharacterLikeForSubclass = {
   subclass_key?: string | null
   level?: number | null
   armor_key?: string | null
+  /** Homebrew subclass features injected at runtime by the character sheet page.
+   *  Only present when subclass starts with 'hb_sc_'. */
+  _homebrew_subclass_features?: HomebrewFeatureRow[] | null
 }
 
 export type DerivedLike = {
@@ -58,7 +69,25 @@ export function applySubclassToDerived(c: CharacterLikeForSubclass, abilities: A
   if (!subclass) return d
 
   const classLevel = Math.max(1, Number(c.level ?? 1))
-  const features = getSubclassFeaturesForLevel(subclass, classLevel)
+
+  // Homebrew subclasses are identified by the 'hb_sc_' prefix.
+  // Their features are injected by the character sheet page at load time
+  // rather than looked up from the static SUBCLASS_RULES table.
+  let features: ReturnType<typeof getSubclassFeaturesForLevel>
+  if (subclass.startsWith('hb_sc_') && c._homebrew_subclass_features?.length) {
+    features = c._homebrew_subclass_features
+      .filter((f) => Number(f.level) <= classLevel && (f.effects?.length ?? 0) > 0)
+      .map((f) => ({
+        level:   Number(f.level) || 0,
+        id:      `hb_${String(f.name).replace(/\s+/g, '_').toLowerCase()}`,
+        name:    f.name,
+        summary: f.description ?? '',
+        effects: (f.effects ?? []) as any,
+        source:  'DND721' as const,
+      }))
+  } else {
+    features = getSubclassFeaturesForLevel(subclass, classLevel)
+  }
 
   d.flags = d.flags ?? {}
   d.notes = d.notes ?? []

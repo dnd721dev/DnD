@@ -85,6 +85,7 @@ export default function CharacterSheetPage() {
 
   const [c, setC] = useState<CharacterSheetData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [homebrewSubclassFeatures, setHomebrewSubclassFeatures] = useState<any[] | null>(null)
 
   // ✅ Attack crit tracking
   const [lastAttackWasCrit, setLastAttackWasCrit] = useState(false)
@@ -114,6 +115,23 @@ export default function CharacterSheetPage() {
       setResourceValues(typeof rs === 'object' && rs ? rs : {})
       setActionState(typeof as === 'object' && as ? as : {})
 
+      // If this character has a homebrew subclass, load its features so the
+      // effect system (applySubclassToDerived) can apply them.
+      const subclassKey = String((data as any)?.subclass ?? (data as any)?.subclass_key ?? '')
+      if (subclassKey.startsWith('hb_sc_')) {
+        const hbId = subclassKey.replace('hb_sc_', '')
+        try {
+          const { data: hbData } = await supabase
+            .from('homebrew_subclasses')
+            .select('features')
+            .eq('id', hbId)
+            .maybeSingle()
+          setHomebrewSubclassFeatures((hbData as any)?.features ?? null)
+        } catch {
+          /* non-fatal — effects just won't apply */
+        }
+      }
+
       setLoading(false)
     })()
   }, [id])
@@ -138,8 +156,12 @@ export default function CharacterSheetPage() {
 
   const d = useMemo(() => {
     if (!c) return null
-    return deriveStats(c, abilities)
-  }, [c, abilities])
+    // Attach homebrew subclass features so applySubclassToDerived can use them
+    const cWithHb = homebrewSubclassFeatures
+      ? { ...c, _homebrew_subclass_features: homebrewSubclassFeatures }
+      : c
+    return deriveStats(cWithHb as any, abilities)
+  }, [c, abilities, homebrewSubclassFeatures])
 
   // Ensure resourceValues contains keys for derived resources (and clamp)
   useEffect(() => {
