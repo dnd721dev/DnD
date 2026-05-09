@@ -14,7 +14,8 @@ const CLASS_PROFS: Record<
     armor: ('light' | 'medium' | 'heavy' | 'shields' | 'all' | 'none')[]
   }
 > = {
-  barbarian: { weapons: ['simple', 'martial'], armor: ['light', 'medium', 'shields'] },
+  artificer: { weapons: ['simple'], armor: ['light', 'medium', 'shields'] },
+  barbarian: { weapons: ['simple', 'martial'], armor: ['light', 'medium', 'heavy', 'shields'] },
   bard: {
     weapons: ['simple'],
     extraWeaponKeys: ['rapier', 'longsword', 'shortsword', 'hand_crossbow'],

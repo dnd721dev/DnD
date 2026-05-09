@@ -64,7 +64,8 @@ function buildLibOptions(classKey = 'fighter'): LibOption[] {
   for (const a of valuesOf<Armor>(ARMORS as unknown as Record<string, Armor>)) {
     if (!a?.key || !a?.name) continue
     if (String(a.category).toLowerCase() === 'shield') continue
-    if (!classCanUseArmor(classKey, a)) continue
+    // No class filter here — any armor can be added to inventory.
+    // Class proficiency is only enforced at the equip step (equipped armor dropdown).
     out.push({ key: norm(a.key), name: a.name, kind: 'armor' })
   }
   for (const g of valuesOf<GearItem>(GEAR as unknown as Record<string, GearItem>)) {

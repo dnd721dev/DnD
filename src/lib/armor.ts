@@ -126,17 +126,7 @@ export const ARMORS: Record<string, Armor> = {
   },
 
   // ===== HEAVY ARMOR =====
-  ringMail: {
-    key: 'ringMail',
-    name: 'Ring Mail',
-    category: 'heavy',
-    baseAc: 14,
-    dexCap: 0, // no Dex bonus
-    strengthRequirement: null,
-    disadvantageOnStealth: true,
-    weight: 40,
-    costGp: '30',
-  },
+  // Ring Mail was removed in the 2024 PHB; Chain Mail (AC 16) is now the entry-level heavy armor.
   chainMail: {
     key: 'chainMail',
     name: 'Chain Mail',
