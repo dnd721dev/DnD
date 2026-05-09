@@ -12,7 +12,8 @@
       "Bash(xargs grep *)",
       "Bash(node -e ' *)",
       "Bash(echo \"Exit code: $?\")",
-      "Bash(echo \"Exit: $?\")"
+      "Bash(echo \"Exit: $?\")",
+      "mcp__Claude_in_Chrome__navigate"
     ]
   }
 }

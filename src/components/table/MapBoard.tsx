@@ -18,6 +18,7 @@ type Token = {
   ac?: number | null;
   type?: string | null;
   monster_id?: string | null;
+  homebrew_monster_id?: string | null;
   token_image_url?: string | null;
   character_id?: string | null;
 };
@@ -306,7 +307,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
     async function loadTokens() {
       let query = supabase
         .from('tokens')
-        .select('id, label, x, y, color, hp, ac, current_hp, type, monster_id, token_image_url, character_id, conditions, resistances, immunities')
+        .select('id, label, x, y, color, hp, ac, current_hp, type, monster_id, homebrew_monster_id, token_image_url, character_id, conditions, resistances, immunities')
         .eq('encounter_id', encounterId);
 
       // GM free view: show tokens for current map + tokens with no map (PC tokens)
@@ -331,6 +332,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
           current_hp: t.current_hp,
           type: t.type,
           monster_id: t.monster_id,
+          homebrew_monster_id: t.homebrew_monster_id ?? null,
           token_image_url: t.token_image_url,
           character_id: t.character_id ?? null,
         }))
@@ -366,6 +368,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
               ...prev,
               { id: t.id, label: t.label, x: t.x, y: t.y, color: t.color,
                 hp: t.hp, ac: t.ac, current_hp: t.current_hp, type: t.type, monster_id: t.monster_id,
+                homebrew_monster_id: t.homebrew_monster_id ?? null,
                 token_image_url: t.token_image_url, character_id: t.character_id ?? null },
             ]);
             if (t.conditions?.length)  setTokenConditions(p => ({ ...p, [t.id]: t.conditions }));
@@ -378,6 +381,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
                 tok.id === t.id
                   ? { ...tok, label: t.label, x: t.x, y: t.y, color: t.color,
                       hp: t.hp, ac: t.ac, current_hp: t.current_hp, type: t.type, monster_id: t.monster_id,
+                      homebrew_monster_id: t.homebrew_monster_id ?? tok.homebrew_monster_id ?? null,
                       token_image_url: t.token_image_url, character_id: t.character_id ?? tok.character_id ?? null }
                   : tok
               )
@@ -1000,9 +1004,26 @@ const MapBoard: React.FC<MapBoardProps> = ({
   const onHudDelete = async () => {
     if (!hudTokenId) return;
     const id = hudTokenId;
+    // Optimistic UI — remove from local state and close HUD immediately
     setTokens((p) => p.filter((t) => t.id !== id));
     setHudTokenId(null);
-    await supabase.from('tokens').delete().eq('id', id);
+    const { error } = await supabase.from('tokens').delete().eq('id', id);
+    if (error) {
+      console.error('[MapBoard] Token delete failed:', error.message, error.details, error.hint);
+      // Re-fetch tokens so local state is consistent with DB
+      const { data: refetchedTokens } = await supabase
+        .from('tokens')
+        .select('id, label, x, y, color, hp, ac, current_hp, type, monster_id, homebrew_monster_id, token_image_url, character_id')
+        .eq('encounter_id', encounterId);
+      if (refetchedTokens) {
+        setTokens(refetchedTokens.map((t: any) => ({
+          id: t.id, label: t.label, x: t.x, y: t.y, color: t.color,
+          hp: t.hp, ac: t.ac, current_hp: t.current_hp, type: t.type,
+          monster_id: t.monster_id, homebrew_monster_id: t.homebrew_monster_id ?? null,
+          token_image_url: t.token_image_url, character_id: t.character_id ?? null,
+        })));
+      }
+    }
   };
 
   const transformStyle = {
