@@ -99,19 +99,20 @@ function floodFill(
 function TileSwatch({ tileKey, selected, onClick }: {
   tileKey: string; selected: boolean; onClick: () => void
 }) {
-  const ref    = useRef<HTMLCanvasElement>(null)
-  const imgSrc = IMAGE_TILE_PATHS[tileKey]   // defined only for PNG-backed tiles
-  const label  = TILE_DEFS.find(t => t.key === tileKey)?.label ?? tileKey
+  const canvasRef  = useRef<HTMLCanvasElement>(null)
+  const imgSrc     = IMAGE_TILE_PATHS[tileKey]
+  const label      = TILE_DEFS.find(t => t.key === tileKey)?.label ?? tileKey
+  // Track whether the PNG loaded successfully — default false, never shows broken icon
+  const [imgReady, setImgReady] = useState(false)
 
-  // Canvas draw — only used when there is no PNG for this key
+  // Always draw procedural canvas (visible until/unless PNG loads)
   useEffect(() => {
-    if (imgSrc) return   // skip: we render an <img> instead
-    const c = ref.current
+    const c = canvasRef.current
     if (!c) return
     const ctx = c.getContext('2d')!
     ctx.clearRect(0, 0, 32, 32)
     drawTile(ctx, 0, 0, 32, tileKey)
-  }, [tileKey, imgSrc])
+  }, [tileKey])
 
   return (
     <button
@@ -119,17 +120,19 @@ function TileSwatch({ tileKey, selected, onClick }: {
       onClick={onClick}
       className={`relative rounded transition ${selected ? 'ring-2 ring-amber-400 ring-offset-1 ring-offset-slate-950' : 'hover:ring-1 hover:ring-slate-500'}`}
     >
-      {imgSrc ? (
+      {/* Canvas is always rendered — acts as procedural fallback */}
+      <canvas ref={canvasRef} width={32} height={32} className="block rounded" />
+      {/* PNG overlay: hidden (opacity-0) until onLoad fires — never shows broken icon */}
+      {imgSrc && (
         <img
           src={imgSrc}
           width={32}
           height={32}
-          alt={label}
-          className="block rounded"
+          alt=""
+          onLoad={() => setImgReady(true)}
+          className={`absolute inset-0 block rounded transition-opacity duration-150 ${imgReady ? 'opacity-100' : 'opacity-0'}`}
           style={{ imageRendering: 'pixelated' }}
         />
-      ) : (
-        <canvas ref={ref} width={32} height={32} className="block rounded" />
       )}
     </button>
   )
