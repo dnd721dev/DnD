@@ -744,8 +744,8 @@ export default function TableClient({ sessionId }: TableClientProps) {
       // Editing existing tile map
       await updateTileMap(editingMapId, tileData)
     } else {
-      // Creating new tile map
-      const name = newMapName.trim() || 'Tile Map'
+      // Creating new tile map — prefer name typed in the creator, fall back to modal name
+      const name = tileData.name?.trim() || newMapName.trim() || 'Tile Map'
       const newMap = await createTileMap(name, tileData)
       if (!newMap) { alert('Failed to save tile map.'); return }
 
