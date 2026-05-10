@@ -1,5 +1,37 @@
 // Shared tile map types and rendering utilities
-// All tile textures are drawn procedurally — no external image assets required.
+// Tiles are rendered procedurally via Canvas 2D.
+// For keys listed in IMAGE_TILE_PATHS, a PNG from public/tiles/ is used instead
+// once preloadTileImages() has been called (falls back to procedural until loaded).
+
+// ─── Image-backed tile paths ─────────────────────────────────────────────────
+/** Tile keys that have a real PNG asset in public/tiles/. */
+export const IMAGE_TILE_PATHS: Record<string, string> = {
+  floor:   '/tiles/dungeon-floor-64.png',
+  wall:    '/tiles/dungeon-wall-64.png',
+  cracked: '/tiles/dungeon-floor-cracked-64.png',
+  water:   '/tiles/dungeon-water-64.png',
+  door:    '/tiles/dungeon-door-64.png',
+}
+
+// ─── Image cache ─────────────────────────────────────────────────────────────
+const _imgCache: Record<string, HTMLImageElement | 'loading' | 'error'> = {}
+
+/**
+ * Kick off loading for all image-backed tiles.
+ * Safe to call multiple times (no-ops if already loading/loaded).
+ * Must be called in a browser context (inside useEffect or similar).
+ */
+export function preloadTileImages(): void {
+  if (typeof window === 'undefined') return
+  for (const [key, path] of Object.entries(IMAGE_TILE_PATHS)) {
+    if (_imgCache[key]) continue   // already loading or loaded
+    _imgCache[key] = 'loading'
+    const img = new Image()
+    img.onload  = () => { _imgCache[key] = img }
+    img.onerror = () => { _imgCache[key] = 'error' }
+    img.src = path
+  }
+}
 
 export const TILE_COLORS: Record<string, string> = {
   // Terrain
@@ -10,10 +42,13 @@ export const TILE_COLORS: Record<string, string> = {
   ice:         '#bfdbfe',
   mud:         '#451a03',
   // Dungeon
+  floor:       '#374151',
+  cracked:     '#4b5563',
   stone:       '#374151',
   cobblestone: '#4b5563',
   wall:        '#0f172a',
   void:        '#020617',
+  door:        '#78350f',
   // Interior
   wood:        '#7c3404',
   carpet:      '#581c87',
@@ -22,35 +57,48 @@ export const TILE_COLORS: Record<string, string> = {
   lava:        '#b91c1c',
 }
 
-export const TILE_DEFS = [
+/** Extended tile definition with optional gameplay metadata. */
+export type TileDef = {
+  key:           string
+  label:         string
+  color:         string
+  passable?:     boolean
+  difficult?:    boolean
+  blocksVision?: boolean
+}
+
+export const TILE_DEFS: TileDef[] = [
   // Terrain
-  { key: 'grass',       label: 'Grass',        color: TILE_COLORS.grass       },
-  { key: 'water',       label: 'Water',        color: TILE_COLORS.water       },
-  { key: 'dirt',        label: 'Dirt',         color: TILE_COLORS.dirt        },
-  { key: 'sand',        label: 'Sand',         color: TILE_COLORS.sand        },
-  { key: 'ice',         label: 'Ice',          color: TILE_COLORS.ice         },
-  { key: 'mud',         label: 'Mud',          color: TILE_COLORS.mud         },
-  // Dungeon
-  { key: 'stone',       label: 'Stone Floor',  color: TILE_COLORS.stone       },
-  { key: 'cobblestone', label: 'Cobblestone',  color: TILE_COLORS.cobblestone },
-  { key: 'wall',        label: 'Wall',         color: TILE_COLORS.wall        },
-  { key: 'void',        label: 'Void / Pit',   color: TILE_COLORS.void        },
+  { key: 'grass',       label: 'Grass',          color: TILE_COLORS.grass       },
+  { key: 'water',       label: 'Water / pit',     color: TILE_COLORS.water,       passable: false,  difficult: false, blocksVision: false },
+  { key: 'dirt',        label: 'Dirt',            color: TILE_COLORS.dirt        },
+  { key: 'sand',        label: 'Sand',            color: TILE_COLORS.sand        },
+  { key: 'ice',         label: 'Ice',             color: TILE_COLORS.ice         },
+  { key: 'mud',         label: 'Mud',             color: TILE_COLORS.mud         },
+  // Dungeon (image-backed tiles listed first for palette prominence)
+  { key: 'floor',       label: 'Stone floor',     color: TILE_COLORS.floor,       passable: true,   difficult: false, blocksVision: false },
+  { key: 'cracked',     label: 'Cracked stone',   color: TILE_COLORS.cracked,     passable: true,   difficult: true,  blocksVision: false },
+  { key: 'wall',        label: 'Stone wall',       color: TILE_COLORS.wall,        passable: false,  difficult: false, blocksVision: true  },
+  { key: 'door',        label: 'Door',            color: TILE_COLORS.door,        passable: true,   difficult: false, blocksVision: true  },
+  { key: 'stone',       label: 'Stone Floor',     color: TILE_COLORS.stone       },
+  { key: 'cobblestone', label: 'Cobblestone',     color: TILE_COLORS.cobblestone },
+  { key: 'void',        label: 'Void / Pit',      color: TILE_COLORS.void        },
   // Interior
-  { key: 'wood',        label: 'Wood Floor',   color: TILE_COLORS.wood        },
-  { key: 'carpet',      label: 'Carpet',       color: TILE_COLORS.carpet      },
-  { key: 'marble',      label: 'Marble',       color: TILE_COLORS.marble      },
+  { key: 'wood',        label: 'Wood Floor',      color: TILE_COLORS.wood        },
+  { key: 'carpet',      label: 'Carpet',          color: TILE_COLORS.carpet      },
+  { key: 'marble',      label: 'Marble',          color: TILE_COLORS.marble      },
   // Special
-  { key: 'lava',        label: 'Lava',         color: TILE_COLORS.lava        },
-] as const
+  { key: 'lava',        label: 'Lava',            color: TILE_COLORS.lava        },
+]
 
 export const TILE_GROUPS = [
   { label: 'Terrain',  keys: ['grass', 'water', 'dirt', 'sand', 'ice', 'mud'] },
-  { label: 'Dungeon',  keys: ['stone', 'cobblestone', 'wall', 'void'] },
+  { label: 'Dungeon',  keys: ['floor', 'cracked', 'wall', 'door', 'stone', 'cobblestone', 'void'] },
   { label: 'Interior', keys: ['wood', 'carpet', 'marble'] },
   { label: 'Special',  keys: ['lava'] },
 ] as const
 
-export type TileKey = typeof TILE_DEFS[number]['key']
+export type TileKey = string   // loosened from the const-tuple so new keys work without casting
 
 export type TileData = {
   cols:  number
@@ -92,12 +140,40 @@ export function drawTile(
   const x = col * size
   const y = row * size
 
+  // ── Image-backed tile (PNG) ───────────────────────────────────────────────
+  const cached = _imgCache[tileKey]
+  if (cached instanceof HTMLImageElement) {
+    ctx.drawImage(cached, x, y, size, size)
+    return   // skip procedural draw entirely
+  }
+
   ctx.save()
   ctx.beginPath()
   ctx.rect(x, y, size, size)
   ctx.clip()
 
   switch (tileKey) {
+    // ── Floor (dungeon) — procedural fallback until PNG loads ────────────────
+    case 'floor': {
+      ctx.fillStyle = '#374151'
+      ctx.fillRect(x, y, size, size)
+      break
+    }
+
+    // ── Cracked stone — procedural fallback until PNG loads ──────────────────
+    case 'cracked': {
+      ctx.fillStyle = '#4b5563'
+      ctx.fillRect(x, y, size, size)
+      break
+    }
+
+    // ── Door — procedural fallback until PNG loads ───────────────────────────
+    case 'door': {
+      ctx.fillStyle = '#78350f'
+      ctx.fillRect(x, y, size, size)
+      break
+    }
+
     // ── Stone Floor ──────────────────────────────────────────────────────────
     case 'stone': {
       ctx.fillStyle = '#374151'

@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { TILE_DEFS, TILE_GROUPS, drawTile, type TileData } from '@/lib/tilemap'
+import { IMAGE_TILE_PATHS, TILE_DEFS, TILE_GROUPS, drawTile, preloadTileImages, type TileData } from '@/lib/tilemap'
 import { generateDungeon, generateWilderness } from '@/lib/dungeonGen'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -99,22 +99,38 @@ function floodFill(
 function TileSwatch({ tileKey, selected, onClick }: {
   tileKey: string; selected: boolean; onClick: () => void
 }) {
-  const ref = useRef<HTMLCanvasElement>(null)
+  const ref    = useRef<HTMLCanvasElement>(null)
+  const imgSrc = IMAGE_TILE_PATHS[tileKey]   // defined only for PNG-backed tiles
+  const label  = TILE_DEFS.find(t => t.key === tileKey)?.label ?? tileKey
+
+  // Canvas draw — only used when there is no PNG for this key
   useEffect(() => {
+    if (imgSrc) return   // skip: we render an <img> instead
     const c = ref.current
     if (!c) return
     const ctx = c.getContext('2d')!
     ctx.clearRect(0, 0, 32, 32)
     drawTile(ctx, 0, 0, 32, tileKey)
-  }, [tileKey])
-  const label = TILE_DEFS.find(t => t.key === tileKey)?.label ?? tileKey
+  }, [tileKey, imgSrc])
+
   return (
     <button
       title={label}
       onClick={onClick}
       className={`relative rounded transition ${selected ? 'ring-2 ring-amber-400 ring-offset-1 ring-offset-slate-950' : 'hover:ring-1 hover:ring-slate-500'}`}
     >
-      <canvas ref={ref} width={32} height={32} className="block rounded" />
+      {imgSrc ? (
+        <img
+          src={imgSrc}
+          width={32}
+          height={32}
+          alt={label}
+          className="block rounded"
+          style={{ imageRendering: 'pixelated' }}
+        />
+      ) : (
+        <canvas ref={ref} width={32} height={32} className="block rounded" />
+      )}
     </button>
   )
 }
@@ -161,6 +177,9 @@ export function MapCreator({ initialData, onSave, onCancel }: Props) {
   // Resize inputs
   const [resizeCols, setResizeCols] = useState(cols)
   const [resizeRows, setResizeRows] = useState(rows)
+
+  // Kick off PNG preloads once on mount
+  useEffect(() => { preloadTileImages() }, [])
 
   // ── History helpers ─────────────────────────────────────────────────────────
   function pushHistory(snapshot: Record<string, string>) {
