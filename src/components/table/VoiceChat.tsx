@@ -176,12 +176,15 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
         adaptiveStream: true,
         // Only publish tracks at resolutions subscribers actually need
         dynacast: true,
-        // Keep retrying longer than the default 3 attempts so brief network
-        // hiccups (mobile switching WiFi→cell, VPN reconnect, etc.) self-heal
-        // without showing the player a full disconnect.
+        // Keep retrying longer than the default so brief network hiccups
+        // (mobile switching WiFi→cell, VPN reconnect, etc.) self-heal without
+        // showing the player a full disconnect.
+        // ReconnectPolicy is a strategy interface: return null to stop retrying.
         reconnectPolicy: {
-          maxRetries: 10,
-          retryDelay: 1000,
+          nextRetryDelayInMs(ctx: { retryCount: number }) {
+            if (ctx.retryCount >= 10) return null // give up after 10 attempts
+            return 1_000                          // 1 s between each retry
+          },
         },
         audioCaptureDefaults: {
           echoCancellation:  true,

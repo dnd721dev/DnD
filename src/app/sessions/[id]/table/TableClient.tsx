@@ -75,9 +75,17 @@ export default function TableClient({ sessionId }: TableClientProps) {
     return Boolean(gm && gm === walletLower)
   }, [walletLower, session?.gm_wallet])
 
+  // ── Session lifecycle status ───────────────────────────────────────────────
+  // Declared early so the idle-redirect effect (below) can reference sessionStatus
+  // before any other game-state hooks run.
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(null)
+  const prevStatusRef = useRef<SessionStatus | null>(null)
+  const [showPauseOverlay, setShowPauseOverlay] = useState(false)
+  const [sessionToast, setSessionToast] = useState<string | null>(null)
+
   // ── Idle redirect (players only) ──────────────────────────────
-  // If a player has not interacted with the page for 30 seconds,
-  // redirect them to the campaign page. GM is exempt.
+  // Skipped during active sessions — a player may be idle for many minutes
+  // simply listening to the GM or watching combat. GM is always exempt.
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const resetIdleTimer = useCallback(() => {
@@ -939,7 +947,9 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
   // HIGH-5: End Session — uses the lifecycle API so all side effects run:
   // processSessionEndItems, stop recordings, end active encounters.
-  async function handleEndSession() {
+  // Wrapped in useCallback so TableTopBar (React.memo'd) does not re-render
+  // every time unrelated game state changes.
+  const handleEndSession = useCallback(async () => {
     if (!session || !walletLower) return
 
     const res = await fetch(`/api/sessions/${session.id}/status`, {
@@ -968,7 +978,12 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
     // Update local state so the status badge and button hide immediately
     setSession((prev) => prev ? { ...prev, status: 'completed' } : prev)
-  }
+  }, [session, walletLower])
+
+  // Stable callbacks for TableTopBar — created once so React.memo can bail out
+  // when these (and other props) have not changed.
+  const handleToggleDiceLog = useCallback(() => setShowDiceLog((v) => !v), [])
+  const handleOpenShop      = useCallback(() => setShowShop(true), [])
 
   const [showShop,     setShowShop]     = useState(false)
   const [shopToast,    setShopToast]    = useState<string | null>(null)
@@ -978,12 +993,6 @@ export default function TableClient({ sessionId }: TableClientProps) {
     setTimeout(() => setShopToast(null), 4000)
   }
 
-  // ── Session lifecycle status ───────────────────────────────────────────────
-  // Derive initial status from loaded session; keep in sync via realtime.
-  const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(null)
-  const prevStatusRef = useRef<SessionStatus | null>(null)
-  const [showPauseOverlay, setShowPauseOverlay] = useState(false)
-  const [sessionToast, setSessionToast] = useState<string | null>(null)
 
   function showSessionToast(msg: string) {
     setSessionToast(msg)
@@ -999,47 +1008,44 @@ export default function TableClient({ sessionId }: TableClientProps) {
     if (s === 'paused') setShowPauseOverlay(true)
   }, [session?.id])  // only re-seed when session ID changes (not every re-render)
 
-  // Realtime subscription for session status changes (Fix 7)
+  // React to session status changes that arrive via the useSessionWithCampaign
+  // realtime subscription.  That hook already owns the `session-meta` channel and
+  // updates session.status, so we do NOT need a second Supabase channel here.
+  // Previously a duplicate `session-status-{sessionId}` channel existed alongside
+  // `session-meta-{sessionId}` — both subscribed to the same sessions row UPDATE,
+  // causing two setSession() calls and two re-renders per event.
   useEffect(() => {
-    if (!sessionId) return
+    const s = session?.status as SessionStatus | undefined
+    if (!s) return
 
-    const channel = supabase
-      .channel(`session-status-${sessionId}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'sessions', filter: `id=eq.${sessionId}` },
-        (payload) => {
-          const newStatus = (payload.new as any).status as SessionStatus
-          const prev = prevStatusRef.current
-          prevStatusRef.current = newStatus
-          setSessionStatus(newStatus)
+    const prev = prevStatusRef.current
+    if (s === prev) return  // no actual change — guard against seeding effect overlap
 
-          // Sync local session object so status badge updates immediately
-          setSession((s) => s ? { ...s, status: newStatus } : s)
+    prevStatusRef.current = s
+    setSessionStatus(s)
 
-          // Transition-specific UI
-          if (newStatus === 'lobby' && prev === 'setup') {
-            showSessionToast('🟡 Lobby is open! Voice chat is available.')
-          }
-          if (newStatus === 'active' && (prev === 'lobby' || prev === 'setup')) {
-            showSessionToast('⚔️ Session has started!')
-          }
-          if (newStatus === 'paused') {
-            setShowPauseOverlay(true)
-          }
-          if (newStatus === 'active' && prev === 'paused') {
-            setShowPauseOverlay(false)
-            showSessionToast('▶ Session resumed!')
-          }
-          if (newStatus === 'completed') {
-            setShowPauseOverlay(false)
-          }
-        }
-      )
-      .subscribe()
-
-    return () => { void supabase.removeChannel(channel) }
-  }, [sessionId])
+    // Transition-specific UI — toasts and pause overlay
+    if (s === 'lobby' && prev === 'setup') {
+      setSessionToast('🟡 Lobby is open! Voice chat is available.')
+      setTimeout(() => setSessionToast(null), 4000)
+    }
+    if (s === 'active' && (prev === 'lobby' || prev === 'setup')) {
+      setSessionToast('⚔️ Session has started!')
+      setTimeout(() => setSessionToast(null), 4000)
+    }
+    if (s === 'paused') {
+      setShowPauseOverlay(true)
+    }
+    if (s === 'active' && prev === 'paused') {
+      setShowPauseOverlay(false)
+      setSessionToast('▶ Session resumed!')
+      setTimeout(() => setSessionToast(null), 4000)
+    }
+    if (s === 'completed') {
+      setShowPauseOverlay(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.status])
 
   const topBar = (
     <>
@@ -1050,9 +1056,9 @@ export default function TableClient({ sessionId }: TableClientProps) {
         displayName={myDisplayName}
         roomName={roomName}
         showDiceLog={showDiceLog}
-        onToggleDiceLog={() => setShowDiceLog((v) => !v)}
+        onToggleDiceLog={handleToggleDiceLog}
         onEndSession={isGm ? handleEndSession : undefined}
-        onOpenShop={() => setShowShop(true)}
+        onOpenShop={handleOpenShop}
         sessionStatus={sessionStatus}
       />
       {/* Shop / session toast notifications */}
