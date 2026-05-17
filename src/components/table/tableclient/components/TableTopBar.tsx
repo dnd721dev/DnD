@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import VoiceChat from '@/components/table/VoiceChat'
 import { RecordingButton } from './RecordingButton'
 import { SrdSearchOverlay } from '@/components/table/SrdSearchOverlay'
@@ -8,7 +8,9 @@ import type { SessionWithCampaign } from '../types'
 import { formatDateTime } from '../utils'
 import type { SessionStatus } from '@/lib/sessionGates'
 
-export function TableTopBar(props: {
+// memo: prevents VoiceChat (inside this component) from re-rendering on every
+// parent state change (dice rolls, token moves, etc.) when props haven't changed.
+export const TableTopBar = memo(function TableTopBar(props: {
   session: SessionWithCampaign
   isGm: boolean
   address: string | undefined
@@ -154,4 +156,4 @@ export function TableTopBar(props: {
     </header>
     </>
   )
-}
+})

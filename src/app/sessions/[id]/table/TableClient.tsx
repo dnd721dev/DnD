@@ -85,13 +85,16 @@ export default function TableClient({ sessionId }: TableClientProps) {
     idleTimerRef.current = setTimeout(() => {
       const target = campaignId ? `/campaigns/${campaignId}` : '/campaigns'
       router.push(target)
-    }, 30_000)
+    }, 20 * 60 * 1000) // 20 minutes — long enough for any passive listening stretch
   }, [campaignId, router])
 
   useEffect(() => {
-    // Only arm the timer for players (not GMs)
+    // Only arm the timer for players (not GMs) and only when session is NOT active.
+    // During an active session a player may be idle for minutes at a time simply
+    // listening to the GM or watching combat — never kick them during gameplay.
     if (isGm) return
     if (!hasMounted) return
+    if (sessionStatus === 'active') return
 
     const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'] as const
     const handle = () => resetIdleTimer()
@@ -103,7 +106,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
       events.forEach((ev) => window.removeEventListener(ev, handle))
     }
-  }, [isGm, hasMounted, resetIdleTimer])
+  }, [isGm, hasMounted, resetIdleTimer, sessionStatus])
 
   // Encounter is session-scoped; hook only needs the session.
   const { encounterId, encounterLoading, encounterError } = useEncounter(session)

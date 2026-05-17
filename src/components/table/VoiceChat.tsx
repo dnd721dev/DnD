@@ -134,6 +134,18 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
       return
     }
 
+    // Pre-clean: if a stale disconnected Room is still in state (e.g. the
+    // RoomEvent.Disconnected handler fired but left a zombie object), remove all
+    // its listeners and clear it before creating the new Room.  Without this the
+    // old Room's handlers (setConnected, setParticipants, etc.) remain attached
+    // and can silently reset the new Room's UI state if the old Room fires any
+    // late lifecycle events.
+    if (room) {
+      room.removeAllListeners()
+      room.disconnect()
+      setRoom(null)
+    }
+
     try {
       setError(null)
       setIsConnecting(true)
@@ -159,7 +171,24 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
         tokenRef.current = { value: token, fetchedAt: Date.now() }
       }
 
-      const newRoom = new Room()
+      const newRoom = new Room({
+        // Adapt bitrate to network conditions — prevents drops on congested WiFi
+        adaptiveStream: true,
+        // Only publish tracks at resolutions subscribers actually need
+        dynacast: true,
+        // Keep retrying longer than the default 3 attempts so brief network
+        // hiccups (mobile switching WiFi→cell, VPN reconnect, etc.) self-heal
+        // without showing the player a full disconnect.
+        reconnectPolicy: {
+          maxRetries: 10,
+          retryDelay: 1000,
+        },
+        audioCaptureDefaults: {
+          echoCancellation:  true,
+          noiseSuppression:  true,
+          autoGainControl:   true,
+        },
+      })
 
       const onParticipantsChanged = () => void rebuildParticipants(newRoom)
 
@@ -173,6 +202,9 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
           setIsReconnecting(false)
           setParticipants([])
           setLocalMuted(false)
+          // Clear room from state so the cleanup effect on [room] fires correctly
+          // and the stale Room's event listeners are no longer reachable via state.
+          setRoom(null)
         })
         // Bug 2: surface reconnection state so the UI doesn't look frozen
         .on(RoomEvent.Reconnecting, () => {
