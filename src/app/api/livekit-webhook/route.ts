@@ -32,7 +32,9 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     console.error('[livekit-webhook] verification failed:', err?.message,
       '| sig header present:', Boolean(signature))
-    return NextResponse.json({ error: 'Invalid webhook signature' }, { status: 401 })
+    // Bug B fix: return 200 on signature failure so LiveKit does NOT retry
+    // a payload that will never pass verification (retries on non-2xx only).
+    return NextResponse.json({ error: 'Invalid webhook signature' }, { status: 200 })
   }
 
   const db        = supabaseAdmin()

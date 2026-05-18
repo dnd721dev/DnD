@@ -8,6 +8,18 @@ import { supabase } from '@/lib/supabase'
 
 type SessionStatus = 'planned' | 'in_progress' | 'completed' | 'cancelled'
 
+type RecordingRow = {
+  id: string
+  status: string
+  started_at: string
+  duration_sec: number | null
+  file_url: string | null
+  published: boolean
+  episode_title: string | null
+  episode_number: number | null
+  master_script_status: string | null
+}
+
 type SessionRow = {
   id: string
   title: string
@@ -51,6 +63,10 @@ export default function SessionPage() {
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Bug D fix: load recordings so the GM can access the editor after leaving the table
+  const [recordings, setRecordings] = useState<RecordingRow[]>([])
+  const [recoverLoading, setRecoverLoading] = useState<string | null>(null)
 
   const myAddress = address?.toLowerCase() ?? null
 
@@ -146,6 +162,36 @@ export default function SessionPage() {
 
     void load()
   }, [sessionId, address])
+
+  // Bug D fix: fetch recordings whenever we have a sessionId
+  useEffect(() => {
+    if (!sessionId) return
+    fetch(`/api/recording/${sessionId}`)
+      .then((r) => (r.ok ? r.json() : { recordings: [] }))
+      .then(({ recordings: rows }) => setRecordings(rows ?? []))
+      .catch(() => {})
+  }, [sessionId])
+
+  async function handleRecover(recordingId: string) {
+    setRecoverLoading(recordingId)
+    try {
+      const res = await fetch(`/api/recording/${sessionId}/recover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordingId }),
+      })
+      const data = await res.json()
+      if (res.ok && data.recovered) {
+        // Re-fetch to show updated status
+        const r2 = await fetch(`/api/recording/${sessionId}`)
+        if (r2.ok) {
+          const { recordings: rows } = await r2.json()
+          setRecordings(rows ?? [])
+        }
+      }
+    } catch {}
+    setRecoverLoading(null)
+  }
 
   const handleJoinTable = () => {
     if (!session) return
@@ -297,6 +343,107 @@ export default function SessionPage() {
           </button>
         </div>
       </section>
+
+      {/* Bug D fix: recordings section — visible to GM (and participants for published episodes) */}
+      {recordings.length > 0 && (
+        <section className="rounded border border-slate-700 bg-slate-900/60 p-4">
+          <h2 className="mb-3 text-sm font-semibold text-slate-100">🎙 Recordings</h2>
+          <div className="space-y-3">
+            {recordings.map((r) => {
+              const dateText = new Date(r.started_at).toLocaleString(undefined, {
+                dateStyle: 'medium',
+                timeStyle: 'short',
+              })
+              const durationText = r.duration_sec
+                ? (() => {
+                    const h = Math.floor(r.duration_sec / 3600)
+                    const m = Math.floor((r.duration_sec % 3600) / 60)
+                    const s = r.duration_sec % 60
+                    return h > 0
+                      ? `${h}h ${m}m`
+                      : m > 0
+                      ? `${m}m ${s}s`
+                      : `${s}s`
+                  })()
+                : null
+
+              const statusColor =
+                r.status === 'completed' ? 'text-emerald-400' :
+                r.status === 'recording' ? 'text-red-400' :
+                r.status === 'stopped'   ? 'text-yellow-400' :
+                'text-slate-500'
+
+              const statusLabel =
+                r.status === 'completed' ? '✓ Completed' :
+                r.status === 'recording' ? '● Recording' :
+                r.status === 'stopped'   ? '◼ Stopped'   :
+                '✗ Failed'
+
+              const isStuck = r.status === 'stopped' && !r.file_url
+
+              return (
+                <div key={r.id} className="flex flex-col gap-2 rounded border border-slate-700 bg-slate-900/60 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`text-xs font-semibold ${statusColor}`}>{statusLabel}</span>
+                      {r.published && (
+                        <span className="rounded-full border border-emerald-600 bg-emerald-900/30 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                          🎙 Published
+                        </span>
+                      )}
+                      {r.episode_number != null && (
+                        <span className="text-[10px] text-slate-500">Ep. {r.episode_number}</span>
+                      )}
+                      {r.episode_title && (
+                        <span className="text-[10px] text-slate-400">{r.episode_title}</span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      {dateText}{durationText ? ` · ${durationText}` : ''}
+                    </p>
+                    {r.master_script_status === 'done' && (
+                      <p className="text-[10px] text-emerald-400">📝 Script ready</p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {r.file_url && (
+                      <a
+                        href={r.file_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded border border-slate-600 px-2.5 py-1 text-xs text-slate-300 hover:border-sky-500"
+                      >
+                        ↓ Download
+                      </a>
+                    )}
+                    {/* Recover button for stuck stopped recordings (GM only) */}
+                    {isStuck && isGm && (
+                      <button
+                        onClick={() => handleRecover(r.id)}
+                        disabled={recoverLoading === r.id}
+                        className="rounded border border-yellow-700/60 bg-yellow-900/20 px-2.5 py-1 text-xs text-yellow-300 hover:bg-yellow-900/40 disabled:opacity-50"
+                        title="Query LiveKit to recover this recording's status"
+                      >
+                        {recoverLoading === r.id ? '…' : '↻ Recover'}
+                      </button>
+                    )}
+                    {/* Only GM sees the editor link */}
+                    {isGm && (
+                      <Link
+                        href={`/sessions/${session.id}/recording/${r.id}`}
+                        className="rounded bg-amber-900/60 px-2.5 py-1 text-xs font-semibold text-amber-200 hover:bg-amber-800"
+                      >
+                        Open Editor
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
     </main>
   )
 }

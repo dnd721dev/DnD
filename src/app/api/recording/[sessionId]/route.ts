@@ -182,7 +182,9 @@ export async function POST(req: NextRequest, { params }: Params) {
         if (trackRow) trackRows.push(trackRow)
       } catch (trackErr: any) {
         console.warn(`Track egress failed for ${participant.identity}:`, trackErr?.message)
-        // Store a placeholder row so the editor knows who was in the session
+        // Store a placeholder row so the editor knows who was in the session.
+        // Bug C fix: set file_status='failed' — without an egress_id the webhook
+        // can never update this row, so it must NOT default to 'recording'.
         const { data: trackRow } = await db
           .from('recording_tracks')
           .insert({
@@ -190,6 +192,7 @@ export async function POST(req: NextRequest, { params }: Params) {
             session_id:           sessionId,
             participant_identity: participant.identity,
             transcript_status:    'failed',
+            file_status:          'failed',
           })
           .select()
           .maybeSingle()

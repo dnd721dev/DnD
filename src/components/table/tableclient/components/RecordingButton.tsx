@@ -43,6 +43,7 @@ export function RecordingButton({ sessionId, roomName, sessionStatus }: Props) {
   const [addingMarker, setAddingMarker] = useState(false)
   const [showMarkers, setShowMarkers] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
+  const [recoverLoading, setRecoverLoading] = useState<string | null>(null)
 
   const fetchStatus = useCallback(async () => {
     const res = await fetch(`/api/recording/${sessionId}`)
@@ -123,6 +124,23 @@ export function RecordingButton({ sessionId, roomName, sessionStatus }: Props) {
       setRecordings((prev) => prev.map((r) => (r.id === row.id ? row : r)))
     }
     setLoading(false)
+  }
+
+  // Bug E fix: allow GM to trigger recovery for a stuck recording directly from the UI
+  async function recoverRecording(r: RecordingRow) {
+    setRecoverLoading(r.id)
+    try {
+      const res = await fetch(`/api/recording/${sessionId}/recover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordingId: r.id }),
+      })
+      if (res.ok) {
+        // Re-fetch to show updated status
+        await fetchStatus()
+      }
+    } catch {}
+    setRecoverLoading(null)
   }
 
   async function addMarker() {
@@ -288,6 +306,17 @@ export function RecordingButton({ sessionId, roomName, sessionStatus }: Props) {
                     >
                       ↓
                     </a>
+                  )}
+                  {/* Bug E fix: Recover button for stuck stopped recordings */}
+                  {r.status === 'stopped' && !r.file_url && (
+                    <button
+                      onClick={() => recoverRecording(r)}
+                      disabled={recoverLoading === r.id}
+                      className="rounded border border-yellow-700/60 bg-yellow-900/20 px-1.5 py-0.5 text-[10px] text-yellow-300 hover:bg-yellow-900/40 disabled:opacity-50"
+                      title="Query LiveKit to recover this recording's file status"
+                    >
+                      {recoverLoading === r.id ? '…' : '↻'}
+                    </button>
                   )}
                   <Link
                     href={`/sessions/${sessionId}/recording/${r.id}`}
