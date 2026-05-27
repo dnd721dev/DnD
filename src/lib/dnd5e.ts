@@ -1,3 +1,41 @@
+// ── D&D 5e 2024 XP thresholds (cumulative XP required to REACH each level) ──
+// Index 0 = level 1 (always 0), index 19 = level 20.
+export const XP_LEVEL_THRESHOLDS: readonly number[] = [
+  0,        // level 1
+  300,      // level 2
+  900,      // level 3
+  2_700,    // level 4
+  6_500,    // level 5
+  14_000,   // level 6
+  23_000,   // level 7
+  34_000,   // level 8
+  48_000,   // level 9
+  64_000,   // level 10
+  85_000,   // level 11
+  100_000,  // level 12
+  120_000,  // level 13
+  140_000,  // level 14
+  165_000,  // level 15
+  195_000,  // level 16
+  225_000,  // level 17
+  265_000,  // level 18
+  305_000,  // level 19
+  355_000,  // level 20
+] as const
+
+/**
+ * Given a total XP value, returns the D&D 5e level (1–20) it corresponds to.
+ * Capped at 20 — characters do not level past 20 via XP.
+ */
+export function xpToLevel(xp: number): number {
+  let level = 1
+  for (let i = 1; i < XP_LEVEL_THRESHOLDS.length; i++) {
+    if (xp >= XP_LEVEL_THRESHOLDS[i]) level = i + 1
+    else break
+  }
+  return Math.min(20, level)
+}
+
 export type AbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
 
 export const ABILITIES: AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha']

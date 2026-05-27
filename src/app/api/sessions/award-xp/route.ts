@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { xpToLevel } from '@/lib/dnd5e'
 
 /** POST /api/sessions/award-xp
  *  Awards XP equally to all CAYA participants in a completed CAYA session.
@@ -78,14 +79,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No CAYA characters found for participants' }, { status: 400 })
   }
 
-  // Update each CAYA character's XP
+  // BUG-05 fix: Update each CAYA character's XP AND level up if threshold crossed
+  const levelUps: { characterId: string; oldLevel: number; newLevel: number }[] = []
+
   const updates = await Promise.all(
-    characters.map((char: any) =>
-      db
+    characters.map(async (char: any) => {
+      const oldXp = char.experience_points ?? 0
+      const newXp = oldXp + xp_amount
+      const oldLevel = char.level ?? 1
+      const newLevel = xpToLevel(newXp)
+
+      const patch: Record<string, number> = { experience_points: newXp }
+      if (newLevel > oldLevel) {
+        patch.level = newLevel
+        levelUps.push({ characterId: char.id, oldLevel, newLevel })
+      }
+
+      return db
         .from('characters')
-        .update({ experience_points: (char.experience_points ?? 0) + xp_amount })
+        .update(patch)
         .eq('id', char.id)
-    )
+    })
   )
 
   const updateErrors = updates.filter((r) => r.error)
@@ -104,5 +118,6 @@ export async function POST(req: NextRequest) {
     ok: true,
     awarded_to: characters.length,
     xp_amount,
+    level_ups: levelUps,
   })
 }

@@ -7,6 +7,8 @@ import { supabase } from '@/lib/supabase'
 import type { CharacterSheetData } from '@/components/character-sheet/types'
 import { HandoutsPanel } from '@/components/table/HandoutsPanel'
 import TableChat from '@/components/table/TableChat'
+import { computeMainAttack } from '@/components/character-sheet/equipment-calc'
+import type { Abilities } from '../../types/character'
 import { CLASS_ACTIONS, SUBCLASS_ACTIONS, DND721_ACTIONS } from '@/lib/actions/registry'
 import { canUseAction } from '@/lib/actions/canUseAction'
 import { getClassResources, CLASS_HIT_DIE } from '@/lib/classResources'
@@ -315,14 +317,16 @@ export function PlayerSidebar({
     onRoll?.({ label: `${label}${modeNote}`, formula: `${formulaPrefix}${sign}${mod}`, result: total, outcome: null, individual_dice: individualDice })
   }
 
-  function doWeaponAttack() {
+  function doWeaponAttack(atkMod?: number) {
     if (!sheet) return
     const str = Number(sheet.abilities?.str ?? 10)
     const dex = Number(sheet.abilities?.dex ?? 10)
-    const mod = Math.max(abilityMod(str), abilityMod(dex))
     const pb = proficiencyBonus(sheet.level)
+    // BUG-11 fix: use caller-supplied atkMod (weapon-aware) when provided,
+    // otherwise fall back to generic best-of-str/dex + proficiency
+    const mod = atkMod ?? (Math.max(abilityMod(str), abilityMod(dex)) + pb)
     const mode = getAttackRollMode()
-    rollD20VsACWithResult('Weapon Attack', mod + pb, mode)
+    rollD20VsACWithResult('Weapon Attack', mod, mode)
     // Inspiration is a one-time benefit — consume it after use
     if (actionState.has_inspiration && mode === 'adv') {
       updateActionState({ has_inspiration: false })
@@ -354,13 +358,24 @@ export function PlayerSidebar({
     const total = rolls.reduce((a, b) => a + b, 0) + mod
     const sign = mod >= 0 ? '+' : ''
     const dieKey = `d${dSides}`
+    const finalResult = Math.max(1, total)
     onRoll?.({
       label: opts?.label ?? `Weapon Damage${(target as any)?.label ? ` → ${(target as any).label}` : ''}`,
       formula: `${damageDice}${sign}${mod}`,
-      result: Math.max(1, total),
+      result: finalResult,
       outcome: null,
       individual_dice: rolls.map(v => ({ die: dieKey, value: v })),
     })
+    // BUG-10 fix: auto-apply damage to targeted token when preceding attack roll hit
+    if (lastAttackHit === true && (target as any)?.id) {
+      const currentHp = Number((target as any).current_hp ?? (target as any).hp ?? 0)
+      const newHp = Math.max(0, currentHp - finalResult)
+      supabase
+        .from('tokens')
+        .update({ current_hp: newHp })
+        .eq('id', (target as any).id)
+        .then(({ error }) => { if (error) console.error('[PlayerSidebar] damage apply error', error) })
+    }
     setLastAttackHit(null)
   }
 
@@ -681,7 +696,7 @@ export function PlayerSidebar({
 
       const { data, error } = await supabase
         .from('characters')
-        .select(['id', 'name', 'level', 'main_job', 'subclass', 'race', 'background', 'abilities', 'hit_points_current', 'hit_points_max', 'ac', 'armor_class', 'speed_ft', 'spell_save_dc', 'spell_attack_bonus', 'resource_state', 'saving_throw_profs', 'skill_proficiencies', 'spell_slots', 'temp_hp', 'inventory_items', 'gold', 'silver', 'copper', 'electrum', 'platinum'].join(','))
+        .select(['id', 'name', 'level', 'main_job', 'subclass', 'race', 'background', 'abilities', 'hit_points_current', 'hit_points_max', 'ac', 'armor_class', 'speed_ft', 'spell_save_dc', 'spell_attack_bonus', 'resource_state', 'saving_throw_profs', 'skill_proficiencies', 'spell_slots', 'temp_hp', 'inventory_items', 'gold', 'silver', 'copper', 'electrum', 'platinum', 'main_weapon_key'].join(','))
         .eq('id', selectedCharacterId)
         .maybeSingle()
 
@@ -710,7 +725,17 @@ export function PlayerSidebar({
 
   async function updateActionState(patch: Partial<ActionState>) {
     if (!selectedCharacterId) return
-    const next: ActionState = { ...(actionState ?? {}), ...patch }
+    // Optimistic UI update so the click feels instant
+    setActionState(prev => ({ ...(prev ?? {}), ...patch }))
+    // BUG-08 fix: read current DB value before writing so we never clobber
+    // move_used_ft (or other fields) that MapBoardView may have just committed
+    const { data: row } = await supabase
+      .from('characters')
+      .select('action_state')
+      .eq('id', selectedCharacterId)
+      .maybeSingle()
+    const dbState = ((row as any)?.action_state ?? {}) as ActionState
+    const next: ActionState = { ...dbState, ...patch }
     setActionState(next)
     const { error } = await supabase
       .from('characters')
@@ -921,7 +946,7 @@ export function PlayerSidebar({
               {!charsLoading && characters.length === 0 && (
                 <div className="space-y-2 rounded-md border border-yellow-900/30 bg-slate-900/60 p-2">
                   <p className="text-xs text-slate-300">You don&apos;t have any characters yet.</p>
-                  <Link href="/characters/new" className="inline-flex rounded-md bg-sky-600 px-3 py-1 text-[11px] font-medium text-white hover:bg-sky-500">
+                  <Link href="/characters/new" target="_blank" rel="noopener noreferrer" className="inline-flex rounded-md bg-sky-600 px-3 py-1 text-[11px] font-medium text-white hover:bg-sky-500">
                     Create a Character
                   </Link>
                 </div>
@@ -1137,6 +1162,9 @@ export function PlayerSidebar({
                       ) : (
                         <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-slate-200">Waiting: {activeName ?? '—'}</span>
                       )
+                    ) : activeName ? (
+                      // BUG-07 fix: NPC turn — active_wallet is null but activeName is set
+                      <span className="rounded bg-amber-900/50 px-2 py-0.5 text-[10px] font-semibold text-amber-300">⚔ NPC: {activeName}</span>
                     ) : (
                       <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">Not started</span>
                     )}
@@ -1266,25 +1294,47 @@ export function PlayerSidebar({
                   // Offhand: second equipped light weapon
                   const offhandEntry = equippedWeapons.length >= 2 && equippedWeapons[1].weapon.properties.includes('light') ? equippedWeapons[1] : null
 
-                  // Derive attack mod for main weapon
+                  // BUG-11 fix: when no WEAPON_DB inventory entry found, fall back to
+                  // computeMainAttack (same calc the character sheet uses) so dice/bonuses match
+                  const derivedAtk = (!mainWeapon && sheet.abilities)
+                    ? computeMainAttack(sheet as any, sheet.abilities as Abilities, pb)
+                    : null
+
+                  // Derive attack mod — WEAPON_DB calc → computeMainAttack → generic fallback
                   const mainAtkMod = (() => {
-                    if (!mainWeapon) return Math.max(abilityMod(str), abilityMod(dex)) + pb
-                    const isFinesse = mainWeapon.properties.includes('finesse')
-                    const isRanged = mainWeapon.attackType === 'ranged'
-                    const abilScore = (isFinesse || isRanged) ? Math.max(abilityMod(str), abilityMod(dex)) : abilityMod(str)
-                    return abilScore + pb
+                    if (mainWeapon) {
+                      const isFinesse = mainWeapon.properties.includes('finesse')
+                      const isRanged = mainWeapon.attackType === 'ranged'
+                      return ((isFinesse || isRanged) ? Math.max(abilityMod(str), abilityMod(dex)) : abilityMod(str)) + pb
+                    }
+                    return derivedAtk?.attackBonus ?? (Math.max(abilityMod(str), abilityMod(dex)) + pb)
                   })()
 
-                  // Derive damage mod for main weapon
-                  const mainDmgMod = (() => {
-                    if (!mainWeapon) return Math.max(abilityMod(str), abilityMod(dex))
+                  // Derive damage dice + mod
+                  let mainDice: string
+                  let mainDmgMod: number
+                  if (mainWeapon) {
                     const isFinesse = mainWeapon.properties.includes('finesse')
                     const isRanged = mainWeapon.attackType === 'ranged'
-                    return (isFinesse || isRanged) ? Math.max(abilityMod(str), abilityMod(dex)) : abilityMod(str)
-                  })()
+                    mainDice = mainWeapon.damageDice
+                    mainDmgMod = (isFinesse || isRanged) ? Math.max(abilityMod(str), abilityMod(dex)) : abilityMod(str)
+                  } else if (derivedAtk) {
+                    const diceMatch = derivedAtk.damageFormula.match(/^(\d+d\d+)([+-]\d+)?$/)
+                    if (diceMatch) {
+                      mainDice = diceMatch[1]
+                      mainDmgMod = diceMatch[2] ? parseInt(diceMatch[2]) : 0
+                    } else {
+                      // Flat damage (unarmed non-monk: 1 + STR) — model as 1d1 + (n-1)
+                      const flat = parseInt(derivedAtk.damageFormula)
+                      mainDice = '1d1'
+                      mainDmgMod = Number.isFinite(flat) ? Math.max(0, flat - 1) : 0
+                    }
+                  } else {
+                    mainDice = '1d8'
+                    mainDmgMod = Math.max(abilityMod(str), abilityMod(dex))
+                  }
 
-                  const mainDice = mainWeapon?.damageDice ?? '1d8'
-                  const mainLabel = mainWeapon ? mainWeapon.name : 'Weapon'
+                  const mainLabel = mainWeapon ? mainWeapon.name : (derivedAtk?.weaponName ?? 'Weapon')
                   const mainIsRanged = mainWeapon?.attackType === 'ranged'
 
                   return (
@@ -1296,7 +1346,7 @@ export function PlayerSidebar({
                       <div className="flex gap-1">
                         <button
                           type="button"
-                          onClick={doWeaponAttack}
+                          onClick={() => doWeaponAttack(mainAtkMod)}
                           className="flex-1 rounded-md border border-emerald-800/50 bg-emerald-900/20 px-1 py-1 text-[10px] font-semibold text-emerald-200 hover:bg-emerald-900/40"
                           title={`${mainLabel} attack roll`}
                         >
@@ -1673,7 +1723,7 @@ export function PlayerSidebar({
                         </div>
                       ) : (
                         <div className="space-y-1.5">
-                          <button type="button" onClick={doWeaponAttack} disabled={!sheet || targetAC == null} className="w-full rounded-lg border border-emerald-800/60 bg-emerald-900/20 px-2 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-900/40 disabled:cursor-not-allowed disabled:opacity-40">⚔ Weapon Attack</button>
+                          <button type="button" onClick={() => doWeaponAttack()} disabled={!sheet || targetAC == null} className="w-full rounded-lg border border-emerald-800/60 bg-emerald-900/20 px-2 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-900/40 disabled:cursor-not-allowed disabled:opacity-40">⚔ Weapon Attack</button>
                           <button type="button" onClick={doSpellAttack} disabled={!sheet || targetAC == null || !sheet.spell_attack_bonus} className="w-full rounded-lg border border-blue-800/60 bg-blue-900/20 px-2 py-2 text-xs font-semibold text-blue-200 hover:bg-blue-900/40 disabled:cursor-not-allowed disabled:opacity-40">✦ Spell Attack</button>
                         </div>
                       )}

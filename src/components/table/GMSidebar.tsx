@@ -109,6 +109,19 @@ export default function GMSidebar({
     };
   }, []);
 
+  // BUG-09 fix: auto-switch to Tools tab when a token is targeted on the map
+  // so the GM immediately sees the monster stat block in DMPanel
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (ev: Event) => {
+      const tok = (ev as CustomEvent).detail?.token ?? null;
+      if (!tok) return;
+      setActiveTab('tools');
+    };
+    window.addEventListener('dnd721-target-selected', handler);
+    return () => window.removeEventListener('dnd721-target-selected', handler);
+  }, []);
+
   // Load initiative entries for footer strip
   useEffect(() => {
     if (!encounterId) {

@@ -90,6 +90,8 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   const canInteract = !sessionStatus || SESSION_GATES.canInteractWithMap(sessionStatus)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  // BUG-03: movement-range highlight layer (between map and token canvas)
+  const rangeCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const tokenCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const fogCanvasRef = useRef<HTMLCanvasElement | null>(null)
 
@@ -696,6 +698,62 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     ctx.restore()
   }, [canvasSize, reveals, gridSize])
 
+  // BUG-03: Compute set of tiles the player can still reach this turn.
+  // Uses the same Euclidean-distance formula as commitMoveToTarget so the
+  // highlighted area matches the actual movement budget exactly.
+  const reachableTiles = useMemo(() => {
+    const set = new Set<string>()
+    if (!isMyTurn || !canvasSize || !ownerLower) return set
+    const myToken = tokens.find(t => t.owner_wallet?.toLowerCase() === ownerLower)
+    if (!myToken) return set
+    const remainingFt = Math.max(0, Math.floor(speedFeet) - Math.floor(moveUsedFt))
+    if (remainingFt <= 0) return set
+
+    const tileRadius = remainingFt / 5
+    const tx = Math.floor(myToken.x / gridSize)
+    const ty = Math.floor(myToken.y / gridSize)
+    const cols = Math.ceil(canvasSize.width / gridSize)
+    const rows = Math.ceil(canvasSize.height / gridSize)
+    const r = Math.ceil(tileRadius)
+
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dy = -r; dy <= r; dy++) {
+        const nx = tx + dx
+        const ny = ty + dy
+        if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue
+        if (Math.sqrt(dx * dx + dy * dy) <= tileRadius) {
+          set.add(keyTile(nx, ny))
+        }
+      }
+    }
+    return set
+  }, [isMyTurn, tokens, ownerLower, moveUsedFt, speedFeet, canvasSize, gridSize])
+
+  // BUG-03: Draw movement-range overlay onto rangeCanvasRef
+  useEffect(() => {
+    const canvas = rangeCanvasRef.current
+    const ctx = canvas?.getContext('2d')
+    if (!canvas || !ctx || !canvasSize) return
+
+    canvas.width = canvasSize.width
+    canvas.height = canvasSize.height
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+    if (reachableTiles.size === 0) return
+
+    ctx.fillStyle = 'rgba(59,130,246,0.20)'
+    ctx.strokeStyle = 'rgba(59,130,246,0.45)'
+    ctx.lineWidth = 1
+
+    for (const key of reachableTiles) {
+      const [tileX, tileY] = key.split(':').map(Number)
+      const px = tileX * gridSize
+      const py = tileY * gridSize
+      ctx.fillRect(px, py, gridSize, gridSize)
+      ctx.strokeRect(px + 0.5, py + 0.5, gridSize - 1, gridSize - 1)
+    }
+  }, [reachableTiles, canvasSize, gridSize])
+
   // ✅ Dash action — sets dashing flag locally + persists to action_state
   async function handleDash() {
     setIsDashing(true)
@@ -1090,6 +1148,8 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     >
       <div className="relative inline-block" style={transformStyle}>
         <canvas ref={mapCanvasRef} className="block" />
+        {/* BUG-03: movement-range highlight — sits above map, below tokens */}
+        <canvas ref={rangeCanvasRef} className="pointer-events-none absolute left-0 top-0" />
         <canvas ref={tokenCanvasRef} className="pointer-events-none absolute left-0 top-0" />
         <canvas
           ref={fogCanvasRef}

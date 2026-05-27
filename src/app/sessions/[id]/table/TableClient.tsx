@@ -171,13 +171,22 @@ export default function TableClient({ sessionId }: TableClientProps) {
     return () => window.removeEventListener('dnd721-conditions-toggle', handler)
   }, [])
 
+  // BUG-06 fix: track last triggered tile per token so triggers only fire on
+  // tile ENTRY (when the token moves to a new tile), not on every move commit.
+  const lastTriggerTileRef = useRef<Map<string, { x: number; y: number }>>(new Map())
+
   // Environmental trigger detection — listen for token moves and check triggers
   useEffect(() => {
     if (!session) return
     const handler = async (event: Event) => {
       const ev = event as CustomEvent<{ tokenId: string; tileX: number; tileY: number; mapId?: string | null; encounterId?: string | null }>
-      const { tileX, tileY, mapId } = ev.detail ?? {}
+      const { tokenId, tileX, tileY, mapId } = ev.detail ?? {}
       if (tileX == null || tileY == null) return
+
+      // Only check triggers when the token has moved to a NEW tile
+      const lastTile = lastTriggerTileRef.current.get(tokenId)
+      if (lastTile && lastTile.x === tileX && lastTile.y === tileY) return
+      lastTriggerTileRef.current.set(tokenId, { x: tileX, y: tileY })
 
       try {
         const params = new URLSearchParams({
