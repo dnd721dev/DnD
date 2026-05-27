@@ -67,6 +67,14 @@ export const TableTopBar = memo(function TableTopBar(props: {
           >
             📖 SRD
           </button>
+          <button
+            type="button"
+            onClick={() => window.open(`/sessions/${session.id}/spells`, '_blank', 'noopener,noreferrer')}
+            className="rounded-md bg-purple-950 border border-purple-500/40 px-2.5 py-1 text-[11px] font-medium text-purple-400 hover:bg-purple-900 hover:text-purple-300 transition-colors"
+            title={isGm ? 'View all party spell slots' : 'Open spell dashboard in new tab'}
+          >
+            ✦ {isGm ? 'Party Slots' : 'Spells'}
+          </button>
           {onOpenShop && (
             <button
               type="button"
