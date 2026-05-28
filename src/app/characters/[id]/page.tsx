@@ -8,6 +8,11 @@ import type { Abilities } from '../../../types/character'
 import type { CharacterSheetData } from '@/components/character-sheet/types'
 
 import { CharacterHeader } from '@/components/character-sheet/CharacterHeader'
+import { MulticlassLevelUpModal } from '@/components/character-sheet/MulticlassLevelUpModal'
+import { WarlockInvocationsPanel } from '@/components/character-sheet/WarlockInvocationsPanel'
+import { getRacialResources } from '@/lib/racialResources'
+import { getMysticArcanumLevels } from '@/lib/spellcastingProgression'
+import type { DerivedResource } from '@/lib/applySubclassEffects'
 import { AbilitiesPanel } from '@/components/character-sheet/AbilitiesPanel'
 import { SavingThrowsPanel } from '@/components/character-sheet/SavingThrowsPanel'
 import { SkillsPanel } from '@/components/character-sheet/SkillsPanel'
@@ -364,6 +369,10 @@ export default function CharacterSheetPage() {
           delete next[`spell_slot_used_${lvl}`]
         }
       }
+      // Polish 1: zero racial innate _used counts for short-rest recharges.
+      const racialShort = getRacialResources(c?.race ?? null, Number(c?.level ?? 1))
+        .filter(r => r.recharge === 'short_rest')
+      for (const r of racialShort) next[r.key] = 0
       return next
     })
 
@@ -385,6 +394,12 @@ export default function CharacterSheetPage() {
         for (const lvl of Object.keys(c.spell_slots)) {
           delete next[`spell_slot_used_${lvl}`]
         }
+      }
+      // Polish 1: zero ALL racial innate _used counts (both short/long recharge)
+      // and zero Mystic Arcanum uses.
+      for (const key of Object.keys(next)) {
+        if (key.startsWith('racial_') && key.endsWith('_used')) next[key] = 0
+        if (key.startsWith('mystic_arcanum_used_')) next[key] = 0
       }
       return next
     })
@@ -484,6 +499,29 @@ export default function CharacterSheetPage() {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4 px-3 pb-16 md:px-6">
       <CharacterHeader c={c} d={d} />
+
+      {/* Wave 6I: Multiclass level-up prompt — appears when XP crossed a
+          threshold AND the character has a secondary class. Single-class
+          characters auto-level via award-xp and never see this. */}
+      <MulticlassLevelUpModal
+        c={c}
+        onApplied={async () => {
+          // Re-fetch the character to pick up the new level / slots / HP.
+          const { data } = await supabase
+            .from('characters')
+            .select('*')
+            .eq('id', id)
+            .limit(1)
+            .maybeSingle()
+          if (data) {
+            setC(data as any)
+            const rs = (data as any)?.resource_state ?? {}
+            const as = (data as any)?.action_state ?? {}
+            setResourceValues(typeof rs === 'object' && rs ? rs : {})
+            setActionState(typeof as === 'object' && as ? as : {})
+          }
+        }}
+      />
 
       {/* Level-up banner */}
       {isCaya && earnedLevel !== null && earnedLevel > currentLevel && (
@@ -603,9 +641,76 @@ export default function CharacterSheetPage() {
                 onToggleSneakArm={() => setSneakArmed((prev) => !prev)}
               />
               <ResourcesPanel
-                resources={d.resources ?? []}
-                values={resourceValues}
-                onChange={onChangeResource}
+                resources={(() => {
+                  // Polish 1 + 2: merge racial innates AND Mystic Arcanum into
+                  // the ResourcesPanel list so players can track everything
+                  // from the sheet.
+                  const base = d.resources ?? []
+                  const racial = getRacialResources(c.race ?? null, Number(c.level ?? 1))
+                  const racialDerived: DerivedResource[] = racial.map(r => ({
+                    key: r.key,
+                    name: `${r.name} (Racial)`,
+                    max: r.max,
+                    current: Math.max(0, r.max - Number(resourceValues[r.key] ?? 0)),
+                    recharge: r.recharge,
+                    note: `Racial innate · ${r.recharge.replace('_', ' ')} recharge`,
+                  }))
+                  // Mystic Arcanum picks (Warlock 11+)
+                  const arcanumLevels = getMysticArcanumLevels(c.main_job, Number(c.level ?? 1))
+                  const picks = ((c as any).mystic_arcanum ?? {}) as Record<string, string | null>
+                  const arcanumDerived: DerivedResource[] = arcanumLevels
+                    .filter(lvl => !!picks[String(lvl)])
+                    .map(lvl => {
+                      const key = `mystic_arcanum_used_${lvl}`
+                      const used = Number(resourceValues[key] ?? 0)
+                      return {
+                        key,
+                        name: `${picks[String(lvl)]} (Mystic Arcanum L${lvl})`,
+                        max: 1,
+                        current: Math.max(0, 1 - used),
+                        recharge: 'long_rest',
+                        note: '1/day — bypasses pact slots',
+                      }
+                    })
+                  return [...base, ...racialDerived, ...arcanumDerived]
+                })()}
+                // Polish 1 + 2: racial + arcanum keys store USED counts (per
+                // dashboard semantics), but ResourcesPanel displays AVAILABLE.
+                // Translate both directions.
+                values={(() => {
+                  const racial = getRacialResources(c.race ?? null, Number(c.level ?? 1))
+                  const arcanumLevels = getMysticArcanumLevels(c.main_job, Number(c.level ?? 1))
+                  if (racial.length === 0 && arcanumLevels.length === 0) return resourceValues
+                  const out = { ...resourceValues }
+                  for (const r of racial) {
+                    const used = Number(resourceValues[r.key] ?? 0)
+                    out[r.key] = Math.max(0, r.max - used)
+                  }
+                  for (const lvl of arcanumLevels) {
+                    const key = `mystic_arcanum_used_${lvl}`
+                    out[key] = Math.max(0, 1 - Number(resourceValues[key] ?? 0))
+                  }
+                  return out
+                })()}
+                onChange={(key, next) => {
+                  // Translate racial available → used count for storage.
+                  if (key.startsWith('racial_') && key.endsWith('_used')) {
+                    const racial = getRacialResources(c.race ?? null, Number(c.level ?? 1))
+                      .find(r => r.key === key)
+                    if (racial) {
+                      const newUsed = Math.max(0, Math.min(racial.max, racial.max - next))
+                      setResourceValues(prev => ({ ...prev, [key]: newUsed }))
+                      return
+                    }
+                  }
+                  // Mystic Arcanum: same translation (max = 1).
+                  if (key.startsWith('mystic_arcanum_used_')) {
+                    const newUsed = Math.max(0, Math.min(1, 1 - next))
+                    setResourceValues(prev => ({ ...prev, [key]: newUsed }))
+                    return
+                  }
+                  onChangeResource(key, next)
+                }}
                 onShortRest={onShortRest}
                 onLongRest={onLongRest}
                 conMod={abilityMod(abilities.con)}
@@ -644,13 +749,17 @@ export default function CharacterSheetPage() {
           {activeTab === 'notes' && <PersonalityNotesPanel c={c} />}
 
           {activeTab === 'magic' && isMageUser && (
-            <SpellsPanel
-              c={c}
-              spellSlots={c.spell_slots ?? null}
-              slotUsed={resourceValues}
-              onSpendSlot={onSpendSlot}
-              onRestoreSlot={onRestoreSlot}
-            />
+            <>
+              <SpellsPanel
+                c={c}
+                spellSlots={c.spell_slots ?? null}
+                slotUsed={resourceValues}
+                onSpendSlot={onSpendSlot}
+                onRestoreSlot={onRestoreSlot}
+              />
+              {/* Polish 3: Warlock invocations panel — auto-hides for non-Warlocks. */}
+              <WarlockInvocationsPanel c={c} />
+            </>
           )}
         </div>
 

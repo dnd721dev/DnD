@@ -487,6 +487,18 @@ export default function NewCharacterStep6Page() {
         spell_attack_bonus: spellAttackBonus,
         spell_slots: spellSlots,
 
+        // Wave 1B: EK/AT any-school wildcard picks. JSONB array of spell names
+        // that were picked using a wildcard from any school.
+        wildcard_spells: draft.wildcardSpells ?? [],
+
+        // Wave 3: Mystic Arcanum picks (Warlock 11+). JSONB keyed by spell
+        // level. Each entry is castable 1/day (long rest) bypassing pact slots.
+        mystic_arcanum: draft.mysticArcanum ?? {},
+
+        // Wave 4: Warlock Eldritch Invocations. TEXT[] of invocation keys.
+        // Book of Ancient Secrets grants ritual casting; others are passive.
+        warlock_invocations: draft.warlockInvocations ?? [],
+
         // NFT
         nft_contract: (draft as any).nft_contract ?? null,
         nft_token_id: (draft as any).nft_token_id ?? null,

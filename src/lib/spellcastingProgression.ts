@@ -473,6 +473,150 @@ export const DOMAIN_SPELLS_BY_SUBCLASS: Partial<Record<string, Record<number, st
     4: ['Conjure Woodland Beings', 'Dominate Beast'],
     5: ['Conjure Celestial', 'Insect Plague'],
   },
+
+  // ── Ranger Conclaves (Tasha's optional always-prepared spells) ───────────
+  // Wave 1A: these subclasses have explicit expanded spell lists in XGtE or
+  // Tasha's. Hunter / Beast Master from PHB don't have a fixed list (Tasha's
+  // adds one; included here for parity).
+  ranger_hunter: {
+    1: ["Hunter's Mark"],
+    2: ['Pass without Trace'],
+    3: ['Lightning Arrow'],
+    4: ['Stoneskin'],
+    5: ['Swift Quiver'],
+  },
+  ranger_beast_master: {
+    1: ['Animal Friendship'],
+    2: ['Beast Sense'],
+    3: ['Conjure Animals'],
+    4: ['Dominate Beast'],
+    5: ['Commune with Nature'],
+  },
+  ranger_gloom_stalker: {
+    1: ['Disguise Self'],
+    2: ['Rope Trick'],
+    3: ['Fear'],
+    4: ['Greater Invisibility'],
+    5: ['Seeming'],
+  },
+  ranger_horizon_walker: {
+    1: ['Protection from Evil and Good'],
+    2: ['Misty Step'],
+    3: ['Haste'],
+    4: ['Banishment'],
+    5: ['Teleportation Circle'],
+  },
+  ranger_monster_slayer: {
+    1: ['Protection from Evil and Good'],
+    2: ['Zone of Truth'],
+    3: ['Magic Circle'],
+    4: ['Banishment'],
+    5: ['Hold Monster'],
+  },
+  ranger_fey_wanderer: {
+    1: ['Charm Person'],
+    2: ['Misty Step'],
+    3: ['Dispel Magic'],
+    4: ['Dimension Door'],
+    5: ['Mislead'],
+  },
+  ranger_swarmkeeper: {
+    1: ['Faerie Fire'],
+    2: ['Web'],
+    3: ['Gaseous Form'],
+    4: ['Arcane Eye'],
+    5: ['Insect Plague'],
+  },
+  ranger_drakewarden: {
+    1: ['Thunderwave'],
+    2: ["Aganazzar's Scorcher"],
+    3: ['Fear'],
+    4: ['Arcane Eye'],
+    5: ['Hold Monster'],
+  },
+
+  // ── Warlock Patrons (always-prepared in addition to spells known) ────────
+  warlock_fiend: {
+    1: ['Burning Hands', 'Command'],
+    2: ['Blindness/Deafness', 'Scorching Ray'],
+    3: ['Fireball', 'Stinking Cloud'],
+    4: ['Fire Shield', 'Wall of Fire'],
+    5: ['Flame Strike', 'Hallow'],
+  },
+  warlock_archfey: {
+    1: ['Faerie Fire', 'Sleep'],
+    2: ['Calm Emotions', 'Phantasmal Force'],
+    3: ['Blink', 'Plant Growth'],
+    4: ['Dominate Beast', 'Greater Invisibility'],
+    5: ['Dominate Person', 'Seeming'],
+  },
+  warlock_great_old_one: {
+    1: ['Dissonant Whispers', "Tasha's Hideous Laughter"],
+    2: ['Detect Thoughts', 'Phantasmal Force'],
+    3: ['Clairvoyance', 'Sending'],
+    4: ["Evard's Black Tentacles", 'Dominate Beast'],
+    5: ['Dominate Person', 'Telekinesis'],
+  },
+  warlock_celestial: {
+    1: ['Cure Wounds', 'Guiding Bolt'],
+    2: ['Flaming Sphere', 'Lesser Restoration'],
+    3: ['Daylight', 'Revivify'],
+    4: ['Guardian of Faith', 'Wall of Fire'],
+    5: ['Flame Strike', 'Greater Restoration'],
+  },
+  warlock_hexblade: {
+    1: ['Shield', 'Wrathful Smite'],
+    2: ['Blur', 'Branding Smite'],
+    3: ['Blink', 'Elemental Weapon'],
+    4: ['Phantasmal Killer', 'Staggering Smite'],
+    5: ['Banishing Smite', 'Cone of Cold'],
+  },
+  warlock_fathomless: {
+    1: ['Create or Destroy Water', 'Thunderwave'],
+    2: ['Gust of Wind', 'Silence'],
+    3: ['Lightning Bolt', 'Sleet Storm'],
+    4: ['Control Water', 'Summon Elemental'],
+    5: ["Bigby's Hand", 'Cone of Cold'],
+  },
+  warlock_genie: {
+    1: ['Detect Evil and Good', 'Phantom Steed'],
+    2: ['Phantasmal Force', 'Protection from Evil and Good'],
+    3: ['Create Food and Water', 'Sending'],
+    4: ['Phantasmal Killer', 'Stoneskin'],
+    5: ['Creation', 'Wall of Stone'],
+  },
+  warlock_undying: {
+    1: ['False Life', 'Ray of Sickness'],
+    2: ['Blindness/Deafness', 'Silence'],
+    3: ['Feign Death', 'Speak with Dead'],
+    4: ['Aura of Life', 'Death Ward'],
+    5: ['Contagion', 'Legend Lore'],
+  },
+  warlock_undead: {
+    1: ['Bane', 'False Life'],
+    2: ['Blindness/Deafness', 'Phantasmal Force'],
+    3: ['Phantom Steed', 'Speak with Dead'],
+    4: ['Death Ward', 'Greater Invisibility'],
+    5: ['Antilife Shell', 'Cloudkill'],
+  },
+
+  // ── Sorcerous Origins with explicit expanded spell lists (Tasha's) ───────
+  // 2014 PHB Draconic Bloodline / Wild Magic have no expanded list.
+  // Divine Soul: picks from cleric — handled differently, no fixed list here.
+  sorcerer_aberrant_mind: {
+    1: ['Arms of Hadar', 'Dissonant Whispers'],
+    2: ['Calm Emotions', 'Detect Thoughts'],
+    3: ['Hunger of Hadar', 'Sending'],
+    4: ["Evard's Black Tentacles", 'Summon Aberration'],
+    5: ["Rary's Telepathic Bond", 'Telekinesis'],
+  },
+  sorcerer_clockwork_soul: {
+    1: ['Alarm', 'Protection from Evil and Good'],
+    2: ['Aid', 'Lesser Restoration'],
+    3: ['Dispel Magic', 'Protection from Energy'],
+    4: ['Freedom of Movement', 'Summon Construct'],
+    5: ['Greater Restoration', 'Wall of Force'],
+  },
 }
 
 // -----------------------------
@@ -525,4 +669,283 @@ export function getDomainSpells(subclassKey: string, maxSpellLevel: number): str
     result.push(...(map[lvl] ?? []))
   }
   return result
+}
+
+// -----------------------------
+// Wave 6 — Multiclass support
+// -----------------------------
+
+/**
+ * One class entry for a multiclass character.
+ * Single-class characters are represented as a single-element array.
+ */
+export type MulticlassEntry = {
+  classKey: ClassKey
+  level: number
+  subclassKey?: string | null
+}
+
+/**
+ * PHB p.165 — multiclass ability score prerequisites. Each entry lists the
+ * minimum ability score(s) you need to take a level in that class.
+ *
+ * Special cases:
+ * - Fighter: STR OR DEX 13 (`anyOf`)
+ * - Monk: DEX AND WIS 13
+ * - Paladin: STR AND CHA 13
+ * - Ranger: DEX AND WIS 13
+ */
+export const MULTICLASS_PREREQS: Partial<Record<ClassKey, {
+  all?: Array<{ ability: 'str'|'dex'|'con'|'int'|'wis'|'cha', min: number }>
+  anyOf?: Array<{ ability: 'str'|'dex'|'con'|'int'|'wis'|'cha', min: number }>
+}>> = {
+  barbarian: { all: [{ ability: 'str', min: 13 }] },
+  bard:      { all: [{ ability: 'cha', min: 13 }] },
+  cleric:    { all: [{ ability: 'wis', min: 13 }] },
+  druid:     { all: [{ ability: 'wis', min: 13 }] },
+  fighter:   { anyOf: [{ ability: 'str', min: 13 }, { ability: 'dex', min: 13 }] },
+  monk:      { all: [{ ability: 'dex', min: 13 }, { ability: 'wis', min: 13 }] },
+  paladin:   { all: [{ ability: 'str', min: 13 }, { ability: 'cha', min: 13 }] },
+  ranger:    { all: [{ ability: 'dex', min: 13 }, { ability: 'wis', min: 13 }] },
+  rogue:     { all: [{ ability: 'dex', min: 13 }] },
+  sorcerer:  { all: [{ ability: 'cha', min: 13 }] },
+  warlock:   { all: [{ ability: 'cha', min: 13 }] },
+  wizard:    { all: [{ ability: 'int', min: 13 }] },
+  artificer: { all: [{ ability: 'int', min: 13 }] },
+}
+
+/**
+ * Check whether a character with the given ability scores can multiclass
+ * INTO `targetClass`. Per PHB, BOTH the current class and the target class
+ * must satisfy their respective prereqs (i.e. you can't multiclass FROM
+ * a class you no longer qualify for either, but in practice this is checked
+ * at the target-class side since the starting class has no prereq).
+ *
+ * Returns:
+ *   { ok: true } on success
+ *   { ok: false, reason: '...' } with a player-readable explanation
+ */
+export function canMulticlassInto(
+  targetClass: ClassKey,
+  abilities: Partial<Record<'str'|'dex'|'con'|'int'|'wis'|'cha', number>>,
+  currentClass?: ClassKey,
+): { ok: true } | { ok: false, reason: string } {
+  function check(cls: ClassKey): string | null {
+    const req = MULTICLASS_PREREQS[cls]
+    if (!req) return null
+    if (req.all) {
+      for (const c of req.all) {
+        const score = Number(abilities[c.ability] ?? 0)
+        if (score < c.min) {
+          return `${cls} requires ${c.ability.toUpperCase()} ${c.min}+ (has ${score})`
+        }
+      }
+    }
+    if (req.anyOf) {
+      const matched = req.anyOf.some(c => Number(abilities[c.ability] ?? 0) >= c.min)
+      if (!matched) {
+        const list = req.anyOf.map(c => `${c.ability.toUpperCase()} ${c.min}`).join(' or ')
+        return `${cls} requires ${list}`
+      }
+    }
+    return null
+  }
+
+  // Target class must satisfy prereqs.
+  const targetErr = check(targetClass)
+  if (targetErr) return { ok: false, reason: targetErr }
+  // Original (current) class also must satisfy prereqs to multiclass.
+  if (currentClass && currentClass !== targetClass) {
+    const currentErr = check(currentClass)
+    if (currentErr) return { ok: false, reason: `Current class — ${currentErr}` }
+  }
+  return { ok: true }
+}
+
+/**
+ * Compute combined spell slots for a multiclass spellcaster per PHB p.164.
+ *
+ * Caster-level contribution:
+ *   - Full caster (Bard/Cleric/Druid/Sorcerer/Wizard): full level
+ *   - Half caster (Paladin/Ranger): floor(level / 2), but counted only at
+ *     level 2+ (level 1 contributes nothing)
+ *   - Artificer: ceil(level / 2) — half-caster that rounds up
+ *   - Third caster (EK / AT subclasses): floor(level / 3) at level 3+
+ *
+ * Warlocks are NOT combined here — Warlock pact magic is a separate slot
+ * pool and stays the way it is. Callers handle Warlock separately.
+ *
+ * Returns the slots from the FULL_CASTER_SLOTS_BY_LEVEL table at the
+ * computed combined caster level. Returns {} for non-casters.
+ */
+export function getMulticlassSlots(entries: MulticlassEntry[]): SpellSlots {
+  let casterLevels = 0
+  for (const e of entries) {
+    const cls = e.classKey
+    const lvl = Math.max(0, Math.floor(e.level))
+    if (lvl === 0) continue
+    const casterType = CLASS_CASTER_TYPE[cls]
+    // Warlocks not combined.
+    if (cls === 'warlock') continue
+    // Third-caster contribution (EK / AT) — only when subclass actually grants it
+    if (casterType === 'none') {
+      const sub = (e.subclassKey ?? '').toLowerCase()
+      const isEK = cls === 'fighter' && sub === 'fighter_eldritch_knight'
+      const isAT = cls === 'rogue' && sub === 'rogue_arcane_trickster'
+      if ((isEK || isAT) && lvl >= 3) casterLevels += Math.floor(lvl / 3)
+      continue
+    }
+    if (casterType === 'full') casterLevels += lvl
+    else if (casterType === 'half') {
+      // Paladin/Ranger: level 1 contributes 0 (no slots yet); level 2+ contributes floor(level/2)
+      if (lvl >= 2) casterLevels += Math.floor(lvl / 2)
+    }
+    else if (casterType === 'artificer') casterLevels += Math.ceil(lvl / 2)
+    else if (casterType === 'third') casterLevels += Math.floor(lvl / 3)
+  }
+  if (casterLevels <= 0) return {}
+  // Use the full-caster table at the combined level.
+  return getSlotsForCasterType('full', casterLevels)
+}
+
+// -----------------------------
+// Wave 3 — Warlock Mystic Arcanum (PHB)
+// -----------------------------
+
+/**
+ * Returns the list of Mystic Arcanum spell levels a Warlock has unlocked.
+ * - 6th-level Arcanum at character level 11
+ * - 7th-level at 13
+ * - 8th-level at 15
+ * - 9th-level at 17
+ *
+ * Each arcanum is castable 1/day (long rest). For non-Warlocks, returns [].
+ */
+export function getMysticArcanumLevels(
+  classKey: string | null | undefined,
+  level: number,
+): number[] {
+  if ((classKey ?? '').toLowerCase() !== 'warlock') return []
+  const unlocked: number[] = []
+  if (level >= 11) unlocked.push(6)
+  if (level >= 13) unlocked.push(7)
+  if (level >= 15) unlocked.push(8)
+  if (level >= 17) unlocked.push(9)
+  return unlocked
+}
+
+// -----------------------------
+// Wave 1B — EK/AT any-school wildcard picks
+// -----------------------------
+
+/**
+ * Eldritch Knight and Arcane Trickster gain one any-school spell pick at
+ * character levels 3, 8, 14, and 20 (per the PHB rules for these subclasses).
+ * Returns the total number of wildcard picks available at the given level,
+ * or 0 for any other subclass / classKey.
+ *
+ * Players can use a wildcard to add a leveled spell from any school
+ * (otherwise restricted by `getAllowedSchoolsForSubclass`).
+ */
+export function getWildcardCountForSubclass(
+  classKey: string | null | undefined,
+  subclassKey: string | null | undefined,
+  level: number,
+): number {
+  const cls = (classKey ?? '').toLowerCase()
+  const sub = (subclassKey ?? '').toLowerCase()
+  const isEK = cls === 'fighter' && sub === 'fighter_eldritch_knight'
+  const isAT = cls === 'rogue' && sub === 'rogue_arcane_trickster'
+  if (!isEK && !isAT) return 0
+  // Milestones: 3, 8, 14, 20
+  let count = 0
+  if (level >= 3) count++
+  if (level >= 8) count++
+  if (level >= 14) count++
+  if (level >= 20) count++
+  return count
+}
+
+// -----------------------------
+// Section D — Subclass school restrictions (EK / AT)
+// -----------------------------
+
+/**
+ * Returns the spell schools an EK / AT must restrict their non-cantrip picks
+ * to, or `null` for any class without a school restriction.
+ *
+ * - Eldritch Knight (fighter_eldritch_knight): Abjuration, Evocation
+ * - Arcane Trickster (rogue_arcane_trickster): Enchantment, Illusion
+ *
+ * Note: 5e gives EK/AT one any-school "wildcard" pick at levels 3, 8, 14, 20.
+ * This V1 implementation does not enforce wildcards — picks are limited
+ * to the listed schools regardless of level. The wildcard is tracked as a
+ * deferred improvement in the audit plan.
+ */
+export function getAllowedSchoolsForSubclass(
+  classKey: string | null | undefined,
+  subclassKey: string | null | undefined,
+): string[] | null {
+  const cls = (classKey ?? '').toLowerCase()
+  const sub = (subclassKey ?? '').toLowerCase()
+  if (cls === 'fighter' && sub === 'fighter_eldritch_knight') {
+    return ['Abjuration', 'Evocation']
+  }
+  if (cls === 'rogue' && sub === 'rogue_arcane_trickster') {
+    return ['Enchantment', 'Illusion']
+  }
+  return null
+}
+
+// -----------------------------
+// Section A / F — Max spell level + spells-known unified helpers
+// -----------------------------
+
+/**
+ * The highest spell level a character can cast at the given level/class/subclass.
+ * Returns 0 if the character is not a spellcaster.
+ *
+ * - Warlocks use pact magic (returns the pactSlotLevel).
+ * - Half-casters (paladin/ranger) at level 1 have no slots yet — but per the
+ *   character-creation step (`isHalfCasterNoSlotsYet`), they can already pick
+ *   level-1 spells they'll cast at level 2. Pass `treatLevel1HalfCasterAsLevel1`
+ *   = true to opt into that behavior; otherwise the slot table is followed.
+ * - EK / AT at level 1–2 have no slots and no third-caster spellcasting yet.
+ */
+export function getMaxSpellLevelForClass(
+  classKey: string | null | undefined,
+  subclassKey: string | null | undefined,
+  level: number,
+  treatLevel1HalfCasterAsLevel1 = false,
+): number {
+  const cls = (classKey ?? '').toLowerCase()
+  const sub = (subclassKey ?? '').toLowerCase()
+  if (cls === 'warlock') {
+    return getWarlockPactRow(level)?.pactSlotLevel ?? 1
+  }
+  const isEK = cls === 'fighter' && sub === 'fighter_eldritch_knight' && level >= 3
+  const isAT = cls === 'rogue' && sub === 'rogue_arcane_trickster' && level >= 3
+  const slots = isEK || isAT
+    ? getSlotsForCasterType('third', level)
+    : getSpellSlotsForClass(cls as ClassKey, level)
+  const keys = Object.keys(slots).map(Number).filter(k => slots[k] > 0)
+  if (keys.length > 0) return Math.max(...keys)
+  if (treatLevel1HalfCasterAsLevel1 && (cls === 'paladin' || cls === 'ranger')) return 1
+  return 0
+}
+
+/**
+ * Max leveled spells known for known-spell casters, OR the Wizard spellbook
+ * size when the class is Wizard. Returns null for prepared casters
+ * (cleric / druid / paladin / artificer) — those use prepared-formula instead.
+ *
+ * Cantrips are NOT counted in this number — use `getCantripsKnown` for those.
+ */
+export function getMaxLeveledSpellsKnown(
+  classKey: string | null | undefined,
+  level: number,
+): number | null {
+  const cls = (classKey ?? '').toLowerCase() as SpellcastingClassKey
+  if (cls === 'wizard') return getWizardSpellbookSize(level)
+  return getSpellsKnown(cls, level) // null for prepared casters
 }

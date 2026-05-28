@@ -5,6 +5,14 @@ import type { CharacterSheetData, SpellSlotsSummary } from './types'
 import { SRD_SPELLS, type SrdSpell } from '@/lib/srdspells'
 import { formatMod } from './utils'
 import { supabase } from '@/lib/supabase'
+import {
+  getDomainSpells,
+  getMaxLeveledSpellsKnown,
+  getMaxSpellLevelForClass,
+  getCantripsKnown,
+  getAllowedSchoolsForSubclass,
+  getWildcardCountForSubclass,
+} from '@/lib/spellcastingProgression'
 
 // ── Spell Detail Modal ────────────────────────────────────────────────────────
 
@@ -237,6 +245,11 @@ export function SpellsPanel({
   const [preparedList, setPreparedList] = useState<string[]>(
     () => (c.spells_prepared ?? []) as string[],
   )
+  // Polish 4: track EK/AT wildcard_spells in local state so we can persist
+  // consumption together with the spell add.
+  const [wildcardList, setWildcardList] = useState<string[]>(
+    () => Array.isArray((c as any).wildcard_spells) ? ((c as any).wildcard_spells as string[]) : [],
+  )
 
   // ── new state ───────────────────────────────────────────────────────────────
   const [panelMode, setPanelMode] = useState<'my_spells' | 'browse_all'>('my_spells')
@@ -253,40 +266,112 @@ export function SpellsPanel({
   const knownSpellNames = useMemo(() => new Set(knownList), [knownList])
   const preparedSpellNames = useMemo(() => new Set(preparedList), [preparedList])
 
-  const classSpellTag = useMemo(() => {
-    const jobRaw = (c.main_job ?? '').toLowerCase()
-    switch (jobRaw) {
-      case 'cleric':    return 'cleric'
-      case 'paladin':   return 'paladin'
-      case 'druid':     return 'druid'
-      case 'wizard':    return 'wizard'
-      case 'sorcerer':  return 'sorcerer'
-      case 'warlock':   return 'warlock'
-      case 'bard':      return 'bard'
-      case 'ranger':    return 'ranger'
-      default:          return null
-    }
-  }, [c.main_job])
+  // Wave 6J: classSpellTag is now an ARRAY so multiclass characters see spells
+  // from every class list they belong to. Single-class characters get one entry.
+  const CASTER_CLASS_TAGS = new Set(['cleric','paladin','druid','wizard','sorcerer','warlock','bard','ranger'])
+  const classSpellTags = useMemo<string[]>(() => {
+    const out: string[] = []
+    const primary = String(c.main_job ?? '').toLowerCase()
+    if (CASTER_CLASS_TAGS.has(primary)) out.push(primary)
+    const secondary = String((c as any).secondary_class ?? '').toLowerCase()
+    if (secondary && CASTER_CLASS_TAGS.has(secondary)) out.push(secondary)
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [c.main_job, (c as any).secondary_class])
+
+  // Convenience: primary class only (for places that need to display a single label).
+  const classSpellTag = classSpellTags[0] ?? null
 
   const isPreparedCaster = useMemo(() => {
     const job = String(c.main_job ?? '').toLowerCase().trim()
     return job === 'cleric' || job === 'druid' || job === 'wizard' || job === 'paladin'
   }, [c.main_job])
 
+  // Magic audit section C.4: Paladin prepared cap uses HALF level (not full)
+  // per 5e rules. The previous formula gave Paladins level+mod, which was wrong.
   const maxPrepared = useMemo(() => {
     if (!isPreparedCaster) return null
     const level = Number(c.level ?? 1)
-    const abilityKey = (c.spellcasting_ability ?? 'int') as keyof typeof c.abilities
+    const abilityKey = (c.spellcasting_ability ?? 'int') as keyof NonNullable<typeof c.abilities>
     const score = Number((c.abilities as any)?.[abilityKey] ?? 10)
     const mod = Math.floor((score - 10) / 2)
+    const job = String(c.main_job ?? '').toLowerCase().trim()
+    if (job === 'paladin') return Math.max(1, Math.floor(level / 2) + mod)
     return Math.max(1, level + mod)
-  }, [isPreparedCaster, c.level, c.spellcasting_ability, c.abilities])
+  }, [isPreparedCaster, c.level, c.spellcasting_ability, c.abilities, c.main_job])
+
+  // Magic audit section C.4: domain / oath / circle spells are ALWAYS prepared
+  // and must be excluded from the prepared cap count. Without this, a level-3
+  // Life Cleric with 2 always-prepared domain spells effectively loses 2
+  // preparation slots.
+  //
+  // Wave 6J: multiclass — union domain spells from BOTH primary and secondary
+  // subclasses (each at the class's own level).
+  const domainSpellNames = useMemo(() => {
+    const result = new Set<string>()
+    const primaryCls = String(c.main_job ?? '').toLowerCase()
+    const primarySub = String(c.subclass ?? '').toLowerCase()
+    const primaryLevel = Number(c.level ?? 1)
+    if (primarySub) {
+      const maxLvl = getMaxSpellLevelForClass(primaryCls, primarySub, primaryLevel, true)
+      if (maxLvl > 0) {
+        for (const name of getDomainSpells(primarySub, maxLvl)) result.add(name)
+      }
+    }
+    const secCls = String((c as any).secondary_class ?? '').toLowerCase()
+    const secSub = String((c as any).secondary_subclass ?? '').toLowerCase()
+    const secLevel = Number((c as any).secondary_level ?? 0)
+    if (secSub && secLevel > 0) {
+      const maxLvl = getMaxSpellLevelForClass(secCls, secSub, secLevel, true)
+      if (maxLvl > 0) {
+        for (const name of getDomainSpells(secSub, maxLvl)) result.add(name)
+      }
+    }
+    return result
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [c.subclass, c.main_job, c.level, (c as any).secondary_class, (c as any).secondary_subclass, (c as any).secondary_level])
+
+  // Count of prepared spells that ACTUALLY count against the cap (excludes
+  // domain spells, since those are always prepared for free).
+  const preparedNonDomainCount = useMemo(() => {
+    return preparedList.filter(n => !domainSpellNames.has(n)).length
+  }, [preparedList, domainSpellNames])
+
+  // Magic audit section F.3: max-leveled-spells-known counter for known-spell
+  // casters (Sorcerer / Bard / Warlock / Ranger) and Wizard spellbook size.
+  // Existing characters with too many spells see a warning (we don't force a
+  // removal — that's the player's call after rebalancing their build).
+  const maxLeveledKnown = useMemo(() => {
+    const cls = String(c.main_job ?? '').toLowerCase()
+    return getMaxLeveledSpellsKnown(cls, Number(c.level ?? 1))
+  }, [c.main_job, c.level])
+
+  // Current leveled-spell count from spells_known (cantrips excluded).
+  const currentLeveledKnown = useMemo(() => {
+    return knownList.filter(name => {
+      const s = SRD_SPELLS.find(sp => sp.name === name)
+      return s && s.level > 0
+    }).length
+  }, [knownList])
+
+  const maxCantrips = useMemo(() => {
+    const cls = String(c.main_job ?? '').toLowerCase() as any
+    return getCantripsKnown(cls, Number(c.level ?? 1))
+  }, [c.main_job, c.level])
+
+  const currentCantrips = useMemo(() => {
+    return knownList.filter(name => {
+      const s = SRD_SPELLS.find(sp => sp.name === name)
+      return s && s.level === 0
+    }).length
+  }, [knownList])
 
   const filteredSpells: SrdSpell[] = useMemo(() => {
     let spells = SRD_SPELLS
 
-    if (onlyMyClassSpells && classSpellTag) {
-      spells = spells.filter((s) => s.classes?.includes(classSpellTag))
+    // Wave 6J: when "Class only" is on, OR all classes the character has.
+    if (onlyMyClassSpells && classSpellTags.length > 0) {
+      spells = spells.filter((s) => classSpellTags.some(t => s.classes?.includes(t as any)))
     }
     if (spellLevelFilter !== 'all') {
       spells = spells.filter((s) => s.level === spellLevelFilter)
@@ -296,7 +381,7 @@ export function SpellsPanel({
       spells = spells.filter((s) => s.name.toLowerCase().includes(q))
     }
     return spells
-  }, [onlyMyClassSpells, classSpellTag, spellLevelFilter, spellSearch])
+  }, [onlyMyClassSpells, classSpellTags, spellLevelFilter, spellSearch])
 
   // ── new memos for My Spells view ────────────────────────────────────────────
   const knownSpells: SrdSpell[] = useMemo(() =>
@@ -321,20 +406,48 @@ export function SpellsPanel({
     [knownByLevel],
   )
 
+  // Polish 4: EK/AT enforcement memoized helpers.
+  const allowedSchools = useMemo(
+    () => getAllowedSchoolsForSubclass(c.main_job, c.subclass),
+    [c.main_job, c.subclass],
+  )
+  const wildcardBudget = useMemo(
+    () => getWildcardCountForSubclass(c.main_job, c.subclass, Number(c.level ?? 1)),
+    [c.main_job, c.subclass, c.level],
+  )
+
+  function isOffSchool(spell: SrdSpell | undefined | null): boolean {
+    if (!spell || !allowedSchools) return false
+    if (spell.level === 0) return false // cantrips unrestricted
+    return !allowedSchools.includes(spell.school)
+  }
+
   // ── persistence helpers (unchanged) ────────────────────────────────────────
-  async function persistSpells(nextKnown: string[], nextPrepared: string[]) {
+  async function persistSpells(
+    nextKnown: string[],
+    nextPrepared: string[],
+    nextWildcards?: string[],
+  ) {
     setSaving(true)
     setSaveErr(null)
     try {
+      const updatePayload: Record<string, any> = {
+        spells_known: nextKnown,
+        spells_prepared: nextPrepared,
+      }
+      if (nextWildcards !== undefined) {
+        updatePayload.wildcard_spells = nextWildcards
+      }
       const { error } = await supabase
         .from('characters')
-        .update({ spells_known: nextKnown, spells_prepared: nextPrepared })
+        .update(updatePayload)
         .eq('id', c.id)
 
       if (error) throw error
 
       setKnownList(nextKnown)
       setPreparedList(nextPrepared)
+      if (nextWildcards !== undefined) setWildcardList(nextWildcards)
     } catch (e: any) {
       setSaveErr(e?.message ?? 'Failed to save spells')
     } finally {
@@ -345,10 +458,29 @@ export function SpellsPanel({
   async function toggleKnown(spellName: string) {
     const cur = [...knownList]
     const exists = knownSpellNames.has(spellName)
+    const spell = SRD_SPELLS.find(s => s.name === spellName)
+
+    // Polish 4: EK/AT off-school adds consume one wildcard slot.
+    let nextWildcards = wildcardList
+    if (allowedSchools && !exists && spell && isOffSchool(spell)) {
+      if (wildcardList.includes(spellName)) {
+        // already tracked as wildcard — no extra consumption
+      } else if (wildcardList.length >= wildcardBudget) {
+        setSaveErr(`No wildcards available — ${spell.school} is off-school for this subclass.`)
+        return
+      } else {
+        nextWildcards = [...wildcardList, spellName]
+      }
+    }
+    if (exists && wildcardList.includes(spellName)) {
+      // Removing a wildcard-tracked spell — free the slot.
+      nextWildcards = wildcardList.filter(n => n !== spellName)
+    }
+
     const next = exists ? cur.filter((n) => n !== spellName) : [...cur, spellName]
     const curPrep = [...preparedList]
     const nextPrep = exists ? curPrep.filter((n) => n !== spellName) : curPrep
-    await persistSpells(next, nextPrep)
+    await persistSpells(next, nextPrep, nextWildcards !== wildcardList ? nextWildcards : undefined)
   }
 
   async function togglePrepared(spellName: string) {
@@ -358,9 +490,14 @@ export function SpellsPanel({
     const cur = [...preparedList]
     const exists = preparedSpellNames.has(spellName)
 
-    if (!exists && maxPrepared !== null && cur.length >= maxPrepared) {
-      setSaveErr(`Can only prepare ${maxPrepared} spell${maxPrepared === 1 ? '' : 's'} (level + ability mod)`)
-      return
+    // Magic audit section C.4: domain/oath/circle spells are always prepared
+    // and don't count toward the cap. Compare against the non-domain count.
+    if (!exists && maxPrepared !== null && !domainSpellNames.has(spellName)) {
+      const curNonDomain = cur.filter(n => !domainSpellNames.has(n)).length
+      if (curNonDomain >= maxPrepared) {
+        setSaveErr(`Can only prepare ${maxPrepared} spell${maxPrepared === 1 ? '' : 's'} (domain spells don't count)`)
+        return
+      }
     }
 
     const next = exists ? cur.filter((n) => n !== spellName) : [...cur, spellName]
@@ -406,7 +543,7 @@ export function SpellsPanel({
 
       {/* Header: known/prepared counts + spellcasting stats */}
       <div className="mb-3">
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-2 mb-2 flex-wrap">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
             Spellbook
           </h2>
@@ -415,14 +552,72 @@ export function SpellsPanel({
           </span>
           <span
             className={`rounded px-1.5 py-0.5 text-[10px] ${
-              maxPrepared !== null && preparedSpellNames.size >= maxPrepared
+              maxPrepared !== null && preparedNonDomainCount >= maxPrepared
                 ? 'bg-amber-900/60 text-amber-300'
                 : 'bg-slate-900/70 text-slate-300'
             }`}
+            title={domainSpellNames.size > 0
+              ? `${preparedNonDomainCount} count against cap; ${domainSpellNames.size} domain spells always prepared.`
+              : undefined}
           >
-            Prepared {preparedSpellNames.size}{maxPrepared !== null ? `/${maxPrepared}` : ''}
+            Prepared {preparedNonDomainCount}{maxPrepared !== null ? `/${maxPrepared}` : ''}
           </span>
+
+          {/* Magic audit section F.3: leveled-spells-known counter for
+              known-spell casters and Wizard spellbook. */}
+          {maxLeveledKnown !== null && maxLeveledKnown > 0 && (
+            <span
+              className={`rounded px-1.5 py-0.5 text-[10px] ${
+                currentLeveledKnown > maxLeveledKnown
+                  ? 'bg-rose-900/60 text-rose-300'
+                  : currentLeveledKnown === maxLeveledKnown
+                    ? 'bg-emerald-900/40 text-emerald-300'
+                    : 'bg-slate-900/70 text-slate-300'
+              }`}
+              title={String(c.main_job).toLowerCase() === 'wizard'
+                ? 'Wizard spellbook size: 6 + 2×(level − 1)'
+                : 'Max leveled spells known at this level'}
+            >
+              {String(c.main_job).toLowerCase() === 'wizard' ? 'Spellbook' : 'Spells known'} {currentLeveledKnown}/{maxLeveledKnown}
+            </span>
+          )}
+
+          {/* Cantrip counter — applies to all cantrip-knowing classes. */}
+          {maxCantrips > 0 && (
+            <span
+              className={`rounded px-1.5 py-0.5 text-[10px] ${
+                currentCantrips > maxCantrips
+                  ? 'bg-rose-900/60 text-rose-300'
+                  : 'bg-slate-900/70 text-slate-300'
+              }`}
+            >
+              Cantrips {currentCantrips}/{maxCantrips}
+            </span>
+          )}
+
+          {/* Polish 4: EK/AT wildcard counter */}
+          {wildcardBudget > 0 && (
+            <span
+              className={`rounded px-1.5 py-0.5 text-[10px] ${
+                wildcardList.length === wildcardBudget
+                  ? 'bg-fuchsia-900/40 text-fuchsia-300'
+                  : 'bg-slate-900/70 text-slate-300'
+              }`}
+              title="EK / AT any-school wildcard picks (levels 3, 8, 14, 20)"
+            >
+              ✦ Wildcards {wildcardList.length}/{wildcardBudget}
+            </span>
+          )}
         </div>
+
+        {/* Over-limit warning banner. Doesn't auto-remove spells — the player
+            chooses what to drop. */}
+        {((maxLeveledKnown !== null && currentLeveledKnown > maxLeveledKnown) ||
+          (maxCantrips > 0 && currentCantrips > maxCantrips)) && (
+          <div className="mb-2 rounded-md border border-rose-700/40 bg-rose-950/30 px-2 py-1 text-[10px] text-rose-200">
+            ⚠ Over the limit for this class & level — remove a spell to balance your build.
+          </div>
+        )}
         {c.spellcasting_ability ? (
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 rounded-md bg-violet-900/30 border border-violet-700/40 px-2.5 py-1">
@@ -539,7 +734,9 @@ export function SpellsPanel({
             <div className="mb-2 rounded-md bg-violet-950/30 border border-violet-800/30 px-2 py-1.5 text-[10px] text-violet-300">
               Prepare spells here after a long rest.
               {maxPrepared !== null &&
-                ` (${preparedSpellNames.size}/${maxPrepared} prepared)`}
+                ` (${preparedNonDomainCount}/${maxPrepared} prepared${
+                  domainSpellNames.size > 0 ? ` + ${domainSpellNames.size} domain` : ''
+                })`}
             </div>
           )}
 
@@ -565,6 +762,7 @@ export function SpellsPanel({
                   {spells.map((spell) => {
                     const isPrepared = preparedSpellNames.has(spell.name)
                     const isCantrip = spell.level === 0
+                    const isDomain = domainSpellNames.has(spell.name)
                     return (
                       <div
                         key={spell.name}
@@ -576,8 +774,13 @@ export function SpellsPanel({
                       >
                         {/* Spell name + subtitle */}
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-[11px] font-semibold text-slate-100">
-                            {spell.name}
+                          <div className="truncate text-[11px] font-semibold text-slate-100 flex items-center gap-1">
+                            <span className="truncate">{spell.name}</span>
+                            {isDomain && (
+                              <span className="shrink-0 rounded bg-amber-900/40 border border-amber-700/40 px-1 py-0 text-[9px] text-amber-300" title="Always prepared — domain/oath/circle">
+                                Domain
+                              </span>
+                            )}
                           </div>
                           <div className="text-[10px] text-slate-400">
                             {spell.school} · {spell.castingTime}
@@ -588,6 +791,10 @@ export function SpellsPanel({
                         {isCantrip ? (
                           <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] bg-slate-800 text-slate-400">
                             Cantrip
+                          </span>
+                        ) : isDomain ? (
+                          <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] bg-amber-900/40 text-amber-300" title="Always prepared">
+                            ✦ Always
                           </span>
                         ) : (
                           <button
@@ -674,6 +881,10 @@ export function SpellsPanel({
             {filteredSpells.map((spell) => {
               const isKnown = knownSpellNames.has(spell.name)
               const isPrepared = preparedSpellNames.has(spell.name)
+              // Wave 6J: show which of the character's classes can cast this spell.
+              const fromTags = classSpellTags.length > 1
+                ? classSpellTags.filter(t => spell.classes?.includes(t as any))
+                : []
 
               return (
                 <button
@@ -688,6 +899,11 @@ export function SpellsPanel({
                       <div className="text-[10px] text-slate-400">
                         {spell.level === 0 ? 'Cantrip' : `Lvl ${spell.level}`} · {spell.school} ·{' '}
                         {spell.castingTime}
+                        {fromTags.length > 0 && (
+                          <span className="ml-1 text-violet-300">
+                            · {fromTags.map(t => `from ${t.charAt(0).toUpperCase()}${t.slice(1)}`).join(' / ')}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -727,7 +943,9 @@ export function SpellsPanel({
           isPrepared={preparedSpellNames.has(selected.name)}
           isPreparedCaster={isPreparedCaster}
           maxPrepared={maxPrepared}
-          preparedCount={preparedSpellNames.size}
+          // Section C.4: show the non-domain count so the cap badge in the
+          // modal matches the rule that domain spells don't count.
+          preparedCount={preparedNonDomainCount}
           saving={saving}
           onClose={() => setSelected(null)}
           onToggleKnown={toggleKnown}

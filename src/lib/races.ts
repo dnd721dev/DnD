@@ -80,9 +80,19 @@ export type Race = {
    * Innate spell grants from racial heritage.
    * `auto` spells are always granted (no choice needed).
    * `cantripChoiceFrom` means the player picks 1 cantrip from that class list.
+   *
+   * Wave 2: `usesPerDay` (omitted = at-will, e.g. cantrips) and `rechargeType`
+   * (default 'long_rest') drive the daily-use tracking in the dashboard and
+   * sheet. Stored at runtime as `racial_<raceKey>_<slug>_used` keys in
+   * `characters.resource_state`.
    */
   innateSpells?: {
-    auto?: Array<{ spellName: string; unlocksAtLevel?: number }>
+    auto?: Array<{
+      spellName: string
+      unlocksAtLevel?: number
+      usesPerDay?: number
+      rechargeType?: 'long_rest' | 'short_rest'
+    }>
     cantripChoiceFrom?: SpellClass
   }
 }
@@ -368,9 +378,9 @@ export const RACES: Record<RaceKey, Race> = {
     ],
     innateSpells: {
       auto: [
-        { spellName: 'Dancing Lights' },
-        { spellName: 'Faerie Fire', unlocksAtLevel: 3 },
-        { spellName: 'Darkness', unlocksAtLevel: 5 },
+        { spellName: 'Dancing Lights' }, // cantrip, at-will
+        { spellName: 'Faerie Fire', unlocksAtLevel: 3, usesPerDay: 1, rechargeType: 'long_rest' },
+        { spellName: 'Darkness', unlocksAtLevel: 5, usesPerDay: 1, rechargeType: 'long_rest' },
       ],
     },
   },
@@ -730,9 +740,9 @@ export const RACES: Record<RaceKey, Race> = {
     ],
     innateSpells: {
       auto: [
-        { spellName: 'Thaumaturgy' },
-        { spellName: 'Hellish Rebuke', unlocksAtLevel: 3 },
-        { spellName: 'Darkness', unlocksAtLevel: 5 },
+        { spellName: 'Thaumaturgy' }, // cantrip, at-will
+        { spellName: 'Hellish Rebuke', unlocksAtLevel: 3, usesPerDay: 1, rechargeType: 'long_rest' },
+        { spellName: 'Darkness', unlocksAtLevel: 5, usesPerDay: 1, rechargeType: 'long_rest' },
       ],
     },
   },

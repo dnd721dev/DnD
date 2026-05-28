@@ -14,12 +14,57 @@ import {
   categorizeSpell,
   scaleDamageForSlot,
   scaleHealForSlot,
+  scaleCantripDamage,
   getHealDice,
   isSpellcaster,
   getSpellcastingAbility,
+  getCastingAbilityForSpell,
   profBonus,
   abilityModifier,
 } from '@/lib/spellCategories'
+import {
+  longRestSlots,
+  shortRestSlots,
+  expendMysticArcanum,
+} from '@/lib/spellSlots'
+import { getDomainSpells, getMysticArcanumLevels } from '@/lib/spellcastingProgression'
+import { hasRitualCasting } from '@/lib/invocations'
+
+/**
+ * Effect 1: Agonizing Blast — when a Warlock has this invocation, Eldritch
+ * Blast adds CHA mod to each beam. Parses a damage string like "3d10" into
+ * `count` and `die`, then appends `+count*chaMod` if positive.
+ *
+ * Examples:
+ *   ("1d10", 4, true) -> "1d10+4"
+ *   ("3d10", 4, true) -> "3d10+12"
+ *   ("3d10", 0, true) -> "3d10"  (no bonus if mod is 0)
+ *   ("3d10", 4, false) -> "3d10" (invocation not selected)
+ */
+function applyAgonizingBlast(damage: string, chaMod: number, hasAgonizingBlast: boolean): string {
+  if (!hasAgonizingBlast || chaMod <= 0) return damage
+  const m = damage.match(/^(\d+)(d\d+)(.*)$/)
+  if (!m) return damage
+  const count = parseInt(m[1], 10)
+  const die = m[2]
+  const rest = m[3] ?? ''
+  const totalBonus = count * chaMod
+  // If the damage already has a +N suffix, add to it
+  const restNum = rest.match(/^([+-]\d+)(.*)$/)
+  if (restNum) {
+    const existing = parseInt(restNum[1], 10)
+    const newBonus = existing + totalBonus
+    const sign = newBonus >= 0 ? '+' : ''
+    return `${count}${die}${sign}${newBonus}${restNum[2] ?? ''}`
+  }
+  return `${count}${die}+${totalBonus}${rest}`
+}
+import {
+  getRacialResources,
+  expendRacialResource,
+  restoreRacialResource,
+  type RacialResource,
+} from '@/lib/racialResources'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -28,14 +73,26 @@ type CharRow = {
   name: string
   level: number
   main_job: string | null
+  subclass: string | null
+  /** Wave 6K: multiclass — secondary class fields for per-spell casting ability */
+  secondary_class: string | null
+  secondary_subclass: string | null
+  secondary_level: number | null
+  race: string | null
   abilities: Record<string, number> | null
   spell_slots: Record<string, number> | null
   resource_state: Record<string, any> | null
+  /** Wave 5: holds concentrating_on (spell name) + active_conditions array */
+  action_state: Record<string, any> | null
   spells_prepared: string[] | null
   spell_save_dc: number | null
   spell_attack_bonus: number | null
   hit_points_current: number | null
   hit_points_max: number | null
+  /** Wave 3: Warlock Mystic Arcanum picks { "6": "Eyebite", "7": null, ... } */
+  mystic_arcanum: Record<string, string | null> | null
+  /** Wave 4: Warlock Eldritch Invocations (string[] of invocation keys) */
+  warlock_invocations: string[] | null
   wallet_address: string
 }
 
@@ -240,7 +297,12 @@ function CombatSpellCard({
   spellAttackBonus,
   spellSaveDC,
   charLevel,
+  isDomain,
+  ritualEligible,
+  agonizingBlast,
+  chaMod,
   onRoll,
+  onRitualCast,
   pending,
   onApply,
   onClearPending,
@@ -251,7 +313,14 @@ function CombatSpellCard({
   spellAttackBonus: number
   spellSaveDC: number
   charLevel: number
+  isDomain: boolean
+  ritualEligible: boolean
+  /** Effect 1: when true and spell is Eldritch Blast, add chaMod per beam */
+  agonizingBlast: boolean
+  /** Effect 1: CHA modifier to apply with Agonizing Blast */
+  chaMod: number
   onRoll: (spell: SrdSpell, slotLevel: number, targetId: string, rollType: 'attack' | 'save' | 'damage') => void
+  onRitualCast: (spell: SrdSpell, targetId: string) => void
   pending: PendingRoll | null
   onApply: () => void
   onClearPending: () => void
@@ -263,9 +332,17 @@ function CombatSpellCard({
   const slotsAtLevel = slots[String(selectedSlot)]
   const hasSlots = isCantrip || (slotsAtLevel ? slotsAtLevel.used < slotsAtLevel.max : false)
 
-  const scaledDmg = isCantrip
-    ? (spell.damage ?? '1d6')
+  // Magic audit section B: cantrip damage scales with character level (not slot level).
+  // 5e cantrips gain extra dice at character levels 5, 11, and 17. Previously the dashboard
+  // showed raw cantrip damage (e.g. Fire Bolt always rolled 1d10 regardless of level).
+  const baseScaledDmg = isCantrip
+    ? scaleCantripDamage(spell.damage ?? '1d6', charLevel)
     : scaleDamageForSlot(spell, selectedSlot)
+
+  // Effect 1: Agonizing Blast adds CHA per beam to Eldritch Blast.
+  const scaledDmg = (agonizingBlast && spell.name === 'Eldritch Blast')
+    ? applyAgonizingBlast(baseScaledDmg, chaMod, true)
+    : baseScaledDmg
 
   const isConc = spell.duration.toLowerCase().includes('concentration')
   const isBonusAction = spell.castingTime.toLowerCase().includes('bonus')
@@ -298,6 +375,14 @@ function CombatSpellCard({
           {isBonusAction && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-400">BA</span>}
           {isConc && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-400">Conc.</span>}
           {isRitual && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-500">Ritual</span>}
+          {isDomain && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/40 border border-amber-700/40 text-amber-300"
+              title="Always prepared — domain/oath/circle spell"
+            >
+              Domain
+            </span>
+          )}
         </div>
 
         {/* Upcast selector */}
@@ -370,6 +455,23 @@ function CombatSpellCard({
         </button>
       </div>
 
+      {/* Magic audit section G: ritual cast — skips slot cost, +10 min cast time.
+          Only shown when the spell is a ritual AND the caster's class supports
+          ritual casting (Bard / Cleric / Druid / Wizard in V1). */}
+      {isRitual && ritualEligible && !isCantrip && (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => onRitualCast(spell, selectedTarget)}
+            disabled={!selectedTarget}
+            className="w-full text-[10px] px-2 py-1.5 bg-indigo-950/40 border border-indigo-700/40 text-indigo-300 rounded hover:bg-indigo-900/50 disabled:opacity-40 whitespace-nowrap"
+            title="Cast as a ritual: no slot consumed, but casting time +10 minutes"
+          >
+            ✦ Cast as Ritual <span className="text-indigo-500">(no slot, +10 min)</span>
+          </button>
+        </div>
+      )}
+
       {/* Pending result */}
       {pending && (
         <div className="mt-2 p-2 bg-slate-800 rounded border border-slate-700 flex items-center justify-between gap-2">
@@ -405,7 +507,10 @@ function HealingSpellCard({
   slots,
   targets,
   spellAbilityMod,
+  isDomain,
+  ritualEligible,
   onRoll,
+  onRitualCast,
   pending,
   onApply,
   onClearPending,
@@ -414,12 +519,16 @@ function HealingSpellCard({
   slots: SpellSlotData
   targets: Token[]
   spellAbilityMod: number
+  isDomain: boolean
+  ritualEligible: boolean
   onRoll: (spell: SrdSpell, slotLevel: number, targetId: string, rollType: 'heal') => void
+  onRitualCast: (spell: SrdSpell, targetId: string) => void
   pending: PendingRoll | null
   onApply: () => void
   onClearPending: () => void
 }) {
   const isCantrip = spell.level === 0
+  const isRitual = spell.castingTime.toLowerCase().includes('ritual')
   // Sort targets lowest HP% first
   const sortedTargets = [...targets].sort((a, b) => hpPct(a) - hpPct(b))
 
@@ -462,6 +571,15 @@ function HealingSpellCard({
             {isCantrip ? 'Cantrip' : `L${spell.level}`}
           </span>
           {isBonusAction && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-400">BA</span>}
+          {isRitual && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-500">Ritual</span>}
+          {isDomain && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/40 border border-amber-700/40 text-amber-300"
+              title="Always prepared — domain/oath/circle spell"
+            >
+              Domain
+            </span>
+          )}
         </div>
 
         {/* Upcast selector */}
@@ -516,6 +634,23 @@ function HealingSpellCard({
           {healDice}{spellAbilityMod !== 0 ? fmtMod(spellAbilityMod) : ''}
         </button>
       </div>
+
+      {/* Magic audit section G: ritual cast for healing rituals.
+          Rare in practice (Healing rituals are essentially nonexistent in SRD)
+          but we surface it for completeness when one is present. */}
+      {isRitual && ritualEligible && !isCantrip && (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => onRitualCast(spell, selectedTarget)}
+            disabled={!selectedTarget}
+            className="w-full text-[10px] px-2 py-1.5 bg-indigo-950/40 border border-indigo-700/40 text-indigo-300 rounded hover:bg-indigo-900/50 disabled:opacity-40 whitespace-nowrap"
+            title="Cast as a ritual: no slot consumed, but casting time +10 minutes"
+          >
+            ✦ Cast as Ritual <span className="text-indigo-500">(no slot, +10 min)</span>
+          </button>
+        </div>
+      )}
 
       {/* Pending heal */}
       {pending && targetToken && (
@@ -624,7 +759,7 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
 
       const { data: char } = await supabase
         .from('characters')
-        .select('id, name, level, main_job, abilities, spell_slots, resource_state, spells_prepared, spell_save_dc, spell_attack_bonus, hit_points_current, hit_points_max, wallet_address')
+        .select('id, name, level, main_job, subclass, secondary_class, secondary_subclass, secondary_level, race, abilities, spell_slots, resource_state, action_state, spells_prepared, spell_save_dc, spell_attack_bonus, hit_points_current, hit_points_max, mystic_arcanum, warlock_invocations, wallet_address')
         .eq('id', charId)
         .maybeSingle()
 
@@ -662,6 +797,13 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
         (payload: any) => {
           const r = payload.new
           setSlots(buildSlotData(r.spell_slots, r.resource_state))
+          // Wave 2 + 5: keep myChar.resource_state and action_state fresh so
+          // racial counters AND concentration chip update via realtime.
+          setMyChar(prev => prev ? {
+            ...prev,
+            resource_state: r.resource_state ?? {},
+            action_state: r.action_state ?? {},
+          } : prev)
         },
       )
       .subscribe()
@@ -692,6 +834,97 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
     [myChar?.spells_prepared],
   )
 
+  // Magic audit section C.3: tag domain/oath/circle spells in the dashboard
+  // so players can see at a glance which spells are "always prepared" and
+  // don't need to be re-prepared after a long rest.
+  const domainSet = useMemo(() => {
+    if (!myChar?.subclass) return new Set<string>()
+    // Probe up to spell level 9; getDomainSpells caps at the data's own range.
+    return new Set(getDomainSpells(myChar.subclass, 9))
+  }, [myChar?.subclass])
+
+  // Wave 2: racial innate spell daily-use resources (Tiefling Hellish Rebuke,
+  // Drow Faerie Fire/Darkness, etc.). Stored counts live in resource_state.
+  const racialResources: RacialResource[] = useMemo(() => {
+    return getRacialResources(myChar?.race ?? null, myChar?.level ?? 1)
+  }, [myChar?.race, myChar?.level])
+
+  const racialUsed = useMemo(() => {
+    const rs = myChar?.resource_state ?? {}
+    const out: Record<string, number> = {}
+    for (const r of racialResources) {
+      out[r.key] = Number((rs as any)[r.key] ?? 0)
+    }
+    return out
+  }, [racialResources, myChar?.resource_state])
+
+  const handleRacialUse = useCallback(async (resource: RacialResource) => {
+    if (!myChar) return
+    await expendRacialResource(supabase, myChar.id, resource.key, resource.max)
+    // Realtime subscription on characters will refresh resource_state shortly,
+    // but optimistically nudge the local state via a re-fetch.
+    const { data: row } = await supabase
+      .from('characters')
+      .select('resource_state')
+      .eq('id', myChar.id)
+      .maybeSingle()
+    if (row && myChar) {
+      setMyChar({ ...myChar, resource_state: (row as any).resource_state ?? {} })
+    }
+  }, [myChar])
+
+  const handleRacialRestore = useCallback(async (resource: RacialResource) => {
+    if (!myChar) return
+    await restoreRacialResource(supabase, myChar.id, resource.key)
+    const { data: row } = await supabase
+      .from('characters')
+      .select('resource_state')
+      .eq('id', myChar.id)
+      .maybeSingle()
+    if (row && myChar) {
+      setMyChar({ ...myChar, resource_state: (row as any).resource_state ?? {} })
+    }
+  }, [myChar])
+
+  // Wave 3: Mystic Arcanum panel — Warlock 11+ has 1-per-day high-level spells
+  // that bypass pact slots. Picks are stored on the character; usage in
+  // resource_state.mystic_arcanum_used_<level>.
+  const arcanumEntries = useMemo(() => {
+    if (!myChar) return []
+    const levels = getMysticArcanumLevels(myChar.main_job, myChar.level)
+    const picks = myChar.mystic_arcanum ?? {}
+    const rs = myChar.resource_state ?? {}
+    return levels.map(lvl => {
+      const spellName = picks[String(lvl)] ?? null
+      const used = Number((rs as any)[`mystic_arcanum_used_${lvl}`] ?? 0)
+      return { level: lvl, spellName, used }
+    })
+  }, [myChar])
+
+  const handleArcanumCast = useCallback(async (arcanumLevel: number, spellName: string | null) => {
+    if (!myChar || !spellName) return
+    const ok = await expendMysticArcanum(supabase, myChar.id, arcanumLevel)
+    if (!ok) return
+    // Log the cast in session_rolls so the GM sees what happened.
+    await supabase.from('session_rolls').insert({
+      session_id: sessionId,
+      roll_type: 'custom',
+      label: `✦ ${myChar.name} casts ${spellName} (Mystic Arcanum, ${arcanumLevel}th-level)`,
+      formula: '—',
+      result_total: 0,
+      roller_name: myChar.name,
+      roller_wallet: wallet,
+    })
+    const { data: row } = await supabase
+      .from('characters')
+      .select('resource_state')
+      .eq('id', myChar.id)
+      .maybeSingle()
+    if (row && myChar) {
+      setMyChar({ ...myChar, resource_state: (row as any).resource_state ?? {} })
+    }
+  }, [myChar, sessionId, wallet])
+
   const preparedSpells = useMemo(
     () => SRD_SPELLS.filter(s => preparedNames.has(s.name) || s.level === 0 && preparedNames.has(s.name)),
     [preparedNames],
@@ -718,6 +951,8 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
   )
 
   // ── Derived caster stats ──────────────────────────────────────────────────────
+  // Wave 6K: single-class default values (primary class's ability). Multiclass
+  // characters compute per-spell values via getSpellStats(spell) below.
   const { spellAttackBonus, spellSaveDC, spellAbilityMod } = useMemo(() => {
     if (!myChar?.abilities || !myChar.main_job) {
       return { spellAttackBonus: 0, spellSaveDC: 8, spellAbilityMod: 0 }
@@ -732,6 +967,39 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
     return { spellAttackBonus: atk, spellSaveDC: dc, spellAbilityMod: mod }
   }, [myChar])
 
+  /**
+   * Wave 6K — per-spell DC / attack / ability mod. For single-class
+   * characters this just returns the derived defaults. Multiclass characters
+   * use each spell's own class ability (WIS for Cleric spells, INT for
+   * Wizard spells, etc.).
+   *
+   * Total proficiency bonus is always based on TOTAL character level
+   * (level + secondary_level).
+   */
+  const getSpellStats = useCallback((spell: SrdSpell): {
+    dc: number, attackBonus: number, mod: number
+  } => {
+    if (!myChar?.abilities || !myChar.main_job) {
+      return { dc: spellSaveDC, attackBonus: spellAttackBonus, mod: spellAbilityMod }
+    }
+    const isMulticlass = !!myChar.secondary_class && (myChar.secondary_level ?? 0) > 0
+    if (!isMulticlass) {
+      return { dc: spellSaveDC, attackBonus: spellAttackBonus, mod: spellAbilityMod }
+    }
+    const abilKey = getCastingAbilityForSpell({
+      primaryClass: myChar.main_job,
+      secondaryClass: myChar.secondary_class,
+      primarySubclass: myChar.subclass,
+      secondarySubclass: myChar.secondary_subclass,
+      abilities: myChar.abilities as any,
+    }, spell)
+    const score = Number((myChar.abilities as any)?.[abilKey] ?? 10)
+    const mod = abilityModifier(score)
+    const totalLevel = (myChar.level ?? 1) + (myChar.secondary_level ?? 0)
+    const pb = profBonus(totalLevel)
+    return { dc: 8 + pb + mod, attackBonus: pb + mod, mod }
+  }, [myChar, spellSaveDC, spellAttackBonus, spellAbilityMod])
+
   // PC tokens for healing, all tokens for combat
   const pcTokens = useMemo(() => tokens.filter(t => t.type === 'pc'), [tokens])
   const allTargets = useMemo(() => tokens.filter(t => t.id !== /* my own? */ undefined), [tokens])
@@ -744,32 +1012,40 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
     rollType: 'attack' | 'save' | 'damage' | 'heal',
   ) => {
     if (!myChar) return
+    // Wave 5: concentration auto-drop check. Skip for damage-only rolls so the
+    // caster can iterate damage without re-rolling concentration prompts.
+    if (rollType !== 'damage' && !requireConcentrationConfirmation(spell)) return
 
     let notation: string
     let label: string
 
+    // Wave 6K: per-spell stats for multiclass characters.
+    const stats = getSpellStats(spell)
+
     switch (rollType) {
       case 'attack':
-        notation = `1d20${spellAttackBonus >= 0 ? '+' : ''}${spellAttackBonus}`
+        notation = `1d20${stats.attackBonus >= 0 ? '+' : ''}${stats.attackBonus}`
         label = `${spell.name} — Spell Attack`
         break
       case 'save':
-        // Save is rolled by the target (DM/player rolls for their creature)
-        // We post a note roll for the chat log at the save DC
         notation = '1d20'
-        label = `${spell.name} — ${spell.saveAbility?.toUpperCase()} Save DC ${spellSaveDC}`
+        label = `${spell.name} — ${spell.saveAbility?.toUpperCase()} Save DC ${stats.dc}`
         break
       case 'damage': {
-        const dmg = spell.level === 0
-          ? (spell.damage ?? '1d6')
+        // Magic audit section B: cantrip damage scales with character level, not slot level.
+        const baseDmg = spell.level === 0
+          ? scaleCantripDamage(spell.damage ?? '1d6', myChar.level ?? 1)
           : scaleDamageForSlot(spell, slotLevel)
-        notation = dmg
+        // Effect 1: Agonizing Blast adds CHA per beam to Eldritch Blast.
+        notation = (hasAgonizingBlast && spell.name === 'Eldritch Blast')
+          ? applyAgonizingBlast(baseDmg, chaMod, true)
+          : baseDmg
         label = `${spell.name} — Damage (L${slotLevel})`
         break
       }
       case 'heal': {
         const healDice = scaleHealForSlot(spell, slotLevel)
-        const mod = spellAbilityMod
+        const mod = stats.mod
         notation = mod !== 0 ? `${healDice}${mod >= 0 ? '+' : ''}${mod}` : healDice
         label = `${spell.name} — Healing (L${slotLevel})`
         break
@@ -815,7 +1091,7 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
       const newSlots = await expendSlot(supabase, myChar.id, slotLevel)
       if (newSlots) setSlots(newSlots)
     }
-  }, [myChar, spellAttackBonus, spellSaveDC, spellAbilityMod, sessionId, wallet])
+  }, [myChar, sessionId, wallet, requireConcentrationConfirmation, getSpellStats, hasAgonizingBlast, chaMod])
 
   const handleApply = useCallback(async () => {
     if (!pending) return
@@ -850,6 +1126,71 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
         .then(() => {})
     }
 
+    // Wave 5: when damage lands on a PC token whose character is concentrating,
+    // roll the CON concentration save and post the result. If the save fails,
+    // clear the target's concentration state.
+    if (pending.type === 'damage' && pending.result > 0 && token.owner_wallet) {
+      try {
+        const { data: tokenRow } = await supabase
+          .from('tokens')
+          .select('character_id')
+          .eq('id', token.id)
+          .maybeSingle()
+        const targetCharId = (tokenRow as any)?.character_id
+        if (targetCharId) {
+          const { data: targetChar } = await supabase
+            .from('characters')
+            .select('name, level, abilities, saving_throw_profs, action_state')
+            .eq('id', targetCharId)
+            .maybeSingle()
+          const targetActionState = (targetChar as any)?.action_state ?? {}
+          const targetConcSpell: string | null = typeof targetActionState.concentrating_on === 'string'
+            ? targetActionState.concentrating_on
+            : null
+          if (targetChar && targetConcSpell) {
+            const dc = Math.max(10, Math.floor(pending.result / 2))
+            const con = Number((targetChar as any).abilities?.con ?? 10)
+            const baseMod = Math.floor((con - 10) / 2)
+            const targetLevel = Number((targetChar as any).level ?? 1)
+            const targetPB = Math.floor((targetLevel - 1) / 4) + 2
+            const hasConProf = Array.isArray((targetChar as any).saving_throw_profs)
+              && (targetChar as any).saving_throw_profs.includes('con')
+            const totalMod = baseMod + (hasConProf ? targetPB : 0)
+            const d20 = Math.floor(Math.random() * 20) + 1
+            const total = d20 + totalMod
+            const maintained = total >= dc
+            const sign = totalMod >= 0 ? '+' : ''
+            await supabase.from('session_rolls').insert({
+              session_id: sessionId,
+              roll_type: 'save',
+              label: `Concentration Save — ${(targetChar as any).name} (${targetConcSpell}) DC ${dc}`,
+              formula: `1d20${sign}${totalMod}`,
+              result_total: total,
+              roller_name: (targetChar as any).name,
+              roller_wallet: token.owner_wallet,
+            })
+            if (!maintained) {
+              const nextConditions: string[] = Array.isArray(targetActionState.active_conditions)
+                ? targetActionState.active_conditions.filter((c: string) => c !== 'concentration')
+                : []
+              await supabase
+                .from('characters')
+                .update({
+                  action_state: {
+                    ...targetActionState,
+                    concentrating_on: null,
+                    active_conditions: nextConditions,
+                  },
+                })
+                .eq('id', targetCharId)
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[SpellDashboard] concentration save trigger failed', err)
+      }
+    }
+
     setPending(null)
   }, [pending, tokens, sessionId, myChar, wallet])
 
@@ -864,6 +1205,167 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
     const newSlots = await restoreSlot(supabase, myChar.id, parseInt(level))
     if (newSlots) setSlots(newSlots)
   }, [myChar])
+
+  // Magic audit section E: long-rest restores all spell slots.
+  const handleLongRest = useCallback(async () => {
+    if (!myChar) return
+    if (!window.confirm('Take a long rest? All spell slots will be restored.')) return
+    await longRestSlots(supabase, myChar.id)
+    // Re-fetch the slot data after the rest
+    const { data: row } = await supabase
+      .from('characters')
+      .select('spell_slots, resource_state')
+      .eq('id', myChar.id)
+      .maybeSingle()
+    if (row) setSlots(buildSlotData((row as any).spell_slots, (row as any).resource_state))
+  }, [myChar])
+
+  // Short rest only restores Warlock pact slots in V1.
+  const handleShortRest = useCallback(async () => {
+    if (!myChar) return
+    if (!window.confirm('Take a short rest? Warlocks regain pact slots; other classes regain nothing here.')) return
+    const newSlots = await shortRestSlots(supabase, myChar.id)
+    if (newSlots) setSlots(newSlots)
+  }, [myChar])
+
+  // Magic audit section G: ritual cast — apply spell effect without expending a slot.
+  // The handler posts a "cast" log entry and, when the spell does damage/heal,
+  // rolls and queues a pending apply just like a normal cast. The only difference
+  // is the slot is NOT spent.
+  const handleRitualCast = useCallback(async (spell: SrdSpell, targetId: string) => {
+    if (!myChar) return
+    // Wave 5: ritual casts of concentration spells still trigger auto-drop.
+    if (!requireConcentrationConfirmation(spell)) return
+    const category = categorizeSpell(spell)
+    let notation: string
+    let label: string
+    if (category === 'healing') {
+      const healDice = scaleHealForSlot(spell, spell.level)
+      const mod = spellAbilityMod
+      notation = mod !== 0 ? `${healDice}${mod >= 0 ? '+' : ''}${mod}` : healDice
+      label = `${spell.name} — Ritual Healing (+10 min)`
+    } else if (spell.damage) {
+      notation = scaleDamageForSlot(spell, spell.level)
+      label = `${spell.name} — Ritual Cast (+10 min)`
+    } else {
+      // Utility ritual (Detect Magic, Identify, etc.) — log the cast, no roll.
+      await supabase.from('session_rolls').insert({
+        session_id: sessionId,
+        roll_type: 'custom',
+        label: `✦ ${myChar.name} casts ${spell.name} as a ritual (+10 min, no slot)`,
+        formula: '—',
+        result_total: 0,
+        roller_name: myChar.name,
+        roller_wallet: wallet,
+      })
+      return
+    }
+
+    const res = await fetch('/api/roll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        notation,
+        rollType: category === 'healing' ? 'custom' : 'damage',
+        label,
+        characterId: myChar.id,
+        targetTokenId: targetId || undefined,
+        sessionId,
+        rollerName: myChar.name,
+        rollerWallet: wallet ?? undefined,
+      }),
+    })
+    if (!res.ok) return
+    const data = await res.json()
+    setPending({
+      spellName: spell.name,
+      result: data.total ?? 0,
+      notation,
+      type: category === 'healing' ? 'heal' : 'damage',
+      targetTokenId: targetId,
+    })
+    // Slot deliberately NOT expended — that's the whole point of ritual.
+  }, [myChar, spellAbilityMod, sessionId, wallet, requireConcentrationConfirmation])
+
+  // ── Wave 5: Concentration tracking ───────────────────────────────────────
+  // The currently-concentrated spell is stored in action_state.concentrating_on.
+  // Casting a new concentration spell auto-drops the previous one. The chip
+  // in the sidebar lets the player release manually.
+  const concentratingOn: string | null = useMemo(() => {
+    const v = myChar?.action_state?.concentrating_on
+    return typeof v === 'string' && v.length > 0 ? v : null
+  }, [myChar?.action_state])
+
+  /**
+   * Set or clear the concentration target on the character. Also keeps
+   * active_conditions in sync so the existing condition UI shows the badge.
+   */
+  const setConcentration = useCallback(async (spellName: string | null) => {
+    if (!myChar) return
+    const { data: row } = await supabase
+      .from('characters')
+      .select('action_state')
+      .eq('id', myChar.id)
+      .maybeSingle()
+    const current = ((row as any)?.action_state ?? {}) as Record<string, any>
+    const activeConditions: string[] = Array.isArray(current.active_conditions) ? current.active_conditions : []
+    const nextConditions = spellName
+      ? Array.from(new Set([...activeConditions, 'concentration']))
+      : activeConditions.filter(c => c !== 'concentration')
+    const next = {
+      ...current,
+      concentrating_on: spellName,
+      active_conditions: nextConditions,
+    }
+    await supabase
+      .from('characters')
+      .update({ action_state: next })
+      .eq('id', myChar.id)
+    setMyChar(prev => prev ? { ...prev, action_state: next } : prev)
+  }, [myChar])
+
+  /**
+   * Called whenever the player initiates a cast (any of attack/save/damage/heal/
+   * ritual). If the spell is a concentration spell and there's an existing
+   * concentration, confirm the drop. Returns true to proceed, false to cancel.
+   */
+  const requireConcentrationConfirmation = useCallback((spell: SrdSpell): boolean => {
+    const isConc = spell.duration.toLowerCase().includes('concentration')
+    if (!isConc) return true
+    if (concentratingOn && concentratingOn !== spell.name) {
+      // Confirm the swap
+      const ok = window.confirm(
+        `You're already concentrating on ${concentratingOn}. Casting ${spell.name} will drop it. Continue?`,
+      )
+      if (!ok) return false
+    }
+    // Update concentration target (fire-and-forget; the realtime sync will catch up)
+    void setConcentration(spell.name)
+    return true
+  }, [concentratingOn, setConcentration])
+
+  // Magic audit section G: ritual casting requires class proficiency.
+  // 5e classes with ritual casting: Bard, Cleric, Druid, Wizard. Wave 4 adds
+  // Warlocks who have the Book of Ancient Secrets invocation.
+  const ritualEligible = useMemo(() => {
+    const cls = (myChar?.main_job ?? '').toLowerCase().trim()
+    if (cls === 'bard' || cls === 'cleric' || cls === 'druid' || cls === 'wizard') return true
+    if (cls === 'warlock' && hasRitualCasting(myChar?.warlock_invocations ?? null)) return true
+    return false
+  }, [myChar?.main_job, myChar?.warlock_invocations])
+
+  // Effect 1: Agonizing Blast — Warlock invocation that adds CHA mod to each
+  // Eldritch Blast beam. We surface a single boolean + CHA modifier the card
+  // can apply when the spell is Eldritch Blast.
+  const hasAgonizingBlast = useMemo(() => {
+    const invs = (myChar?.warlock_invocations ?? []) as string[]
+    return invs.includes('agonizing_blast')
+  }, [myChar?.warlock_invocations])
+
+  const chaMod = useMemo(() => {
+    const score = Number((myChar?.abilities as any)?.cha ?? 10)
+    return abilityModifier(score)
+  }, [myChar?.abilities])
 
   // ── Render: loading / error ───────────────────────────────────────────────────
   if (loading) {
@@ -931,12 +1433,148 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
                   />
                 ))}
               </div>
+
+              {/* Magic audit section E: Long Rest + Short Rest controls.
+                  Long rest zeros every spell_slot_used_*. Short rest only
+                  restores Warlock pact slots (see shortRestSlots helper). */}
+              {myChar && (
+                <div className="mt-2 grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleLongRest}
+                    className="rounded border border-violet-700/40 bg-violet-950/40 px-2 py-1.5 text-[10px] text-violet-300 hover:bg-violet-900/50 transition"
+                    title="Long Rest — restore all spell slots"
+                  >
+                    🌙 Long Rest
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleShortRest}
+                    className="rounded border border-amber-700/40 bg-amber-950/40 px-2 py-1.5 text-[10px] text-amber-300 hover:bg-amber-900/50 transition"
+                    title="Short Rest — Warlock pact slots only"
+                  >
+                    ☀ Short Rest
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
           {!myChar && !isGm && (
             <div className="text-[11px] text-slate-500 italic">
               No character linked to this session.
+            </div>
+          )}
+
+          {/* Wave 5: Concentration chip — current concentration spell with drop button. */}
+          {concentratingOn && (
+            <div className="rounded border border-amber-700/40 bg-amber-950/30 px-2 py-1.5 flex items-center gap-2">
+              <span className="text-[10px] uppercase tracking-wide text-amber-500">Conc.</span>
+              <span className="truncate text-[11px] text-amber-200 flex-1 min-w-0" title={concentratingOn}>
+                {concentratingOn}
+              </span>
+              <button
+                type="button"
+                onClick={() => setConcentration(null)}
+                className="rounded px-1.5 py-0.5 text-[9px] text-amber-300 bg-amber-900/40 hover:bg-amber-900/60"
+                title="Drop concentration"
+              >
+                Drop
+              </button>
+            </div>
+          )}
+
+          {/* Wave 3: Mystic Arcanum (Warlock 11+ — 1/day high-level spells) */}
+          {arcanumEntries.length > 0 && (
+            <div>
+              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Mystic Arcanum
+              </div>
+              <div className="space-y-1.5">
+                {arcanumEntries.map(entry => {
+                  const available = entry.used < 1
+                  return (
+                    <div key={entry.level} className="flex items-center gap-1.5">
+                      <span className="w-7 shrink-0 text-[10px] text-slate-500">
+                        L{entry.level}
+                      </span>
+                      <span className="truncate text-[10px] text-slate-300 flex-1 min-w-0" title={entry.spellName ?? 'Not chosen'}>
+                        {entry.spellName ?? <span className="italic text-slate-600">Not chosen</span>}
+                      </span>
+                      <div className="flex gap-0.5">
+                        <div
+                          className={`h-2.5 w-2.5 rounded-full border ${
+                            available
+                              ? 'border-fuchsia-400/60 bg-fuchsia-500/60'
+                              : 'border-slate-700 bg-slate-900'
+                          }`}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleArcanumCast(entry.level, entry.spellName)}
+                        disabled={!available || !entry.spellName}
+                        className="rounded px-1 py-0.5 text-[9px] text-fuchsia-300 bg-fuchsia-900/30 hover:bg-fuchsia-900/50 disabled:opacity-30 transition"
+                        title={entry.spellName ? `Cast ${entry.spellName} (1/day)` : 'Pick a spell at character creation'}
+                      >
+                        Cast
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Wave 2: Racial innate spells with daily-use tracking. */}
+          {racialResources.length > 0 && (
+            <div>
+              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Racial Innates
+              </div>
+              <div className="space-y-1.5">
+                {racialResources.map(r => {
+                  const used = racialUsed[r.key] ?? 0
+                  const available = r.max - used
+                  return (
+                    <div key={r.key} className="flex items-center gap-1.5">
+                      <span className="truncate text-[10px] text-slate-300 flex-1 min-w-0" title={r.name}>
+                        {r.name}
+                      </span>
+                      <div className="flex gap-0.5">
+                        {Array.from({ length: r.max }).map((_, i) => (
+                          <div
+                            key={i}
+                            className={`h-2.5 w-2.5 rounded-full border ${
+                              i < available
+                                ? 'border-fuchsia-400/60 bg-fuchsia-500/60'
+                                : 'border-slate-700 bg-slate-900'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRacialUse(r)}
+                        disabled={available === 0}
+                        className="rounded px-1 py-0.5 text-[9px] text-fuchsia-300 bg-fuchsia-900/30 hover:bg-fuchsia-900/50 disabled:opacity-30 transition"
+                        title={`Use ${r.name} (${r.recharge.replace('_', ' ')} recharge)`}
+                      >
+                        Use
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRacialRestore(r)}
+                        disabled={used === 0}
+                        className="rounded px-1 py-0.5 text-[9px] text-slate-400 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 transition"
+                        title="Restore one use"
+                      >
+                        +
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           )}
 
@@ -990,21 +1628,30 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
           </div>
 
           <div className="space-y-3">
-            {filteredCombat.map(spell => (
+            {filteredCombat.map(spell => {
+              // Wave 6K: per-spell stats for multiclass characters
+              const stats = getSpellStats(spell)
+              return (
               <CombatSpellCard
                 key={spell.name}
                 spell={spell}
                 slots={slots}
                 targets={allTargets}
-                spellAttackBonus={spellAttackBonus}
-                spellSaveDC={spellSaveDC}
+                spellAttackBonus={stats.attackBonus}
+                spellSaveDC={stats.dc}
                 charLevel={myChar?.level ?? 1}
+                isDomain={domainSet.has(spell.name)}
+                ritualEligible={ritualEligible}
+                agonizingBlast={hasAgonizingBlast}
+                chaMod={chaMod}
                 onRoll={handleRoll}
+                onRitualCast={handleRitualCast}
                 pending={pending?.spellName === spell.name ? pending : null}
                 onApply={handleApply}
                 onClearPending={() => setPending(null)}
               />
-            ))}
+              )
+            })}
             {filteredCombat.length === 0 && (
               <p className="py-8 text-center text-[11px] text-slate-600 italic">
                 {preparedNames.size === 0
@@ -1034,19 +1681,25 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
           </div>
 
           <div className="space-y-3">
-            {filteredHeal.map(spell => (
+            {filteredHeal.map(spell => {
+              const stats = getSpellStats(spell)
+              return (
               <HealingSpellCard
                 key={spell.name}
                 spell={spell}
                 slots={slots}
                 targets={pcTokens.length > 0 ? pcTokens : tokens}
-                spellAbilityMod={spellAbilityMod}
+                spellAbilityMod={stats.mod}
+                isDomain={domainSet.has(spell.name)}
+                ritualEligible={ritualEligible}
                 onRoll={handleRoll}
+                onRitualCast={handleRitualCast}
                 pending={pending?.spellName === spell.name ? pending : null}
                 onApply={handleApply}
                 onClearPending={() => setPending(null)}
               />
-            ))}
+              )
+            })}
             {filteredHeal.length === 0 && (
               <p className="py-8 text-center text-[11px] text-slate-600 italic">
                 {preparedNames.size === 0

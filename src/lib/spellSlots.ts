@@ -155,6 +155,14 @@ export async function restoreSlot(
 
 /**
  * Long rest — zeros all spell_slot_used_N keys in resource_state.
+ *
+ * Wave 2: also resets all daily-use racial innate spell counters
+ * (`racial_*_used`) and class resource counters tagged for long_rest
+ * (`class_resource_*_used` — kept generic so future class features
+ * can opt in without code changes).
+ *
+ * Wave 3: also resets Mystic Arcanum daily counters
+ * (`mystic_arcanum_used_*`).
  */
 export async function longRestSlots(
   supabase: SupabaseClient,
@@ -173,10 +181,96 @@ export async function longRestSlots(
 
   for (const key of Object.keys(next)) {
     if (key.startsWith('spell_slot_used_')) next[key] = 0
+    else if (key.startsWith('racial_') && key.endsWith('_used')) next[key] = 0
+    else if (key.startsWith('mystic_arcanum_used_')) next[key] = 0
+    // class_resource_<key>_used — long-rest-recharging class features
+    else if (key.startsWith('class_resource_') && key.endsWith('_used_long')) next[key] = 0
   }
 
   await supabase
     .from('characters')
     .update({ resource_state: next })
     .eq('id', characterId)
+}
+
+/**
+ * Wave 3 — expend one daily use of a Mystic Arcanum spell.
+ * Increments `resource_state.mystic_arcanum_used_<spellLevel>`.
+ * Long rest resets via `longRestSlots` (which already matches the
+ * `mystic_arcanum_used_` prefix).
+ */
+export async function expendMysticArcanum(
+  supabase: SupabaseClient,
+  characterId: string,
+  spellLevel: number,
+): Promise<boolean> {
+  const { data: char } = await supabase
+    .from('characters')
+    .select('resource_state')
+    .eq('id', characterId)
+    .maybeSingle()
+  if (!char) return false
+
+  const resourceState: Record<string, any> = (char as any).resource_state ?? {}
+  const key = `mystic_arcanum_used_${spellLevel}`
+  const used = Number(resourceState[key] ?? 0)
+  if (used >= 1) return false // already used today
+
+  const next = { ...resourceState, [key]: 1 }
+  const { error } = await supabase
+    .from('characters')
+    .update({ resource_state: next })
+    .eq('id', characterId)
+  if (error) {
+    console.error('[spellSlots] expendMysticArcanum error', error)
+    return false
+  }
+  return true
+}
+
+/**
+ * Short rest — restores Warlock pact slots only (other classes do not regain
+ * spell slots on a short rest). Reads the character's class to gate the
+ * restoration. No-op for non-Warlocks (returns current slot data unchanged).
+ *
+ * Future: when Wizard's Arcane Recovery and other short-rest features land,
+ * extend this helper rather than adding parallel paths.
+ */
+export async function shortRestSlots(
+  supabase: SupabaseClient,
+  characterId: string,
+): Promise<SpellSlotData | null> {
+  const { data: char } = await supabase
+    .from('characters')
+    .select('main_job, spell_slots, resource_state')
+    .eq('id', characterId)
+    .maybeSingle()
+
+  if (!char) return null
+
+  const className = String((char as any).main_job ?? '').toLowerCase().trim()
+  const spellSlots: Record<string, number> = (char as any).spell_slots ?? {}
+  const resourceState: Record<string, any> = (char as any).resource_state ?? {}
+
+  // Only Warlocks regain spell slots on a short rest.
+  if (className !== 'warlock') {
+    return buildSlotData(spellSlots, resourceState)
+  }
+
+  const next = { ...resourceState }
+  for (const key of Object.keys(next)) {
+    if (key.startsWith('spell_slot_used_')) next[key] = 0
+  }
+
+  const { error } = await supabase
+    .from('characters')
+    .update({ resource_state: next })
+    .eq('id', characterId)
+
+  if (error) {
+    console.error('[spellSlots] shortRestSlots update error', error)
+    return null
+  }
+
+  return buildSlotData(spellSlots, next)
 }

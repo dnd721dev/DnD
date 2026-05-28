@@ -59,3 +59,52 @@ export function calcMaxHp(args: {
 
   return Math.max(1, level1 + laterLevels)
 }
+
+/**
+ * Wave 6 — Multiclass-aware HP calculation.
+ *
+ * 5e rules:
+ *   - The FIRST class level grants the max hit die (no CON multiplier
+ *     beyond the single CON mod for that level).
+ *   - Every subsequent level grants the chosen class's per-level HP
+ *     (average or max) PLUS CON mod.
+ *   - "First class" = the class you took at character creation (`classes[0]`).
+ *
+ * Example: Fighter 5 / Wizard 3, CON +2
+ *   Lvl 1 (Fighter): 10 + 2 = 12
+ *   Lvl 2-5 (Fighter avg = 6): 4 × (6 + 2) = 32
+ *   Lvl 6-8 (Wizard avg = 4):  3 × (4 + 2) = 18
+ *   Total = 62 HP
+ *
+ * `classes[0]` is treated as the first class.
+ */
+export function calcMaxHpMulticlass(args: {
+  classes: Array<{ classKey: ClassKey, level: number }>
+  conScore: number
+  method?: HpCalcMethod
+}): number {
+  if (!args.classes.length) return 1
+  const conMod = abilityMod(args.conScore)
+  const method: HpCalcMethod = args.method ?? 'average'
+
+  // First class level 1: max hit die + CON
+  const firstHitDie = hitDieForClass(args.classes[0].classKey)
+  let hp = firstHitDie + conMod
+
+  // Remaining levels: cycle through classes in order, summing per-level HP
+  // (average or max) + CON mod for each level beyond the very first.
+  let levelIndex = 0
+  for (let ci = 0; ci < args.classes.length; ci++) {
+    const entry = args.classes[ci]
+    const hitDie = hitDieForClass(entry.classKey)
+    const perLevel = method === 'max' ? hitDie : averageHpPerLevel(hitDie)
+    const startInClass = (ci === 0) ? 1 : 0 // skip the first-class level-1 we already counted
+    for (let lvl = startInClass; lvl < entry.level; lvl++) {
+      levelIndex++
+      if (ci === 0 && lvl === 0) continue // already counted (the level-1 in first class)
+      hp += perLevel + conMod
+    }
+  }
+
+  return Math.max(1, hp)
+}

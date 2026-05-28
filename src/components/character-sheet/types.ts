@@ -31,6 +31,14 @@ export type CharacterSheetData = {
   experience_points?: number | null
   main_job?: string | null
   subclass?: string | null
+  /**
+   * Wave 6 — Multiclass support (Option A, 2-class narrow schema).
+   * Total character level = `level + (secondary_level ?? 0)`.
+   * Single-class characters leave these null.
+   */
+  secondary_class?: string | null
+  secondary_subclass?: string | null
+  secondary_level?: number | null
   race?: string | null
   background?: string | null
   alignment?: string | null

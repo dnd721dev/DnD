@@ -1,5 +1,6 @@
 import type { CharacterSheetData } from './types'
 import type { DerivedStats } from './calc'
+import { getAllClasses, isMulticlassed } from '@/lib/multiclass'
 
 function HpPill({ current, max }: { current: number; max: number }) {
   const pct = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0
@@ -46,8 +47,18 @@ export function CharacterHeader({ c, d }: { c: CharacterSheetData; d: DerivedSta
           <h1 className="text-2xl font-bold tracking-tight text-white leading-tight">{name}</h1>
           <p className="text-sm text-slate-300">
             {c.race ?? 'Unknown Race'}
-            {c.main_job ? ` • ${c.main_job}` : ''}
-            {subclassLabel ? ` (${subclassLabel})` : ''}
+            {/* Wave 6: render every class entry with its level so multiclass
+                characters show e.g. "Human • Cleric 5 / Wizard 1" */}
+            {isMulticlassed(c)
+              ? ' • ' + getAllClasses(c).map(e =>
+                  `${e.classKey.charAt(0).toUpperCase()}${e.classKey.slice(1)} ${e.level}`,
+                ).join(' / ')
+              : (
+                <>
+                  {c.main_job ? ` • ${c.main_job}` : ''}
+                  {subclassLabel ? ` (${subclassLabel})` : ''}
+                </>
+              )}
           </p>
 
           {/* Stat pills row */}

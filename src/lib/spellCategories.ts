@@ -164,3 +164,65 @@ export function profBonus(level: number): number {
 export function abilityModifier(score: number): number {
   return Math.floor((score - 10) / 2)
 }
+
+/**
+ * Wave 6K — per-spell casting ability for multiclass characters.
+ *
+ * 5e rule: each class uses ITS OWN spellcasting ability. A Cleric/Wizard
+ * multiclass casts Cleric spells with WIS and Wizard spells with INT.
+ *
+ * Algorithm:
+ *  1. Determine which of the character's classes can cast `spell` (i.e. the
+ *     spell's `classes` array intersects with the character's class list).
+ *  2. If only ONE such class, return that class's ability.
+ *  3. If multiple (e.g. Cure Wounds is on Cleric AND Bard lists), pick the
+ *     class whose ability modifier is HIGHER.
+ *  4. If none, fall back to the primary class's ability.
+ *
+ * EK/AT third-caster subclasses count as Wizard-list casters (INT).
+ */
+export function getCastingAbilityForSpell(
+  args: {
+    primaryClass: string | null | undefined
+    secondaryClass?: string | null
+    primarySubclass?: string | null
+    secondarySubclass?: string | null
+    abilities: Partial<Record<'str'|'dex'|'con'|'int'|'wis'|'cha', number>>
+  },
+  spell: { classes?: readonly string[] },
+): 'int' | 'wis' | 'cha' {
+  const primary = (args.primaryClass ?? '').toLowerCase()
+  const secondary = (args.secondaryClass ?? '').toLowerCase()
+  const spellClasses = (spell.classes ?? []) as string[]
+
+  type Candidate = { classKey: string, ability: 'int' | 'wis' | 'cha' }
+  const candidates: Candidate[] = []
+  function consider(cls: string, sub: string | null | undefined) {
+    if (!cls) return
+    // EK / AT cast wizard-list spells with INT.
+    if (cls === 'fighter' && (sub ?? '').toLowerCase() === 'fighter_eldritch_knight') {
+      candidates.push({ classKey: 'wizard', ability: 'int' })
+      return
+    }
+    if (cls === 'rogue' && (sub ?? '').toLowerCase() === 'rogue_arcane_trickster') {
+      candidates.push({ classKey: 'wizard', ability: 'int' })
+      return
+    }
+    if (isSpellcaster(cls)) {
+      candidates.push({ classKey: cls, ability: getSpellcastingAbility(cls) })
+    }
+  }
+  consider(primary, args.primarySubclass)
+  consider(secondary, args.secondarySubclass)
+
+  const matching = candidates.filter(c => spellClasses.includes(c.classKey))
+  if (matching.length === 0) {
+    return candidates[0]?.ability ?? 'int'
+  }
+  if (matching.length === 1) return matching[0].ability
+
+  function mod(ab: 'int' | 'wis' | 'cha'): number {
+    return abilityModifier(Number(args.abilities[ab] ?? 10))
+  }
+  return matching.sort((a, b) => mod(b.ability) - mod(a.ability))[0].ability
+}

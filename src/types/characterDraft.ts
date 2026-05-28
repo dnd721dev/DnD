@@ -14,6 +14,15 @@ export interface CharacterDraft {
   raceKey?: string
   alignment?: string | ''
 
+  /**
+   * Wave 6 — Multiclass (Option A, 2-class narrow schema).
+   * Total character level = `level + (secondaryLevel ?? 0)`.
+   * Most characters are single-class; these fields stay unset.
+   */
+  secondaryClass?: string | null
+  secondarySubclass?: string | null
+  secondaryLevel?: number
+
   // Abilities
   baseAbilities?: {
     str: number
@@ -92,6 +101,24 @@ export interface CharacterDraft {
   // Spells
   knownSpells?: string[]
   preparedSpells?: string[]
+  /**
+   * Wave 1B — Eldritch Knight / Arcane Trickster any-school wildcard picks.
+   * Stores spell names that were picked using a wildcard slot (from any
+   * school, not just the subclass-restricted ones).
+   */
+  wildcardSpells?: string[]
+  /**
+   * Wave 3 — Warlock Mystic Arcanum picks, keyed by spell level.
+   * Example: { "6": "Eyebite", "7": null, "8": null, "9": null }
+   * Each entry is castable 1/day (long rest) and bypasses pact slots.
+   */
+  mysticArcanum?: Record<string, string | null>
+  /**
+   * Wave 4 — Warlock Eldritch Invocations. Stored as an array of invocation
+   * keys (see src/lib/invocations.ts → InvocationKey). Book of Ancient
+   * Secrets enables ritual casting; other invocations are mostly passive flags.
+   */
+  warlockInvocations?: string[]
   /** Chosen cantrip for races with a cantrip choice (e.g. High Elf) */
   racialCantripChoice?: string
 

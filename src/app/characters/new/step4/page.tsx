@@ -15,7 +15,11 @@ import {
   getSpellsKnown,
   getWizardSpellbookSize,
   getDomainSpells,
+  getAllowedSchoolsForSubclass,
+  getWildcardCountForSubclass,
+  getMysticArcanumLevels,
 } from '@/lib/spellcastingProgression'
+import { getEligibleInvocations, getInvocationCount, INVOCATIONS } from '@/lib/invocations'
 import { proficiencyForLevel } from '@/lib/rules'
 
 type Abilities = {
@@ -289,7 +293,32 @@ export default function NewCharacterStep4Page() {
     ? SRD_SPELLS.filter(s => s.level === 0 && s.classes?.includes(cantripChoiceFrom))
     : []
 
+  // Magic audit section D: enforce EK/AT school restrictions.
+  // EK is limited to Abjuration + Evocation; AT is limited to Enchantment + Illusion.
+  // Cantrips are not restricted (per 5e). Wave 1B adds the any-school wildcard
+  // picks at levels 3, 8, 14, 20.
+  const allowedSchools = getAllowedSchoolsForSubclass(classKey, subclassKey)
+  const wildcardSpells: string[] = draft.wildcardSpells ?? []
+  const wildcardBudget = getWildcardCountForSubclass(classKey, subclassKey, level)
+  const wildcardsUsed = wildcardSpells.length
+
+  // Wave 3 — Mystic Arcanum (Warlock 11+). Picks are stored keyed by spell
+  // level. The picker is rendered separately from the main spell list.
+  const arcanumLevels = getMysticArcanumLevels(classKey, level)
+  const mysticArcanum: Record<string, string | null> = draft.mysticArcanum ?? {}
+
+  // Wave 4 — Warlock Eldritch Invocations. Pick up to invocationBudget; the
+  // budget grows with class level (2/2/2/3/3/4/4/5/5/5/6/6/6/7/7/7/8 from PHB).
+  const invocationBudget = classKey === 'warlock' ? getInvocationCount(level) : 0
+  const warlockInvocations: string[] = draft.warlockInvocations ?? []
+  const eligibleInvocations = classKey === 'warlock' ? getEligibleInvocations(level) : []
+  const invocationsPickedCount = warlockInvocations.length
+
   // ── Filtered spell lists ──────────────────────────────────────────────────
+  // Wave 1B: spells that violate the school restriction are NOT hidden — instead
+  // they're left visible so the EK/AT player can use a wildcard pick to add
+  // them. The visual treatment + add-button below distinguishes "free pick"
+  // from "wildcard pick."
   const baseSpells = showClassSpells
     ? SRD_SPELLS.filter(spell => {
         if (spellClass && !spell.classes?.includes(spellClass)) return false
@@ -302,6 +331,13 @@ export default function NewCharacterStep4Page() {
         return true
       })
     : []
+
+  // Wave 1B helper: is a given spell off-school for the current subclass?
+  function isOffSchool(spell: { school: string; level: number }): boolean {
+    if (!allowedSchools) return false
+    if (spell.level === 0) return false // cantrips are unrestricted
+    return !allowedSchools.includes(spell.school)
+  }
 
   // Split into cantrips and leveled spells
   const filteredCantrips = baseSpells.filter(s => s.level === 0)
@@ -343,6 +379,8 @@ export default function NewCharacterStep4Page() {
 
     const isCantrip = spell.level === 0
     const exists = knownSpells.includes(spellName)
+    const isWildcardPick = wildcardSpells.includes(spellName)
+    const requiresWildcard = isOffSchool(spell)
 
     if (!exists) {
       // Check cantrip cap
@@ -353,6 +391,11 @@ export default function NewCharacterStep4Page() {
         if (isWizard && wizardSpellbookSize !== null && currentLeveledKnown.length >= wizardSpellbookSize) return
         // Check known-spell caster cap
         if (!isWizard && maxSpellsKnown !== null && currentLeveledKnown.length >= maxSpellsKnown) return
+
+        // Wave 1B: off-school spells require a wildcard pick from the EK/AT budget.
+        if (requiresWildcard) {
+          if (wildcardsUsed >= wildcardBudget) return // no wildcards available
+        }
       }
     }
 
@@ -360,14 +403,24 @@ export default function NewCharacterStep4Page() {
       ? knownSpells.filter(s => s !== spellName)
       : [...knownSpells, spellName]
 
+    // Wave 1B: track which spells consumed a wildcard so the school filter
+    // continues to allow them and the budget counter stays accurate.
+    let nextWildcards = wildcardSpells
+    if (exists) {
+      // Removing a known spell — also drop it from wildcard tracking.
+      if (isWildcardPick) nextWildcards = wildcardSpells.filter(s => s !== spellName)
+    } else if (requiresWildcard && !isCantrip) {
+      nextWildcards = [...wildcardSpells, spellName]
+    }
+
     // For known-spell casters: keep prepared in sync with known
     if (isKnownSpellCaster) {
       const nextPrepared = exists
         ? preparedSpells.filter(s => s !== spellName)
         : [...preparedSpells, spellName]
-      updateDraft({ knownSpells: nextKnown, preparedSpells: nextPrepared })
+      updateDraft({ knownSpells: nextKnown, preparedSpells: nextPrepared, wildcardSpells: nextWildcards })
     } else {
-      updateDraft({ knownSpells: nextKnown })
+      updateDraft({ knownSpells: nextKnown, wildcardSpells: nextWildcards })
     }
   }
 
@@ -487,11 +540,106 @@ export default function NewCharacterStep4Page() {
 
       {/* EK / AT subclass note */}
       {isThirdCasterSubclass && (
-        <div className="rounded-lg border border-amber-700/40 bg-amber-900/10 px-4 py-2.5 text-xs text-amber-200">
-          <span className="font-semibold">{isEK ? 'Eldritch Knight' : 'Arcane Trickster'}:</span>{' '}
-          {isEK
-            ? 'You cast spells from the Wizard list, primarily Abjuration and Enchantment schools. Third-caster progression.'
-            : 'You cast spells from the Wizard list, primarily Divination and Enchantment schools. Third-caster progression.'}
+        <div className="rounded-lg border border-amber-700/40 bg-amber-900/10 px-4 py-2.5 text-xs text-amber-200 space-y-1">
+          <div>
+            <span className="font-semibold">{isEK ? 'Eldritch Knight' : 'Arcane Trickster'}:</span>{' '}
+            {isEK
+              ? 'You cast spells from the Wizard list — leveled spells must be Abjuration or Evocation. Third-caster progression.'
+              : 'You cast spells from the Wizard list — leveled spells must be Enchantment or Illusion. Third-caster progression.'}
+          </div>
+          {/* Wave 1B: wildcard counter */}
+          {wildcardBudget > 0 && (
+            <div className="text-[11px] text-amber-300/90">
+              ✦ <span className="font-semibold">Any-school picks</span>: {wildcardsUsed}/{wildcardBudget} used
+              <span className="ml-1 text-amber-400/70">— gained at levels 3, 8, 14, 20. Any spell off-school requires one.</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Wave 3 — Mystic Arcanum picker (Warlock 11+) */}
+      {arcanumLevels.length > 0 && (
+        <div className="rounded-xl border border-fuchsia-700/40 bg-fuchsia-900/10 p-4 space-y-3">
+          <div className="text-sm font-semibold text-fuchsia-200">
+            Mystic Arcanum
+            <span className="ml-2 text-[11px] font-normal text-fuchsia-400/80">
+              — pick one spell per level. Each castable 1/day (long rest), bypasses pact slots.
+            </span>
+          </div>
+          {arcanumLevels.map(arcLvl => {
+            const picked = mysticArcanum[String(arcLvl)] ?? ''
+            const options = SRD_SPELLS.filter(
+              s => s.classes?.includes('warlock') && s.level === arcLvl,
+            )
+            return (
+              <div key={arcLvl} className="flex items-center gap-2">
+                <span className="w-20 shrink-0 text-xs font-semibold text-fuchsia-300">
+                  {spellLevelLabel(arcLvl)} Level
+                </span>
+                <select
+                  className="flex-1 rounded-md border border-fuchsia-700/40 bg-slate-900/80 px-3 py-1.5 text-xs focus:border-fuchsia-400 focus:outline-none"
+                  value={picked}
+                  onChange={e => {
+                    const next = { ...mysticArcanum, [String(arcLvl)]: e.target.value || null }
+                    updateDraft({ mysticArcanum: next })
+                  }}
+                >
+                  <option value="">— Choose a {spellLevelLabel(arcLvl)}-level Warlock spell —</option>
+                  {options.map(s => (
+                    <option key={s.name} value={s.name}>
+                      {s.name} · {s.school}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Wave 4 — Warlock Eldritch Invocations picker (level 2+) */}
+      {classKey === 'warlock' && invocationBudget > 0 && (
+        <div className="rounded-xl border border-purple-700/40 bg-purple-900/10 p-4 space-y-3">
+          <div className="text-sm font-semibold text-purple-200">
+            Eldritch Invocations
+            <span className="ml-2 text-[11px] font-normal text-purple-400/80">
+              — pick {invocationBudget} ({invocationsPickedCount}/{invocationBudget} picked). Book of Ancient Secrets grants ritual casting.
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-64 overflow-y-auto pr-1">
+            {eligibleInvocations.map(inv => {
+              const picked = warlockInvocations.includes(inv.key)
+              const atCap = !picked && invocationsPickedCount >= invocationBudget
+              return (
+                <button
+                  key={inv.key}
+                  type="button"
+                  onClick={() => {
+                    const next = picked
+                      ? warlockInvocations.filter(k => k !== inv.key)
+                      : [...warlockInvocations, inv.key]
+                    updateDraft({ warlockInvocations: next })
+                  }}
+                  disabled={atCap}
+                  className={`rounded-lg border px-3 py-2 text-left text-[11px] transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                    picked
+                      ? 'border-purple-400 bg-purple-500/15 text-purple-100'
+                      : 'border-slate-700 bg-slate-900/60 text-slate-300 hover:border-purple-500/50'
+                  }`}
+                >
+                  <div className="font-semibold flex items-center gap-1">
+                    {picked && <span className="text-purple-300">✓</span>}
+                    {inv.name}
+                    <span className="ml-auto text-[9px] text-slate-500">L{inv.minLevel}</span>
+                  </div>
+                  {inv.prereq && (
+                    <div className="text-[10px] text-amber-400/80 mt-0.5">Requires: {inv.prereq}</div>
+                  )}
+                  <div className="text-[10px] text-slate-400 mt-0.5">{inv.summary}</div>
+                </button>
+              )
+            })}
+          </div>
         </div>
       )}
 
@@ -830,11 +978,16 @@ export default function NewCharacterStep4Page() {
                   const isKnown = knownSpells.includes(spell.name)
                   const isPrepared = preparedSpells.includes(spell.name) || domainSpells.includes(spell.name)
                   const isDomain = domainSpells.includes(spell.name)
+                  // Wave 1B: off-school for EK/AT — needs a wildcard pick.
+                  const isOff = isOffSchool(spell)
+                  const isWildcardPick = wildcardSpells.includes(spell.name)
+                  const wildcardExhausted = isOff && !isKnown && wildcardsUsed >= wildcardBudget
 
                   // Cap logic per class type
                   const knownAtCap = !isKnown && (
                     (isWizard && wizardSpellbookSize !== null && currentLeveledKnown.length >= wizardSpellbookSize) ||
-                    (!isWizard && !isPreparedCaster && maxSpellsKnown !== null && currentLeveledKnown.length >= maxSpellsKnown)
+                    (!isWizard && !isPreparedCaster && maxSpellsKnown !== null && currentLeveledKnown.length >= maxSpellsKnown) ||
+                    wildcardExhausted
                   )
                   const preparedAtCap = !isPrepared && !isDomain && maxPrepared !== null &&
                     currentPreparedNonDomain.length >= maxPrepared
@@ -854,6 +1007,23 @@ export default function NewCharacterStep4Page() {
                         <div className="font-semibold text-white text-sm">
                           {spell.name}
                           {isDomain && <span className="ml-1.5 text-[10px] text-amber-400">Domain</span>}
+                          {/* Wave 1B: off-school flag for EK/AT */}
+                          {isOff && !isWildcardPick && (
+                            <span
+                              className="ml-1.5 text-[10px] text-fuchsia-400"
+                              title="Off-school for your subclass. Requires a wildcard pick."
+                            >
+                              ✦ Off-school
+                            </span>
+                          )}
+                          {isWildcardPick && (
+                            <span
+                              className="ml-1.5 text-[10px] text-fuchsia-300"
+                              title="Picked using one of your any-school wildcards."
+                            >
+                              ✦ Wildcard
+                            </span>
+                          )}
                           <span className="ml-1.5 text-[10px] text-slate-400">
                             {spellLevelLabel(spell.level)} level • {spell.school}
                           </span>
@@ -883,10 +1053,21 @@ export default function NewCharacterStep4Page() {
                                   ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300'
                                   : knownAtCap
                                     ? 'border-slate-700 bg-slate-800/40 text-slate-500'
-                                    : 'border-slate-600 bg-slate-800 text-slate-200 hover:border-slate-400'
+                                    : isOff
+                                      ? 'border-fuchsia-600 bg-fuchsia-900/30 text-fuchsia-200 hover:border-fuchsia-400'
+                                      : 'border-slate-600 bg-slate-800 text-slate-200 hover:border-slate-400'
                               }`}
+                              title={isOff && !isKnown ? 'Off-school — will use one wildcard pick' : undefined}
                             >
-                              {isKnown ? knownButtonActiveLabel : knownAtCap ? 'Spellbook full' : knownButtonLabel}
+                              {isKnown
+                                ? knownButtonActiveLabel
+                                : wildcardExhausted
+                                  ? 'No wildcards'
+                                  : knownAtCap
+                                    ? 'Spellbook full'
+                                    : isOff
+                                      ? '✦ Use Wildcard'
+                                      : knownButtonLabel}
                             </button>
                           )}
 

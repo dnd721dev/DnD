@@ -1058,6 +1058,28 @@ export function PlayerSidebar({
                       </div>
                     </div>
 
+                    {/* Wave 5: concentration chip — shows the current concentration
+                        spell with a Drop button. Stored in action_state.concentrating_on. */}
+                    {(actionState as any)?.concentrating_on && (
+                      <div className="rounded-md border border-amber-700/40 bg-amber-950/30 px-2 py-1.5 flex items-center gap-2">
+                        <span className="text-[10px] uppercase tracking-wide text-amber-500">Conc.</span>
+                        <span className="truncate text-[11px] text-amber-200 flex-1 min-w-0">
+                          {(actionState as any).concentrating_on}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextConditions = activeConditions.filter(c => c !== 'concentration')
+                            updateActionState({ concentrating_on: null, active_conditions: nextConditions } as any)
+                          }}
+                          className="rounded px-1.5 py-0.5 text-[9px] text-amber-300 bg-amber-900/40 hover:bg-amber-900/60"
+                          title="Drop concentration"
+                        >
+                          Drop
+                        </button>
+                      </div>
+                    )}
+
                     {/* Currency — Bug 19 UI */}
                     {(sheet?.gold != null || sheet?.silver != null || sheet?.copper != null || sheet?.electrum != null || sheet?.platinum != null) && (
                       <div className="flex flex-wrap gap-1.5 rounded-md border border-yellow-900/20 bg-slate-900/40 px-2 py-1.5">
