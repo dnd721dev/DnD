@@ -742,17 +742,49 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
         setTokens((toks ?? []) as Token[])
       }
 
-      // My character via session_characters
+      // My character — preferred path is via session_characters which is
+      // populated when a player formally joins the session via the table.
+      // Fallback chain when that row is missing:
+      //   1. token at this encounter whose owner_wallet matches → tokens.character_id
+      //   2. any character owned by the wallet (most recent updated, CAYA preferred)
+      // This makes the dashboard usable for players who placed a token but
+      // never joined via the table UI, and for solo testing.
+      let charId: string | null = null
+
       const { data: link } = await supabase
         .from('session_characters')
         .select('character_id')
         .eq('session_id', sessionId)
         .eq('wallet_address', wallet)
         .maybeSingle()
+      charId = (link as any)?.character_id ?? null
 
-      const charId = (link as any)?.character_id ?? null
+      if (!charId && eid) {
+        const { data: tokForChar } = await supabase
+          .from('tokens')
+          .select('character_id')
+          .eq('encounter_id', eid)
+          .eq('owner_wallet', wallet)
+          .not('character_id', 'is', null)
+          .limit(1)
+          .maybeSingle()
+        charId = (tokForChar as any)?.character_id ?? null
+      }
+
       if (!charId) {
-        // DM or observer — no character needed
+        const { data: charByWallet } = await supabase
+          .from('characters')
+          .select('id, is_caya, updated_at')
+          .eq('wallet_address', wallet)
+          .order('is_caya', { ascending: false })
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        charId = (charByWallet as any)?.id ?? null
+      }
+
+      if (!charId) {
+        // True observer / DM with no characters — no character to load.
         setLoading(false)
         return
       }

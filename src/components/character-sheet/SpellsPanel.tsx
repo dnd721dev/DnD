@@ -384,12 +384,18 @@ export function SpellsPanel({
   }, [onlyMyClassSpells, classSpellTags, spellLevelFilter, spellSearch])
 
   // ── new memos for My Spells view ────────────────────────────────────────────
-  const knownSpells: SrdSpell[] = useMemo(() =>
-    knownList
+  // Bug fix: for prepared casters (cleric, druid, paladin) leveled spells
+  // live ONLY in `spells_prepared` — they aren't added to `spells_known`
+  // (which holds cantrips only). The My Spells view must show the union of
+  // both lists, otherwise a druid sees only cantrips on the sheet even when
+  // they have 10 spells prepared. Wizards already maintain spells_known +
+  // spells_prepared together (spellbook + prepared subset).
+  const knownSpells: SrdSpell[] = useMemo(() => {
+    const union = new Set<string>([...knownList, ...preparedList])
+    return Array.from(union)
       .map((n) => SRD_SPELLS.find((s) => s.name === n))
-      .filter((s): s is SrdSpell => s !== undefined),
-    [knownList],
-  )
+      .filter((s): s is SrdSpell => s !== undefined)
+  }, [knownList, preparedList])
 
   const knownByLevel: Map<number, SrdSpell[]> = useMemo(() => {
     const map = new Map<number, SrdSpell[]>()
