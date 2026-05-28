@@ -1063,6 +1063,19 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
     return true
   }, [concentratingOn, setConcentration])
 
+  // Effect 1: Agonizing Blast — Warlock invocation that adds CHA mod to each
+  // Eldritch Blast beam. Declared BEFORE handleRoll for the same TDZ reason
+  // as requireConcentrationConfirmation above.
+  const hasAgonizingBlast = useMemo(() => {
+    const invs = (myChar?.warlock_invocations ?? []) as string[]
+    return invs.includes('agonizing_blast')
+  }, [myChar?.warlock_invocations])
+
+  const chaMod = useMemo(() => {
+    const score = Number((myChar?.abilities as any)?.cha ?? 10)
+    return abilityModifier(score)
+  }, [myChar?.abilities])
+
   // ── Handlers ──────────────────────────────────────────────────────────────────
   const handleRoll = useCallback(async (
     spell: SrdSpell,
@@ -1355,19 +1368,6 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
     if (cls === 'warlock' && hasRitualCasting(myChar?.warlock_invocations ?? null)) return true
     return false
   }, [myChar?.main_job, myChar?.warlock_invocations])
-
-  // Effect 1: Agonizing Blast — Warlock invocation that adds CHA mod to each
-  // Eldritch Blast beam. We surface a single boolean + CHA modifier the card
-  // can apply when the spell is Eldritch Blast.
-  const hasAgonizingBlast = useMemo(() => {
-    const invs = (myChar?.warlock_invocations ?? []) as string[]
-    return invs.includes('agonizing_blast')
-  }, [myChar?.warlock_invocations])
-
-  const chaMod = useMemo(() => {
-    const score = Number((myChar?.abilities as any)?.cha ?? 10)
-    return abilityModifier(score)
-  }, [myChar?.abilities])
 
   // ── Render: loading / error ───────────────────────────────────────────────────
   if (loading) {
