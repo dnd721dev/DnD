@@ -1004,6 +1004,65 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
   const pcTokens = useMemo(() => tokens.filter(t => t.type === 'pc'), [tokens])
   const allTargets = useMemo(() => tokens.filter(t => t.id !== /* my own? */ undefined), [tokens])
 
+  // ── Wave 5: Concentration tracking ───────────────────────────────────────
+  // Declared BEFORE handleRoll so the useCallback dep array can reference
+  // requireConcentrationConfirmation without hitting "used before declaration"
+  // under Next.js's strict build (tsc --noEmit alone permits this).
+  //
+  // The currently-concentrated spell is stored in action_state.concentrating_on.
+  // Casting a new concentration spell auto-drops the previous one. The chip
+  // in the sidebar lets the player release manually.
+  const concentratingOn: string | null = useMemo(() => {
+    const v = myChar?.action_state?.concentrating_on
+    return typeof v === 'string' && v.length > 0 ? v : null
+  }, [myChar?.action_state])
+
+  /**
+   * Set or clear the concentration target on the character. Also keeps
+   * active_conditions in sync so the existing condition UI shows the badge.
+   */
+  const setConcentration = useCallback(async (spellName: string | null) => {
+    if (!myChar) return
+    const { data: row } = await supabase
+      .from('characters')
+      .select('action_state')
+      .eq('id', myChar.id)
+      .maybeSingle()
+    const current = ((row as any)?.action_state ?? {}) as Record<string, any>
+    const activeConditions: string[] = Array.isArray(current.active_conditions) ? current.active_conditions : []
+    const nextConditions = spellName
+      ? Array.from(new Set([...activeConditions, 'concentration']))
+      : activeConditions.filter(c => c !== 'concentration')
+    const next = {
+      ...current,
+      concentrating_on: spellName,
+      active_conditions: nextConditions,
+    }
+    await supabase
+      .from('characters')
+      .update({ action_state: next })
+      .eq('id', myChar.id)
+    setMyChar(prev => prev ? { ...prev, action_state: next } : prev)
+  }, [myChar])
+
+  /**
+   * Called whenever the player initiates a cast (any of attack/save/damage/heal/
+   * ritual). If the spell is a concentration spell and there's an existing
+   * concentration, confirm the drop. Returns true to proceed, false to cancel.
+   */
+  const requireConcentrationConfirmation = useCallback((spell: SrdSpell): boolean => {
+    const isConc = spell.duration.toLowerCase().includes('concentration')
+    if (!isConc) return true
+    if (concentratingOn && concentratingOn !== spell.name) {
+      const ok = window.confirm(
+        `You're already concentrating on ${concentratingOn}. Casting ${spell.name} will drop it. Continue?`,
+      )
+      if (!ok) return false
+    }
+    void setConcentration(spell.name)
+    return true
+  }, [concentratingOn, setConcentration])
+
   // ── Handlers ──────────────────────────────────────────────────────────────────
   const handleRoll = useCallback(async (
     spell: SrdSpell,
@@ -1286,63 +1345,6 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
     })
     // Slot deliberately NOT expended — that's the whole point of ritual.
   }, [myChar, spellAbilityMod, sessionId, wallet, requireConcentrationConfirmation])
-
-  // ── Wave 5: Concentration tracking ───────────────────────────────────────
-  // The currently-concentrated spell is stored in action_state.concentrating_on.
-  // Casting a new concentration spell auto-drops the previous one. The chip
-  // in the sidebar lets the player release manually.
-  const concentratingOn: string | null = useMemo(() => {
-    const v = myChar?.action_state?.concentrating_on
-    return typeof v === 'string' && v.length > 0 ? v : null
-  }, [myChar?.action_state])
-
-  /**
-   * Set or clear the concentration target on the character. Also keeps
-   * active_conditions in sync so the existing condition UI shows the badge.
-   */
-  const setConcentration = useCallback(async (spellName: string | null) => {
-    if (!myChar) return
-    const { data: row } = await supabase
-      .from('characters')
-      .select('action_state')
-      .eq('id', myChar.id)
-      .maybeSingle()
-    const current = ((row as any)?.action_state ?? {}) as Record<string, any>
-    const activeConditions: string[] = Array.isArray(current.active_conditions) ? current.active_conditions : []
-    const nextConditions = spellName
-      ? Array.from(new Set([...activeConditions, 'concentration']))
-      : activeConditions.filter(c => c !== 'concentration')
-    const next = {
-      ...current,
-      concentrating_on: spellName,
-      active_conditions: nextConditions,
-    }
-    await supabase
-      .from('characters')
-      .update({ action_state: next })
-      .eq('id', myChar.id)
-    setMyChar(prev => prev ? { ...prev, action_state: next } : prev)
-  }, [myChar])
-
-  /**
-   * Called whenever the player initiates a cast (any of attack/save/damage/heal/
-   * ritual). If the spell is a concentration spell and there's an existing
-   * concentration, confirm the drop. Returns true to proceed, false to cancel.
-   */
-  const requireConcentrationConfirmation = useCallback((spell: SrdSpell): boolean => {
-    const isConc = spell.duration.toLowerCase().includes('concentration')
-    if (!isConc) return true
-    if (concentratingOn && concentratingOn !== spell.name) {
-      // Confirm the swap
-      const ok = window.confirm(
-        `You're already concentrating on ${concentratingOn}. Casting ${spell.name} will drop it. Continue?`,
-      )
-      if (!ok) return false
-    }
-    // Update concentration target (fire-and-forget; the realtime sync will catch up)
-    void setConcentration(spell.name)
-    return true
-  }, [concentratingOn, setConcentration])
 
   // Magic audit section G: ritual casting requires class proficiency.
   // 5e classes with ritual casting: Bard, Cleric, Druid, Wizard. Wave 4 adds
