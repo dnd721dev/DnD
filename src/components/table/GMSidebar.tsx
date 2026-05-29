@@ -180,39 +180,7 @@ export default function GMSidebar({
     return arr;
   }, [entries]);
 
-  // GM notes — persisted to sessions.gm_notes
-  const [gmNotes, setGmNotes] = useState('');
-  const [notesSaving, setNotesSaving] = useState(false);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Load notes when session changes
-  useEffect(() => {
-    if (!sessionId) return;
-    let cancelled = false;
-
-    supabase
-      .from('sessions')
-      .select('gm_notes')
-      .eq('id', sessionId)
-      .limit(1)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (!cancelled) setGmNotes((data as any)?.gm_notes ?? '');
-      });
-
-    return () => { cancelled = true; };
-  }, [sessionId]);
-
-  function handleNotesChange(value: string) {
-    setGmNotes(value);
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(async () => {
-      if (!sessionId) return;
-      setNotesSaving(true);
-      await supabase.from('sessions').update({ gm_notes: value }).eq('id', sessionId);
-      setNotesSaving(false);
-    }, 1000);
-  }
+  // GM notes lived here previously; moved to the DM Dashboard.
 
   const tabs: { key: TabKey; label: string }[] = [
     { key: 'combat', label: '⚔ Combat' },
@@ -329,18 +297,8 @@ export default function GMSidebar({
                   <p className="text-[11px] text-slate-400">Session not loaded.</p>
                 )}
               </div>
-              <div className="flex flex-col gap-1.5 rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-semibold text-yellow-300/70">Session Notes</span>
-                  <span className="text-[10px] text-slate-500">{notesSaving ? 'Saving…' : 'Auto-saved'}</span>
-                </div>
-                <textarea
-                  value={gmNotes}
-                  onChange={(e) => handleNotesChange(e.target.value)}
-                  rows={3}
-                  className="w-full resize-none rounded-md border border-yellow-900/30 bg-slate-950/90 px-2 py-1 text-[11px] text-slate-100 placeholder:text-slate-500 focus:border-yellow-500 focus:outline-none"
-                  placeholder="Write NPC names, plot twists, secret DCs…"
-                />
+              <div className="rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40 text-[11px] text-slate-400">
+                Session notes moved to the <span className="text-indigo-300">DM Dashboard</span> (🎲 button up top).
               </div>
             </div>
             <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">

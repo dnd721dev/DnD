@@ -163,75 +163,14 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
 
   // ── GM rolls state ─────────────────────────────────────────────────────────
   const [advMode, setAdvMode] = useState<AdvMode>('normal')
-  const [xpInput, setXpInput] = useState('')
-  const [awardingXp, setAwardingXp] = useState(false)
-  const [awardError, setAwardError] = useState<string | null>(null)
-  const [awardSuccess, setAwardSuccess] = useState<number | null>(null)
 
-  // ── Mid-session XP award ───────────────────────────────────────────────────
-  const [midXpInput, setMidXpInput] = useState('')
-  const [midAwardingXp, setMidAwardingXp] = useState(false)
-  const [midAwardError, setMidAwardError] = useState<string | null>(null)
-  const [midAwardSuccess, setMidAwardSuccess] = useState<number | null>(null)
-
-  async function handleMidAwardXp(presetAmount?: number) {
-    const xp = presetAmount ?? parseInt(midXpInput)
-    if (!xp || xp <= 0 || !sessionId || !gmWallet) return
-    setMidAwardingXp(true)
-    setMidAwardError(null)
-    setMidAwardSuccess(null)
-    try {
-      const res = await fetch('/api/sessions/award-xp-mid', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, xp_amount: xp, gm_wallet: gmWallet }),
-      })
-      const json = await res.json()
-      if (!res.ok) {
-        setMidAwardError(json.error ?? 'Failed to award XP')
-      } else {
-        setMidAwardSuccess(xp)
-        setMidXpInput('')
-        // Auto-clear success message after 4 s
-        window.setTimeout(() => setMidAwardSuccess(null), 4000)
-      }
-    } catch (err: any) {
-      setMidAwardError(err.message ?? 'Network error')
-    } finally {
-      setMidAwardingXp(false)
-    }
-  }
+  // XP award state + handlers were lifted to src/app/sessions/[id]/dm/XpAwardPanel.tsx
 
   // Encounter difficulty calculator
   const [calcOpen, setCalcOpen] = useState(false)
   const [partyCount, setPartyCount] = useState(4)
   const [partyLevel, setPartyLevel] = useState(5)
   const [monsterCRs, setMonsterCRs] = useState<CRKey[]>(['1'])
-
-  async function handleAwardXp() {
-    const xp = parseInt(xpInput)
-    if (!xp || xp <= 0 || !sessionId || !gmWallet) return
-    setAwardingXp(true)
-    setAwardError(null)
-    try {
-      const res = await fetch('/api/sessions/award-xp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, xp_amount: xp, gm_wallet: gmWallet }),
-      })
-      const json = await res.json()
-      if (!res.ok) {
-        setAwardError(json.error ?? 'Failed to award XP')
-      } else {
-        setAwardSuccess(xp)
-        setXpInput('')
-      }
-    } catch (err: any) {
-      setAwardError(err.message ?? 'Network error')
-    } finally {
-      setAwardingXp(false)
-    }
-  }
 
   // Custom roll picker state
   const [customSides, setCustomSides] = useState<DieSides>(20)
@@ -703,96 +642,12 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
         })()}
       </section>
 
-      {/* ── Mid-session XP Award (any active session — awards only to CAYA characters) ── */}
-      {sessionStatus === 'active' && sessionId && gmWallet && (
-        <section className="rounded-lg border border-violet-700/50 bg-violet-950/20 p-2">
-          <p className="mb-1 text-xs font-semibold text-violet-200">Award XP</p>
-          <p className="mb-2 text-[10px] text-slate-400">
-            Grants XP to all CAYA characters seated at this session.
-          </p>
-
-          {/* Quick preset buttons */}
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {[25, 50, 100, 200, 500].map((amt) => (
-              <button
-                key={amt}
-                type="button"
-                disabled={midAwardingXp}
-                onClick={() => void handleMidAwardXp(amt)}
-                className="rounded-md border border-violet-700/60 bg-violet-900/30 px-2.5 py-1 text-[11px] font-semibold text-violet-200 hover:bg-violet-800/50 disabled:opacity-40 transition"
-              >
-                +{amt}
-              </button>
-            ))}
-          </div>
-
-          {/* Custom amount */}
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              min={1}
-              placeholder="Custom XP"
-              value={midXpInput}
-              onChange={(e) => setMidXpInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') void handleMidAwardXp() }}
-              className="w-24 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 outline-none focus:border-violet-500"
-            />
-            <button
-              type="button"
-              onClick={() => void handleMidAwardXp()}
-              disabled={midAwardingXp || !midXpInput}
-              className="flex-1 rounded-lg border border-violet-700/50 bg-violet-900/30 py-1 text-[11px] font-bold text-violet-200 hover:bg-violet-800/50 disabled:opacity-40 transition"
-            >
-              {midAwardingXp ? 'Awarding…' : 'Award'}
-            </button>
-          </div>
-
-          {midAwardSuccess != null && (
-            <p className="mt-1.5 text-[10px] font-semibold text-emerald-300">
-              ✓ {midAwardSuccess} XP awarded to all CAYA players!
-            </p>
-          )}
-          {midAwardError && (
-            <p className="mt-1.5 text-[10px] text-red-400">{midAwardError}</p>
-          )}
-        </section>
-      )}
-
-      {/* XP Award — only for CAYA sessions after completion */}
-      {sessionType === 'caya' && sessionStatus === 'completed' && !xpAwardedAlready && !awardSuccess && (
-        <section className="rounded-lg border border-amber-700/50 bg-amber-950/20 p-2">
-          <p className="mb-1.5 text-xs font-semibold text-amber-200">Award Session XP</p>
-          <p className="mb-2 text-[10px] text-slate-400">Awarded equally to all CAYA participants.</p>
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              min={1}
-              placeholder="XP amount"
-              value={xpInput}
-              onChange={(e) => setXpInput(e.target.value)}
-              className="w-24 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs outline-none focus:border-amber-500"
-            />
-            <button
-              type="button"
-              onClick={handleAwardXp}
-              disabled={awardingXp || !xpInput}
-              className="flex-1 rounded-lg border border-amber-700/50 bg-amber-900/30 py-1.5 text-[11px] font-bold text-amber-300 hover:bg-amber-900/50 disabled:opacity-50"
-            >
-              {awardingXp ? 'Awarding…' : 'Award XP to All Players'}
-            </button>
-          </div>
-          {awardError && <p className="mt-1.5 text-[10px] text-red-400">{awardError}</p>}
-        </section>
-      )}
-
-      {/* XP success or already awarded */}
-      {sessionType === 'caya' && sessionStatus === 'completed' && (xpAwardedAlready ?? awardSuccess) && (
-        <section className="rounded-lg border border-emerald-700/40 bg-emerald-950/20 p-2">
-          <p className="text-xs font-semibold text-emerald-300">
-            ✓ {xpAwardedAlready ?? awardSuccess} XP awarded to CAYA participants
-          </p>
-        </section>
-      )}
+      {/* XP award UI moved to the DM Dashboard (🎲 button up top). */}
+      <section className="rounded-lg border border-slate-700/50 bg-slate-900/40 p-2">
+        <p className="text-[11px] text-slate-400">
+          XP awards now live on the <span className="text-indigo-300">DM Dashboard</span> (🎲 button up top).
+        </p>
+      </section>
 
       </> /* end tools tab */}
     </div>

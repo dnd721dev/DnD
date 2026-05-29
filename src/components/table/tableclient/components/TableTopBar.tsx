@@ -75,6 +75,16 @@ export const TableTopBar = memo(function TableTopBar(props: {
           >
             ✦ {isGm ? 'Party Slots' : 'Spells'}
           </button>
+          {isGm && (
+            <button
+              type="button"
+              onClick={() => window.open(`/sessions/${session.id}/dm`, '_blank', 'noopener,noreferrer')}
+              className="rounded-md bg-indigo-950 border border-indigo-500/40 px-2.5 py-1 text-[11px] font-medium text-indigo-300 hover:bg-indigo-900 hover:text-indigo-200 transition-colors"
+              title="Open the DM dashboard in a new tab"
+            >
+              🎲 DM Dashboard
+            </button>
+          )}
           {onOpenShop && (
             <button
               type="button"
