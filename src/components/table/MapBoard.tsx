@@ -116,6 +116,9 @@ const MapBoard: React.FC<MapBoardProps> = ({
 
   // Fog of war GM tools
   const [fogToolActive, setFogToolActive] = useState(false);
+  // Wave 4: shroud (un-reveal) mode — when true, the fog brush re-covers
+  // tiles instead of revealing them. Same drag UX, opposite SQL operation.
+  const [fogShroudMode, setFogShroudMode] = useState(false);
   const [fogRevealSet, setFogRevealSet] = useState<Set<string>>(new Set());
   const [isRevealingAll, setIsRevealingAll] = useState(false);
   const isFogPaintingRef = useRef(false);
@@ -172,9 +175,20 @@ const MapBoard: React.FC<MapBoardProps> = ({
 
     loadFog();
 
+    // Wave 2: narrow realtime filter. Supabase postgres_changes only supports
+    // a single filter clause. The GM view shows the union across all players
+    // on the current map, so we filter by map_id when available (more
+    // specific than encounter_id since one encounter may have multiple maps).
+    // Falls back to encounter_id when mapId is null (legacy single-map flow).
     const channel = supabase
       .channel(`gm-fog-${encounterId}-${mapId ?? 'nomap'}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'fog_reveals', filter: `encounter_id=eq.${encounterId}` }, loadFog)
+      .on(
+        'postgres_changes',
+        mapId
+          ? { event: '*', schema: 'public', table: 'fog_reveals', filter: `map_id=eq.${mapId}` }
+          : { event: '*', schema: 'public', table: 'fog_reveals', filter: `encounter_id=eq.${encounterId}` },
+        loadFog,
+      )
       .subscribe();
 
     return () => { mounted = false; supabase.removeChannel(channel); };
@@ -589,14 +603,38 @@ const MapBoard: React.FC<MapBoardProps> = ({
     }
   }, [fogToolActive, canvasSize, gridSize, fogRevealSet]);
 
-  /** Paint a single tile for all players and update local set */
+  /** Paint a single tile for all players and update local set.
+   *
+   * Behaviour depends on `fogShroudMode`:
+   *  - false (reveal): upsert a row per player for this tile.
+   *  - true  (shroud): delete every player's reveal row for this tile,
+   *    re-covering it. The GM-side union set drops the tile too.
+   */
   const paintFogAt = async (world: Point) => {
     if (sessionPlayerWallets.length === 0) return;
     const tx = Math.floor(world.x / gridSize);
     const ty = Math.floor(world.y / gridSize);
     const k = keyTile(tx, ty);
-    if (fogRevealSet.has(k)) return;
 
+    if (fogShroudMode) {
+      // Wave 4: shroud (un-reveal) — skip tiles that are already covered.
+      if (!fogRevealSet.has(k)) return;
+      setFogRevealSet((prev) => { const next = new Set(prev); next.delete(k); return next; });
+
+      let q = supabase
+        .from('fog_reveals')
+        .delete()
+        .eq('encounter_id', encounterId)
+        .eq('tile_x', tx)
+        .eq('tile_y', ty);
+      q = mapId ? (q as any).eq('map_id', mapId) : (q as any).is('map_id', null);
+      const { error } = await q;
+      if (error) console.error('fog shroud failed:', error);
+      return;
+    }
+
+    // Reveal path (default).
+    if (fogRevealSet.has(k)) return;
     setFogRevealSet((prev) => { const next = new Set(prev); next.add(k); return next; });
 
     const rows = sessionPlayerWallets.map((w) => ({
@@ -606,7 +644,12 @@ const MapBoard: React.FC<MapBoardProps> = ({
       tile_x: tx,
       tile_y: ty,
     }));
-    const { error } = await supabase.from('fog_reveals').upsert(rows, { ignoreDuplicates: true });
+    // onConflict is required — see MapBoardView for the full explanation.
+    // fog_reveals has no PK, so we must point at the named unique constraint.
+    const { error } = await supabase.from('fog_reveals').upsert(rows, {
+      onConflict: 'encounter_id,viewer_wallet,map_id,tile_x,tile_y',
+      ignoreDuplicates: true,
+    });
     if (error) console.error('fog paint failed:', error);
   };
 
@@ -631,7 +674,10 @@ const MapBoard: React.FC<MapBoardProps> = ({
       setFogRevealSet(nextSet);
       // Upsert in batches of 500 to avoid request size limits
       for (let i = 0; i < allRows.length; i += 500) {
-        const { error } = await supabase.from('fog_reveals').upsert(allRows.slice(i, i + 500), { ignoreDuplicates: true });
+        const { error } = await supabase.from('fog_reveals').upsert(allRows.slice(i, i + 500), {
+          onConflict: 'encounter_id,viewer_wallet,map_id,tile_x,tile_y',
+          ignoreDuplicates: true,
+        });
         if (error) { console.error('reveal all failed:', error); break; }
       }
     } finally {
@@ -1117,6 +1163,22 @@ const MapBoard: React.FC<MapBoardProps> = ({
         >
           🌫 Fog Brush
         </button>
+        {/* Wave 4: reveal/shroud mode toggle — only visible while the brush
+            is active, so the toolbar isn't cluttered otherwise. */}
+        {fogToolActive && (
+          <button
+            type="button"
+            onClick={() => setFogShroudMode((v) => !v)}
+            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold shadow transition ${
+              fogShroudMode
+                ? 'border-violet-500/80 bg-violet-950/90 text-violet-200 shadow-[0_0_8px_rgba(139,92,246,0.4)]'
+                : 'border-slate-700/60 bg-slate-950/80 text-slate-300 hover:border-slate-500'
+            }`}
+            title={fogShroudMode ? 'Shroud mode — click/drag to re-cover tiles' : 'Reveal mode — click/drag to reveal tiles'}
+          >
+            {fogShroudMode ? '🌑 Shroud' : '✨ Reveal'}
+          </button>
+        )}
         <button
           type="button"
           onClick={handleRevealAll}
@@ -1217,8 +1279,16 @@ const MapBoard: React.FC<MapBoardProps> = ({
 
       {/* Fog brush active banner */}
       {fogToolActive && (
-        <div className="pointer-events-none absolute left-3 top-3 z-20 rounded-lg border border-sky-600/60 bg-slate-950/90 px-3 py-1.5 text-xs text-sky-200 shadow-lg">
-          🌫 Fog Brush active — click and drag to reveal tiles (Esc to cancel)
+        <div
+          className={`pointer-events-none absolute left-3 top-3 z-20 rounded-lg border px-3 py-1.5 text-xs shadow-lg ${
+            fogShroudMode
+              ? 'border-violet-600/60 bg-slate-950/90 text-violet-200'
+              : 'border-sky-600/60 bg-slate-950/90 text-sky-200'
+          }`}
+        >
+          {fogShroudMode
+            ? '🌑 Shroud mode — click and drag to re-cover tiles (Esc to cancel)'
+            : '🌫 Fog Brush active — click and drag to reveal tiles (Esc to cancel)'}
         </div>
       )}
 

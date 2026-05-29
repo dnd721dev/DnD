@@ -168,7 +168,10 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
         }
       }
       for (let i = 0; i < allRows.length; i += 500) {
-        const { error } = await supabase.from('fog_reveals').upsert(allRows.slice(i, i + 500), { ignoreDuplicates: true })
+        const { error } = await supabase.from('fog_reveals').upsert(allRows.slice(i, i + 500), {
+          onConflict: 'encounter_id,viewer_wallet,map_id,tile_x,tile_y',
+          ignoreDuplicates: true,
+        })
         if (error) { console.error('reveal all failed:', error); break }
       }
     } finally {
@@ -425,11 +428,16 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
 
     loadReveals()
 
+    // Wave 2: narrow the realtime filter. Supabase postgres_changes only
+    // supports a single filter clause, so we pick the most-discriminating
+    // column for this view. The player view only cares about THEIR OWN
+    // reveals — filtering by viewer_wallet eliminates the noise from every
+    // other player's movement in the same encounter.
     const channel = supabase
       .channel(`fog-${encounterId}-${ownerLower}-${mapId ?? 'nomap'}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'fog_reveals', filter: `encounter_id=eq.${encounterId}` },
+        { event: '*', schema: 'public', table: 'fog_reveals', filter: `viewer_wallet=eq.${ownerLower}` },
         () => loadReveals()
       )
       .subscribe()
@@ -514,9 +522,18 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       tile_y: t.tile_y,
     }))
 
+    // NOTE: The `onConflict` argument is REQUIRED here. The `fog_reveals`
+    // table has no primary key — only the named unique constraint
+    // `fog_reveals_unique` on (encounter_id, viewer_wallet, map_id, tile_x,
+    // tile_y). Without `onConflict`, PostgREST defaults to the PK as the
+    // conflict target; since there is none, `ignoreDuplicates` is silently
+    // ignored and every re-reveal of a known tile throws 23505 / HTTP 409.
     const { error } = await supabase
       .from('fog_reveals')
-      .upsert(payload, { ignoreDuplicates: true })
+      .upsert(payload, {
+        onConflict: 'encounter_id,viewer_wallet,map_id,tile_x,tile_y',
+        ignoreDuplicates: true,
+      })
 
     if (error) {
       logSupabaseError('Failed to persist fog reveals:', error)
