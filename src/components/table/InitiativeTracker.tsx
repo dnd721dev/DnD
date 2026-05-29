@@ -480,10 +480,18 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
     const hp = hpInput.value ? Number(hpInput.value) : null;
     const isPc = isPcInput.checked;
 
+    // Audit Wave 3F: surface NaN coercion so the underlying bug (corrupted
+    // modifier, bad input) appears in dev tools instead of silently changing
+    // combat order.
+    let safeInit = init
+    if (Number.isNaN(init)) {
+      console.warn('[InitiativeTracker] NaN init value for', name, '— defaulting to 0')
+      safeInit = 0
+    }
     const { error } = await supabase.from('initiative_entries').insert({
       encounter_id: encounterId,
       name,
-      init: isNaN(init) ? 0 : init,
+      init: safeInit,
       hp,
       is_pc: isPc,
       character_id: null,

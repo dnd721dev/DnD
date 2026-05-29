@@ -121,8 +121,13 @@ function fmtMod(n: number) {
 }
 
 function hpPct(token: Token): number {
-  const max = token.hp ?? 1
-  const cur = token.current_hp ?? max
+  // Audit Wave 3E: defensively coerce both values to finite positive numbers
+  // before division. Old code could NaN-out the bar when both `hp` and
+  // `current_hp` were null (rare but observed when a monster token shipped
+  // without HP set), since `null ?? 1` is 1 but `null/null * 100` is NaN.
+  const max = Math.max(1, Number(token.hp ?? token.current_hp ?? 1))
+  const cur = Number(token.current_hp ?? max)
+  if (!Number.isFinite(cur)) return 0
   return Math.round(Math.max(0, Math.min(100, (cur / max) * 100)))
 }
 

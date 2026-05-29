@@ -20,6 +20,26 @@ function verifyEvmSignature(params: { wallet: string; message: string; signature
   return normalizeAddr(recovered) === normalizeAddr(params.wallet)
 }
 
+// Audit Wave 2D: avatar_url is written straight from the client into the DB
+// and later rendered in <img src> across many components. Reject schemes that
+// can execute script (javascript:, data:text/html, vbscript:) or read local
+// files (file:). Only http/https and relative paths are allowed. Empty / null
+// stays valid — that just clears the avatar.
+function sanitizeAvatarUrl(raw: unknown): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (raw == null) return { ok: true, value: null }
+  if (typeof raw !== 'string') return { ok: false, error: 'avatar_url must be a string or null' }
+  const trimmed = raw.trim()
+  if (trimmed === '') return { ok: true, value: null }
+  // Relative paths (e.g. uploaded asset paths handled by Supabase Storage)
+  // are accepted — they don't carry a scheme.
+  if (trimmed.startsWith('/')) return { ok: true, value: trimmed }
+  // Anything with a scheme must be http(s).
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return { ok: false, error: 'avatar_url must use http(s) or be a relative path' }
+  }
+  return { ok: true, value: trimmed }
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json()
@@ -46,6 +66,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: 'Missing fields' }, { status: 400 })
     }
 
+    // Audit Wave 2D: reject avatar_url schemes that can execute script or
+    // read local files. Anything other than http(s) or a relative path
+    // returns 400.
+    const avatarCheck = sanitizeAvatarUrl(avatar_url)
+    if (!avatarCheck.ok) {
+      return NextResponse.json({ ok: false, error: avatarCheck.error }, { status: 400 })
+    }
+    const safeAvatarUrl = avatarCheck.value
+
     // Verify wallet signature
     const valid = verifyEvmSignature({ wallet: wallet_address, message, signature })
     if (!valid) {
@@ -63,7 +92,7 @@ export async function POST(req: Request) {
           username,
           bio:          bio          ?? null,
           display_name: display_name ?? null,
-          avatar_url:   avatar_url   ?? null,
+          avatar_url:   safeAvatarUrl,
           location:     location     ?? null,
           timezone:     timezone     ?? null,
           twitter:      twitter      ?? null,

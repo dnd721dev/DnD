@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { xpToLevel } from '@/lib/dnd5e'
+import { buildLevelUpPatch, MAX_XP_PER_AWARD } from '@/lib/levelUpRefresh'
 
 /** POST /api/sessions/award-xp-mid
  *  Awards XP to all CAYA characters assigned to an **active** session.
@@ -21,6 +23,13 @@ export async function POST(req: NextRequest) {
   }
   if (!xp_amount || typeof xp_amount !== 'number' || xp_amount <= 0 || !Number.isInteger(xp_amount)) {
     return NextResponse.json({ error: 'xp_amount must be a positive integer' }, { status: 400 })
+  }
+  // Audit Wave 2B: same hard cap as end-of-session award.
+  if (xp_amount > MAX_XP_PER_AWARD) {
+    return NextResponse.json(
+      { error: `xp_amount must be ≤ ${MAX_XP_PER_AWARD}` },
+      { status: 400 },
+    )
   }
   if (!gm_wallet || typeof gm_wallet !== 'string') {
     return NextResponse.json({ error: 'gm_wallet required' }, { status: 400 })
@@ -67,10 +76,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No characters assigned to session players yet' }, { status: 400 })
   }
 
-  // Fetch those characters — only award to CAYA characters
-  const { data: characters, error: charErr } = await db
+  // Fetch those characters — only award to CAYA characters.
+  // Wave 2C: pull all the columns the shared level-up helper reads, so that
+  // crossing a level threshold mid-session refreshes spell slots / DC / HP
+  // the same way end-of-session award does.
+  const { data: charactersRaw, error: charErr } = await db
     .from('characters')
-    .select('id, experience_points, is_caya')
+    .select('id, wallet_address, experience_points, level, main_job, subclass, secondary_class, secondary_subclass, secondary_level, abilities, spells_prepared, spells_known, resource_state, action_state, hp, hit_points_max, hit_points_current, is_caya')
     .in('id', characterIds)
     .eq('is_caya', true)
 
@@ -78,18 +90,46 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to fetch characters' }, { status: 500 })
   }
 
-  if (!characters?.length) {
+  if (!charactersRaw?.length) {
     return NextResponse.json({ error: 'No CAYA characters found for session players' }, { status: 400 })
   }
 
-  // Award XP to each CAYA character
+  // Audit Wave 2A: defense-in-depth — re-verify each fetched character's
+  // wallet matches a session_players row. Prevents XP leakage if
+  // session_players.character_id were tampered to point at another wallet's
+  // character (the existing FK alone doesn't enforce ownership).
+  const playerWalletByCharId = new Map<string, string>()
+  for (const p of players as any[]) {
+    if (p.character_id && p.wallet_address) {
+      playerWalletByCharId.set(p.character_id, String(p.wallet_address).toLowerCase())
+    }
+  }
+  const characters = (charactersRaw as any[]).filter((c) =>
+    playerWalletByCharId.get(c.id) === String(c.wallet_address ?? '').toLowerCase(),
+  )
+
+  if (characters.length === 0) {
+    return NextResponse.json({ error: 'No CAYA characters found for session players' }, { status: 400 })
+  }
+
+  // Award XP — and if the character crosses a level threshold, also apply
+  // the level-up patch (spell slots, save DC, attack bonus, HP recalc,
+  // domain spells). Same helper as award-xp uses at end-of-session.
+  const levelUps: { characterId: string; oldLevel: number; newLevel: number }[] = []
   const updates = await Promise.all(
-    characters.map((char: any) =>
-      db
-        .from('characters')
-        .update({ experience_points: (char.experience_points ?? 0) + xp_amount })
-        .eq('id', char.id)
-    )
+    characters.map((char: any) => {
+      const oldXp = Number(char.experience_points ?? 0)
+      const newXp = oldXp + xp_amount
+      const oldLevel = Number(char.level ?? 1)
+      const newLevel = xpToLevel(newXp)
+
+      const patch: Record<string, any> = { experience_points: newXp }
+      if (newLevel > oldLevel) {
+        Object.assign(patch, buildLevelUpPatch(char, newLevel))
+        levelUps.push({ characterId: char.id, oldLevel, newLevel })
+      }
+      return db.from('characters').update(patch).eq('id', char.id)
+    }),
   )
 
   const failed = updates.filter((r) => r.error)
@@ -102,5 +142,6 @@ export async function POST(req: NextRequest) {
     ok: true,
     awarded_to: characters.length,
     xp_amount,
+    level_ups: levelUps,
   })
 }

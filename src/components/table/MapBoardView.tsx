@@ -99,6 +99,12 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   const [tokens, setTokens] = useState<Token[]>([])
   const [reveals, setReveals] = useState<FogReveal[]>([])
   const [revealSet, setRevealSet] = useState<Set<string>>(new Set())
+  // Audit Wave 4C: debounced fog-reveal upsert. revealAround fires every
+  // drag frame (~16ms); we accumulate the newly-discovered tiles in a ref
+  // and flush a single upsert after 200ms of quiet. Local state updates
+  // (setRevealSet / setReveals) stay synchronous so the UI feels instant.
+  const pendingRevealTilesRef = useRef<Map<string, FogReveal>>(new Map())
+  const revealFlushTimerRef = useRef<number | null>(null)
   // Hidden until the first loadReveals() resolves to prevent a flash of
   // fully-revealed map (or all-black fog) during the async DB fetch.
   const [fogsLoaded, setFogsLoaded] = useState(false)
@@ -367,12 +373,34 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
 
     loadTokens()
 
+    // Audit Wave 4A: patch from payload.new instead of re-fetching the full
+    // token set on every change. With 10+ tokens on the map, a single
+    // coordinate update used to SELECT the whole list back. Now we apply the
+    // delta in place. The map_id filter (PC token visible everywhere = null)
+    // is preserved by tracking inclusion in the existing set; new tokens that
+    // would have been visible only after a refetch (e.g. created in another
+    // map view) are still discovered by the next mount or explicit reload.
     const channel = supabase
       .channel(`tokens-view-${encounterId}-${mapId ?? 'all'}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'tokens', filter: `encounter_id=eq.${encounterId}` },
-        () => loadTokens()
+        (payload: any) => {
+          if (!mounted) return
+          const evt = payload.eventType
+          if (evt === 'INSERT') {
+            const row = payload.new
+            // Honour the map_id filter applied by loadTokens.
+            if (mapId && row?.map_id && row.map_id !== mapId) return
+            setTokens((prev) => (prev.some((t: any) => t.id === row.id) ? prev : [...prev, row as any]))
+          } else if (evt === 'UPDATE') {
+            const row = payload.new
+            setTokens((prev) => prev.map((t: any) => (t.id === row.id ? { ...t, ...row } : t)))
+          } else if (evt === 'DELETE') {
+            const row = payload.old
+            setTokens((prev) => prev.filter((t: any) => t.id !== row.id))
+          }
+        },
       )
       .subscribe()
 
@@ -390,6 +418,11 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       setFogsLoaded(false)
       return
     }
+    // Audit Wave 3A: clear stale reveals from the previous encounter/map
+    // before fetching fresh. Without this, tiles from the previous map
+    // briefly bleed through while loadReveals() awaits the network.
+    setReveals([])
+    setRevealSet(new Set())
     setFogsLoaded(false)
 
     let mounted = true
@@ -447,6 +480,45 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       supabase.removeChannel(channel)
     }
   }, [encounterId, ownerLower, mapId])
+
+  // Audit Wave 4C: flush queued fog reveals to the DB in one upsert. The
+  // `onConflict` argument remains required because fog_reveals has no PK —
+  // only the named unique constraint. Without it, ignoreDuplicates is
+  // silently dropped and every re-reveal of a known tile throws 23505/409.
+  const flushPendingReveals = useCallback(async () => {
+    if (!ownerLower) return
+    if (pendingRevealTilesRef.current.size === 0) return
+    const tiles = Array.from(pendingRevealTilesRef.current.values())
+    pendingRevealTilesRef.current.clear()
+    const payload = tiles.map((t) => ({
+      encounter_id: encounterId,
+      viewer_wallet: ownerLower,
+      map_id: mapId ?? null,
+      tile_x: t.tile_x,
+      tile_y: t.tile_y,
+    }))
+    const { error } = await supabase
+      .from('fog_reveals')
+      .upsert(payload, {
+        onConflict: 'encounter_id,viewer_wallet,map_id,tile_x,tile_y',
+        ignoreDuplicates: true,
+      })
+    if (error) {
+      logSupabaseError('Failed to persist fog reveals:', error)
+    }
+  }, [encounterId, ownerLower, mapId])
+
+  // Flush any pending fog upserts on unmount or when encounter/map changes,
+  // so reveals from the prior context don't leak into the next.
+  useEffect(() => {
+    return () => {
+      if (revealFlushTimerRef.current !== null) {
+        window.clearTimeout(revealFlushTimerRef.current)
+        revealFlushTimerRef.current = null
+      }
+      void flushPendingReveals()
+    }
+  }, [flushPendingReveals])
 
   // Reveal fog around a canvas-pixel center point.
   // useCallback gives a stable reference so the initial-reveal effect below
@@ -513,31 +585,21 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       return incoming.length ? [...prev, ...incoming] : prev
     })
 
-    // Persist to DB — upsert with ignoreDuplicates handles server-side dedup
-    const payload = circleTiles.map((t) => ({
-      encounter_id: encounterId,
-      viewer_wallet: ownerLower,
-      map_id: mapId ?? null,
-      tile_x: t.tile_x,
-      tile_y: t.tile_y,
-    }))
-
-    // NOTE: The `onConflict` argument is REQUIRED here. The `fog_reveals`
-    // table has no primary key — only the named unique constraint
-    // `fog_reveals_unique` on (encounter_id, viewer_wallet, map_id, tile_x,
-    // tile_y). Without `onConflict`, PostgREST defaults to the PK as the
-    // conflict target; since there is none, `ignoreDuplicates` is silently
-    // ignored and every re-reveal of a known tile throws 23505 / HTTP 409.
-    const { error } = await supabase
-      .from('fog_reveals')
-      .upsert(payload, {
-        onConflict: 'encounter_id,viewer_wallet,map_id,tile_x,tile_y',
-        ignoreDuplicates: true,
-      })
-
-    if (error) {
-      logSupabaseError('Failed to persist fog reveals:', error)
+    // Audit Wave 4C: queue the tiles for the debounced flush instead of
+    // firing one upsert per drag frame. The `pendingRevealTilesRef` map is
+    // keyed by tile so successive drag frames over the same tile collapse to
+    // a single row. The flush handler below runs at most every 200ms and
+    // also fires on unmount / encounter change via its own cleanup effect.
+    for (const t of circleTiles) {
+      pendingRevealTilesRef.current.set(`${t.tile_x},${t.tile_y}`, t)
     }
+    if (revealFlushTimerRef.current !== null) {
+      window.clearTimeout(revealFlushTimerRef.current)
+    }
+    revealFlushTimerRef.current = window.setTimeout(() => {
+      revealFlushTimerRef.current = null
+      void flushPendingReveals()
+    }, 200)
   // setRevealSet / setReveals are stable React dispatch functions — no dep needed.
   // supabase is a module singleton — no dep needed.
   }, [ownerLower, visionPx, gridSize, encounterId, mapId, canvasSize])

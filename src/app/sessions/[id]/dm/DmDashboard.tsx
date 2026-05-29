@@ -235,7 +235,12 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
       )
       .subscribe()
     return () => { supabase.removeChannel(ch) }
-  }, [isGm, sessionId, characterIds])
+    // Audit Wave 3D: depend on the stable joined key, not the array
+    // reference. characterIds is a fresh array on every `players` update
+    // (it's a new useMemo result), which would tear down and rebuild the
+    // channel even when the membership is unchanged.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGm, sessionId, characterIds.join(',')])
 
   // ── Card data builder + write handlers ─────────────────────────────────────
   const cards: PartyCardData[] = useMemo(() => {

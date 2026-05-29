@@ -2,24 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { xpToLevel } from '@/lib/dnd5e'
 import {
-  getSpellSlotsForClass,
-  getSlotsForCasterType,
-  getWarlockPactRow,
-  getDomainSpells,
-  getMaxSpellLevelForClass,
-  getMulticlassSlots,
   canMulticlassInto,
   MULTICLASS_PREREQS,
-  type MulticlassEntry,
 } from '@/lib/spellcastingProgression'
-import {
-  getSpellcastingAbility,
-  isSpellcaster,
-  profBonus,
-  abilityModifier,
-} from '@/lib/spellCategories'
-import type { ClassKey } from '@/lib/subclasses'
-import { calcMaxHpMulticlass } from '@/lib/hitPoints'
+import { buildLevelUpPatch, MAX_XP_PER_AWARD } from '@/lib/levelUpRefresh'
 
 /** POST /api/sessions/award-xp
  *  Awards XP equally to all CAYA participants in a completed CAYA session.
@@ -40,6 +26,13 @@ export async function POST(req: NextRequest) {
   }
   if (!xp_amount || typeof xp_amount !== 'number' || xp_amount <= 0 || !Number.isInteger(xp_amount)) {
     return NextResponse.json({ error: 'xp_amount must be a positive integer' }, { status: 400 })
+  }
+  // Audit Wave 2B: cap to prevent rogue-GM / griefing inflation.
+  if (xp_amount > MAX_XP_PER_AWARD) {
+    return NextResponse.json(
+      { error: `xp_amount must be ≤ ${MAX_XP_PER_AWARD}` },
+      { status: 400 },
+    )
   }
   if (!gm_wallet || typeof gm_wallet !== 'string') {
     return NextResponse.json({ error: 'gm_wallet required' }, { status: 400 })
@@ -87,9 +80,9 @@ export async function POST(req: NextRequest) {
   // We pull spellcasting-relevant columns here so a level-up can recompute slots,
   // DC, attack bonus, and union new domain/oath/circle spells into spells_prepared.
   // Wave 6: also pull multiclass columns so combined slot math runs correctly.
-  const { data: characters, error: charErr } = await db
+  const { data: charactersRaw, error: charErr } = await db
     .from('characters')
-    .select('id, experience_points, level, main_job, subclass, secondary_class, secondary_subclass, secondary_level, abilities, spells_prepared, spells_known, resource_state, action_state, hp, hit_points_max, hit_points_current')
+    .select('id, wallet_address, experience_points, level, main_job, subclass, secondary_class, secondary_subclass, secondary_level, abilities, spells_prepared, spells_known, resource_state, action_state, hp, hit_points_max, hit_points_current')
     .in('wallet_address', wallets)
     .eq('is_caya', true)
 
@@ -97,7 +90,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to fetch characters' }, { status: 500 })
   }
 
-  if (!characters?.length) {
+  if (!charactersRaw?.length) {
+    return NextResponse.json({ error: 'No CAYA characters found for participants' }, { status: 400 })
+  }
+
+  // Audit Wave 2A: defense-in-depth — re-verify each character's wallet is
+  // actually in the participant list before awarding. Prevents XP escalation
+  // if `characters.wallet_address` were tampered or join logic regressed.
+  const participantWalletSet = new Set(
+    participants.map((p: any) => String(p.wallet_address ?? '').toLowerCase()),
+  )
+  const characters = charactersRaw.filter((c: any) =>
+    participantWalletSet.has(String(c.wallet_address ?? '').toLowerCase()),
+  )
+
+  if (characters.length === 0) {
     return NextResponse.json({ error: 'No CAYA characters found for participants' }, { status: 400 })
   }
 
@@ -159,127 +166,12 @@ export async function POST(req: NextRequest) {
           return db.from('characters').update(patch).eq('id', char.id)
         }
 
-        patch.level = newLevel
+        // Audit Wave 2C: spell slots, save DC, attack bonus, HP recalc and
+        // subclass-spell unions are computed by the shared helper so that
+        // award-xp-mid produces an identical result when it level-ups.
+        const levelUpPatch = buildLevelUpPatch(char, newLevel)
+        Object.assign(patch, levelUpPatch)
         levelUps.push({ characterId: char.id, oldLevel, newLevel })
-
-        // ── Spellcasting refresh on level-up ────────────────────────────────
-        const classKey = String(char.main_job ?? '').toLowerCase()
-        const subclassKey = String(char.subclass ?? '').toLowerCase()
-
-        const isEK = classKey === 'fighter' && subclassKey === 'fighter_eldritch_knight' && newLevel >= 3
-        const isAT = classKey === 'rogue' && subclassKey === 'rogue_arcane_trickster' && newLevel >= 3
-        const isThirdCasterSubclass = isEK || isAT
-
-        const hasCasting = isSpellcaster(classKey) || isThirdCasterSubclass
-
-        if (hasCasting) {
-          // Wave 6: build the multiclass entries (single-class characters
-          // get a one-element array). award-xp currently only levels up the
-          // primary class; secondary_level stays unchanged unless a future
-          // level-up UI lets the player pick.
-          const secondaryClass = String(char.secondary_class ?? '').toLowerCase()
-          const secondaryLevel = Math.max(0, Number(char.secondary_level ?? 0))
-          const entries: MulticlassEntry[] = [
-            { classKey: classKey as ClassKey, level: newLevel, subclassKey: subclassKey || null },
-          ]
-          if (secondaryClass && secondaryLevel > 0) {
-            entries.push({
-              classKey: secondaryClass as ClassKey,
-              level: secondaryLevel,
-              subclassKey: char.secondary_subclass ?? null,
-            })
-          }
-          const isMulticlass = entries.length > 1
-
-          // Recompute spell slots from the progression tables
-          let spellSlots: Record<string, number> = {}
-          if (classKey === 'warlock' && !isMulticlass) {
-            // Pure Warlock: pact magic only
-            const pact = getWarlockPactRow(newLevel)
-            if (pact) spellSlots = { [String(pact.pactSlotLevel)]: pact.pactSlots }
-          } else if (isMulticlass) {
-            // Multiclass: combine all non-Warlock class levels into the
-            // full-caster table. Warlock pact slots layer on separately —
-            // for V1 we keep pact slots out of the combined map (PHB rule).
-            const combined = getMulticlassSlots(entries)
-            spellSlots = Object.fromEntries(
-              Object.entries(combined).map(([k, v]) => [k, v as number])
-            )
-          } else if (isThirdCasterSubclass) {
-            const raw = getSlotsForCasterType('third', newLevel)
-            spellSlots = Object.fromEntries(
-              Object.entries(raw).map(([k, v]) => [k, v as number])
-            )
-          } else if (isSpellcaster(classKey)) {
-            const raw = getSpellSlotsForClass(classKey as any, newLevel)
-            spellSlots = Object.fromEntries(
-              Object.entries(raw).map(([k, v]) => [k, v as number])
-            )
-          }
-          if (Object.keys(spellSlots).length > 0) {
-            patch.spell_slots = spellSlots
-
-            // Reset spent counts so the new slots are available immediately
-            // (treats the level-up as occurring after a long rest).
-            const resourceState: Record<string, any> = char.resource_state ?? {}
-            const nextResource = { ...resourceState }
-            for (const key of Object.keys(nextResource)) {
-              if (key.startsWith('spell_slot_used_')) nextResource[key] = 0
-            }
-            patch.resource_state = nextResource
-          }
-
-          // Recompute save DC and attack bonus from the new proficiency bonus
-          const abilities = (char.abilities ?? {}) as Record<string, number>
-          let castingAbilityKey: 'int' | 'wis' | 'cha' | null = null
-          if (isSpellcaster(classKey)) {
-            castingAbilityKey = getSpellcastingAbility(classKey)
-          } else if (isThirdCasterSubclass) {
-            castingAbilityKey = 'int'
-          }
-          if (castingAbilityKey) {
-            const score = Number(abilities[castingAbilityKey] ?? 10)
-            const mod = abilityModifier(score)
-            const pb = profBonus(newLevel)
-            patch.spell_save_dc = 8 + pb + mod
-            patch.spell_attack_bonus = pb + mod
-          }
-
-          // Union new domain / oath / circle spells into spells_prepared so
-          // higher-level subclass spells unlock automatically.
-          const maxSpellLevel = getMaxSpellLevelForClass(classKey, subclassKey, newLevel)
-          const rawDomain = subclassKey ? getDomainSpells(subclassKey, maxSpellLevel) : []
-          if (rawDomain.length > 0) {
-            const currentPrepared: string[] = Array.isArray(char.spells_prepared) ? char.spells_prepared : []
-            const currentKnown: string[] = Array.isArray(char.spells_known) ? char.spells_known : []
-            patch.spells_prepared = Array.from(new Set([...currentPrepared, ...rawDomain]))
-            patch.spells_known = Array.from(new Set([...currentKnown, ...rawDomain]))
-          }
-        }
-
-        // ── HP recalc on level-up (Wave 6H) ─────────────────────────────────
-        // 5e average rule: each new level adds (avg hit die + CON mod).
-        // We use calcMaxHpMulticlass with a one-element classes array for
-        // single-class characters. Current HP increases by the same delta
-        // so the level-up doesn't fully heal the character, but the newly
-        // gained HP IS available immediately.
-        try {
-          const abilities = (char.abilities ?? {}) as Record<string, number>
-          const conScore = Number(abilities.con ?? 10)
-          const newMaxHp = calcMaxHpMulticlass({
-            classes: [{ classKey: classKey as ClassKey, level: newLevel }],
-            conScore,
-            method: 'average',
-          })
-          const oldMaxHp = Number(char.hit_points_max ?? char.hp ?? 0)
-          const delta = Math.max(0, newMaxHp - oldMaxHp)
-          const oldCurHp = Number(char.hit_points_current ?? oldMaxHp)
-          patch.hp = newMaxHp
-          patch.hit_points_max = newMaxHp
-          patch.hit_points_current = Math.max(0, Math.min(newMaxHp, oldCurHp + delta))
-        } catch (e) {
-          console.error('award-xp HP recalc error', e)
-        }
       }
 
       return db

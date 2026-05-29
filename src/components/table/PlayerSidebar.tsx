@@ -366,8 +366,16 @@ export function PlayerSidebar({
       outcome: null,
       individual_dice: rolls.map(v => ({ die: dieKey, value: v })),
     })
-    // BUG-10 fix: auto-apply damage to targeted token when preceding attack roll hit
-    if (lastAttackHit === true && (target as any)?.id) {
+    // BUG-10 fix: auto-apply damage to targeted token when preceding attack roll hit.
+    //
+    // Audit Wave 3B: capture and consume `lastAttackHit` into a local BEFORE
+    // firing the fire-and-forget update so a rapid second click (which re-renders
+    // synchronously before this function returns) cannot see the "hit" flag a
+    // second time and double-apply damage. We also reset the state flag right
+    // away rather than after the update, so concurrent fires can't both see true.
+    const consumedHit = lastAttackHit === true
+    setLastAttackHit(null)
+    if (consumedHit && (target as any)?.id) {
       const currentHp = Number((target as any).current_hp ?? (target as any).hp ?? 0)
       const newHp = Math.max(0, currentHp - finalResult)
       supabase
@@ -376,7 +384,6 @@ export function PlayerSidebar({
         .eq('id', (target as any).id)
         .then(({ error }) => { if (error) console.error('[PlayerSidebar] damage apply error', error) })
     }
-    setLastAttackHit(null)
   }
 
   function executeEffects(action: SheetAction) {
@@ -654,7 +661,11 @@ export function PlayerSidebar({
       if (!maintained) {
         // Remove concentration condition from player's own state
         const nextConditions = activeConditions.filter((c) => c !== 'concentration')
-        updateActionState({ active_conditions: nextConditions })
+        // Audit Wave 3C: await the DB write so the broadcast event arrives
+        // AFTER the action_state row is durably cleared. Other clients pick
+        // it up via realtime in the next ~1s and won't see a flicker of the
+        // old "concentrating" badge after the event fires.
+        await updateActionState({ active_conditions: nextConditions })
         // Notify InitiativeTracker to clear the visual condition ring
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('dnd721-concentration-broken', { detail: { wallet: addressLower } }))
