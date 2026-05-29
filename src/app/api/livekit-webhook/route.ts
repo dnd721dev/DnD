@@ -13,6 +13,32 @@ function makeReceiver() {
   return new WebhookReceiver(apiKey, apiSecret)
 }
 
+/**
+ * Recording Wave 1: persist a failure message onto the offending recording row
+ * so the DM Dashboard's Recordings panel surfaces it without a code read.
+ *
+ * Best-effort — if the write itself fails (the same column-doesn't-exist
+ * problem that triggered this code path), we just log. Never throws.
+ */
+async function recordWebhookFailure(
+  db: ReturnType<typeof supabaseAdmin>,
+  table: 'session_recordings' | 'recording_tracks',
+  rowId: string,
+  message: string,
+) {
+  try {
+    if (table === 'session_recordings') {
+      const { error } = await db.from('session_recordings').update({ error: message.slice(0, 500) }).eq('id', rowId)
+      if (error) console.error('[livekit-webhook] could not persist failure on session_recordings:', error)
+    } else {
+      const { error } = await db.from('recording_tracks').update({ error: message.slice(0, 500) }).eq('id', rowId)
+      if (error) console.error('[livekit-webhook] could not persist failure on recording_tracks:', error)
+    }
+  } catch (e: any) {
+    console.error('[livekit-webhook] recordWebhookFailure threw:', e?.message)
+  }
+}
+
 /** POST /api/livekit-webhook  — receives LiveKit room/egress events */
 export async function POST(req: NextRequest) {
   const body = await req.text()
@@ -47,13 +73,43 @@ export async function POST(req: NextRequest) {
   // recordings as stopped so they don't stay stuck at status='recording' forever.
   if (eventType === 'room_finished') {
     const roomName: string | undefined = event.room?.name ?? event.roomName
-    console.log('[livekit-webhook] room_finished roomName=', roomName)
+    // Recording Wave 4C: secondary match by any egressId referenced in the
+    // event payload, so a room rename mid-session doesn't leave recordings
+    // stuck at status='recording' forever. LiveKit's room_finished payload
+    // can include egress_jobs / egressJobs with the egressId we know.
+    const eventEgressIds: string[] = Array.isArray(event.room?.egressJobs)
+      ? event.room.egressJobs.map((j: any) => j?.egressId).filter(Boolean)
+      : Array.isArray(event.egressJobs)
+      ? event.egressJobs.map((j: any) => j?.egressId).filter(Boolean)
+      : []
+    console.log('[livekit-webhook] room_finished roomName=', roomName, 'egressIds=', eventEgressIds)
+
+    // Always check by roomName when we have one — preserves prior behavior.
     if (roomName) {
-      await db
+      const { error: roomFinishedErr } = await db
         .from('session_recordings')
         .update({ status: 'stopped', stopped_at: new Date().toISOString() })
         .eq('room_name', roomName)
         .eq('status', 'recording')
+      if (roomFinishedErr) {
+        console.error('[livekit-webhook] room_finished update FAILED roomName=', roomName, 'err=', roomFinishedErr)
+        return NextResponse.json({ error: roomFinishedErr.message }, { status: 500 })
+      }
+    }
+
+    // Also stop any recordings matched by egress_id from the payload — covers
+    // the rare case where roomName drifted from what we persisted.
+    if (eventEgressIds.length > 0) {
+      const { error: egressIdMatchErr } = await db
+        .from('session_recordings')
+        .update({ status: 'stopped', stopped_at: new Date().toISOString() })
+        .in('egress_id', eventEgressIds)
+        .eq('status', 'recording')
+      if (egressIdMatchErr) {
+        console.error('[livekit-webhook] room_finished egress_id fallback update FAILED err=', egressIdMatchErr)
+        // Don't return 500 — the primary match by roomName already succeeded
+        // (or returned 500 above). This is a best-effort secondary path.
+      }
     }
     return NextResponse.json({ ok: true, type: 'room_finished' })
   }
@@ -95,10 +151,20 @@ export async function POST(req: NextRequest) {
 
     console.log('[livekit-webhook] composite ended id=', compositeRow.id, 'fileUrl=', fileUrl)
 
-    await db
+    // Recording Wave 1: check + log + persist the failure into the row's
+    // `error` column so the DM dashboard shows it. Most likely cause of a
+    // silent failure here is migration 018 not being applied (no
+    // `completed_at` column).
+    const { error: compositeUpdateErr } = await db
       .from('session_recordings')
       .update({ status: 'completed', completed_at: new Date().toISOString(), file_url: fileUrl })
       .eq('id', compositeRow.id)
+
+    if (compositeUpdateErr) {
+      console.error('[livekit-webhook] composite update FAILED id=', compositeRow.id, 'err=', compositeUpdateErr)
+      await recordWebhookFailure(db, 'session_recordings', compositeRow.id, `composite update: ${compositeUpdateErr.message}`)
+      return NextResponse.json({ error: compositeUpdateErr.message }, { status: 500 })
+    }
 
     // Fire-and-forget transcription (runs after response returns)
     if (process.env.OPENAI_API_KEY) {
@@ -126,26 +192,48 @@ export async function POST(req: NextRequest) {
 
     // Bug 10 + 11 fix: set file_url AND file_status='ready' so the UI knows
     // the audio is available for download, independently of transcript status.
-    await db
+    // Recording Wave 1: check + log + persist the failure. Most likely cause
+    // of silent failure is migration 016 not being applied (no `file_status`
+    // column on recording_tracks).
+    const { error: trackUpdateErr } = await db
       .from('recording_tracks')
       .update({ file_url: fileUrl, file_status: 'ready' })
       .eq('id', trackRow.id)
 
+    if (trackUpdateErr) {
+      console.error('[livekit-webhook] track update FAILED id=', trackRow.id, 'err=', trackUpdateErr)
+      await recordWebhookFailure(db, 'recording_tracks', trackRow.id, `track update: ${trackUpdateErr.message}`)
+      return NextResponse.json({ error: trackUpdateErr.message }, { status: 500 })
+    }
+
     // Bug 10 fix: check if all sibling tracks are now ready; if the composite
     // is also completed, mark the overall recording as completed.
-    const { data: siblings } = await db
+    const { data: siblings, error: siblingsErr } = await db
       .from('recording_tracks')
       .select('file_status')
       .eq('recording_id', trackRow.recording_id)
 
+    if (siblingsErr) {
+      console.error('[livekit-webhook] sibling fetch FAILED recording_id=', trackRow.recording_id, 'err=', siblingsErr)
+      // Don't fail the whole webhook for this — the per-track update already
+      // succeeded; just skip the promotion this round and let a later track
+      // event try again.
+    }
+
     const allTracksReady = siblings?.every((t) => t.file_status === 'ready') ?? false
     if (allTracksReady) {
-      // Only upgrade to 'completed' if composite is already done
-      await db
+      // Only upgrade to 'completed' if composite is already done.
+      // Recording Wave 1: check the error here too.
+      const { error: promoteErr } = await db
         .from('session_recordings')
         .update({ status: 'completed' })
         .eq('id', trackRow.recording_id)
         .eq('status', 'stopped')  // only promote from stopped, not re-set if already completed
+      if (promoteErr) {
+        console.error('[livekit-webhook] recording promote FAILED id=', trackRow.recording_id, 'err=', promoteErr)
+        await recordWebhookFailure(db, 'session_recordings', trackRow.recording_id, `recording promote: ${promoteErr.message}`)
+        return NextResponse.json({ error: promoteErr.message }, { status: 500 })
+      }
     }
 
     // Fire-and-forget transcription

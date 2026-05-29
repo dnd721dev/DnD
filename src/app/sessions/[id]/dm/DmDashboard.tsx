@@ -6,6 +6,7 @@ import { PartyCard, type PartyCardData } from './PartyCard'
 import { XpAwardPanel } from './XpAwardPanel'
 import { GmNotesPanel } from './GmNotesPanel'
 import { PrivateRollsPanel, type PrivateRollPlayer } from './PrivateRollsPanel'
+import { RecordingsPanel } from './RecordingsPanel'
 import type { ConditionKey } from '@/lib/conditions'
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -52,7 +53,7 @@ type TokenRow = {
   ac: number | null
 }
 
-type DashboardTab = 'notes' | 'xp' | 'private-rolls'
+type DashboardTab = 'notes' | 'xp' | 'private-rolls' | 'recordings'
 
 function formatClassLabel(
   mainJob: string | null,
@@ -402,7 +403,7 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
         {/* Center panel — tab switcher (Waves 2 + 4) */}
         <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
           <nav className="mb-3 flex gap-2">
-            {(['notes', 'xp', 'private-rolls'] as DashboardTab[]).map((t) => (
+            {(['notes', 'xp', 'private-rolls', 'recordings'] as DashboardTab[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setActiveTab(t)}
@@ -412,7 +413,13 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
                     : 'bg-slate-900/60 text-slate-300 hover:bg-slate-900'
                 }`}
               >
-                {t === 'notes' ? '📝 Notes' : t === 'xp' ? '✨ XP Award' : '🎲 Private Rolls'}
+                {t === 'notes'
+                  ? '📝 Notes'
+                  : t === 'xp'
+                    ? '✨ XP Award'
+                    : t === 'private-rolls'
+                      ? '🎲 Private Rolls'
+                      : '🎙️ Recordings'}
               </button>
             ))}
           </nav>
@@ -438,6 +445,9 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
                   level: c.level,
                 }))}
               />
+            )}
+            {activeTab === 'recordings' && (
+              <RecordingsPanel sessionId={sessionId} />
             )}
           </div>
         </section>

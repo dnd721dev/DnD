@@ -121,12 +121,13 @@ export async function POST(req: NextRequest, { params }: Params) {
   // exist on S3 yet.  The webhook sets file_url when the egress_ended event
   // fires and the file is confirmed uploaded.
   const db = supabaseAdmin()
+  const compositeEgressId = compositeEgress?.egressId ?? compositeEgress?.egress_id ?? null
   const { data: recording, error: insertError } = await db
     .from('session_recordings')
     .insert({
       session_id: sessionId,
       room_name:  roomName,
-      egress_id:  compositeEgress?.egressId ?? compositeEgress?.egress_id ?? null,
+      egress_id:  compositeEgressId,
       status:     'recording',
       file_key:   fileKey,
       file_url:   null,  // set by webhook when egress_ended fires
@@ -136,6 +137,18 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   if (insertError) {
     console.error('recording insert error', insertError)
+    // Recording Wave 2: the LiveKit egress is ALREADY running. If we just
+    // return 500, the egress runs to completion, files land on S3, the
+    // webhook fires egress_ended but has no row to update → silent zombie.
+    // Tear down the egress now so state stays consistent.
+    if (compositeEgressId) {
+      try {
+        const client = makeEgressClient()
+        await (client as any).stopEgress(compositeEgressId)
+      } catch (stopErr: any) {
+        console.error('failed to stop zombie composite egress', compositeEgressId, stopErr?.message)
+      }
+    }
     return NextResponse.json({ error: insertError.message }, { status: 500 })
   }
 
@@ -165,13 +178,14 @@ export async function POST(req: NextRequest, { params }: Params) {
           audioTrack.sid,
         )
 
-        const { data: trackRow } = await db
+        const trackEgressId = trackEgress?.egressId ?? trackEgress?.egress_id ?? null
+        const { data: trackRow, error: trackInsertErr } = await db
           .from('recording_tracks')
           .insert({
             recording_id:         recording!.id,
             session_id:           sessionId,
             participant_identity: participant.identity,
-            egress_id:            trackEgress?.egressId ?? trackEgress?.egress_id ?? null,
+            egress_id:            trackEgressId,
             file_key:             trackKey,
             file_url:             null,       // set by webhook when egress_ended fires
             file_status:          'recording',
@@ -179,13 +193,28 @@ export async function POST(req: NextRequest, { params }: Params) {
           .select()
           .maybeSingle()
 
-        if (trackRow) trackRows.push(trackRow)
+        if (trackInsertErr) {
+          console.error('track row insert FAILED for', participant.identity, trackInsertErr)
+          // Recording Wave 2: don't leave a zombie track egress running. The
+          // file would land on S3 but no row exists to match by egress_id.
+          if (trackEgressId) {
+            try { await (egressClient as any).stopEgress(trackEgressId) } catch (e: any) {
+              console.error('failed to stop zombie track egress', trackEgressId, e?.message)
+            }
+          }
+        } else if (trackRow) {
+          trackRows.push(trackRow)
+        }
       } catch (trackErr: any) {
         console.warn(`Track egress failed for ${participant.identity}:`, trackErr?.message)
         // Store a placeholder row so the editor knows who was in the session.
         // Bug C fix: set file_status='failed' — without an egress_id the webhook
         // can never update this row, so it must NOT default to 'recording'.
-        const { data: trackRow } = await db
+        //
+        // Recording Wave 1: check the error explicitly so a column-doesn't-
+        // exist failure (e.g. migration 018 not applied → no `error` column)
+        // doesn't get swallowed.
+        const { data: trackRow, error: placeholderErr } = await db
           .from('recording_tracks')
           .insert({
             recording_id:         recording!.id,
@@ -193,15 +222,32 @@ export async function POST(req: NextRequest, { params }: Params) {
             participant_identity: participant.identity,
             transcript_status:    'failed',
             file_status:          'failed',
+            error:                String(trackErr?.message ?? 'track egress failed').slice(0, 500),
           })
           .select()
           .maybeSingle()
+        if (placeholderErr) {
+          console.error('placeholder track insert FAILED for', participant.identity, placeholderErr)
+        }
         if (trackRow) trackRows.push(trackRow)
       }
     }
   } catch (err: any) {
-    // Per-track egress is best-effort; composite is already running
-    console.warn('Per-track egress setup failed (composite still running):', err?.message)
+    // Per-track egress is best-effort; composite is already running.
+    // Recording Wave 4B: log with full context AND persist into the
+    // session_recordings.error column so the DM dashboard surfaces it.
+    // Without this, a listParticipants failure silently drops every track.
+    console.warn('Per-track egress setup failed sessionId=', sessionId, 'roomName=', roomName, 'err=', err?.message)
+    if (recording?.id) {
+      try {
+        await db
+          .from('session_recordings')
+          .update({ error: `per-track setup failed: ${String(err?.message ?? '').slice(0, 480)}` })
+          .eq('id', recording.id)
+      } catch (e: any) {
+        console.error('could not persist per-track setup failure', e?.message)
+      }
+    }
   }
 
   return NextResponse.json({ recording, tracks: trackRows }, { status: 201 })
@@ -258,8 +304,15 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     }
   }
 
-  const stoppedAt   = new Date().toISOString()
-  const durationSec = Math.round((Date.now() - new Date(row.started_at).getTime()) / 1000)
+  const stoppedAt = new Date().toISOString()
+  // Recording Wave 4A: started_at is NOT NULL DEFAULT now() so this is
+  // usually fine, but if a row somehow has a malformed timestamp, the
+  // subtraction goes NaN. Coerce defensively rather than writing NaN to
+  // duration_sec (Postgres rejects NaN on INT columns → silent failure).
+  const startedMs = new Date(row.started_at).getTime()
+  const durationSec = Number.isFinite(startedMs)
+    ? Math.max(0, Math.round((Date.now() - startedMs) / 1000))
+    : 0
 
   const { data: updated, error: updateError } = await db
     .from('session_recordings')
