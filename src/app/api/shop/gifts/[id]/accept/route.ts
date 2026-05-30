@@ -16,7 +16,7 @@ const Schema = z.object({
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const wallet = req.headers.get('x-wallet-address')?.toLowerCase() ?? null
   if (!wallet || !/^0x[0-9a-f]{40}$/.test(wallet)) {
@@ -28,7 +28,7 @@ export async function POST(
     return NextResponse.json({ error: parsed.error.errors[0]?.message ?? 'Invalid request' }, { status: 400 })
   }
   const { characterId, sessionId } = parsed.data
-  const giftId = params.id
+  const { id: giftId } = await params
 
   const db = supabaseAdmin()
 

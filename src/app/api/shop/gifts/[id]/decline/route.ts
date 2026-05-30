@@ -6,15 +6,15 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const wallet = req.headers.get('x-wallet-address')?.toLowerCase() ?? null
   if (!wallet || !/^0x[0-9a-f]{40}$/.test(wallet)) {
     return NextResponse.json({ error: 'Wallet not connected' }, { status: 401 })
   }
 
-  const db     = supabaseAdmin()
-  const giftId = params.id
+  const db              = supabaseAdmin()
+  const { id: giftId } = await params
 
   const { data: gift, error: giftErr } = await db
     .from('shop_gifts')
