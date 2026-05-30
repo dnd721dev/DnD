@@ -7,6 +7,7 @@ import { DND721_TOKEN_ADDRESS, DND721_TOKEN_ABI } from '@/lib/dnd721Token'
 import { usdToDnd721Tokens, usdToDnd721Wei, formatTokens, formatCountdown, secondsUntilMidnightUTC } from '@/lib/shopPricing'
 import type { ShopItem, ShopTier } from '@/lib/shopData'
 import { SESSION_GATES, type SessionStatus } from '@/lib/sessionGates'
+import { GiftModal } from './GiftModal'
 
 const TREASURY = (process.env.NEXT_PUBLIC_TREASURY_WALLET ?? '') as `0x${string}`
 const BASE_CHAIN_ID = 8453
@@ -88,7 +89,9 @@ export function ShopModal({ isModal = false, sessionId, onClose, onPurchase, ses
   const [loading,        setLoading]        = useState(true)
   const [countdown,      setCountdown]      = useState(secondsUntilMidnightUTC())
 
-  const [active, setActive] = useState<ActivePurchase | null>(null)
+  const [active,      setActive]      = useState<ActivePurchase | null>(null)
+  const [giftTarget,  setGiftTarget]  = useState<ShopItem | null>(null)
+  const [pendingGifts, setPendingGifts] = useState<number>(0)
 
   // wagmi transaction hooks
   const { writeContractAsync }                       = useWriteContract()
@@ -148,6 +151,33 @@ export function ShopModal({ isModal = false, sessionId, onClose, onPurchase, ses
   }, [wallet, sessionId])
 
   useEffect(() => { void loadInventory() }, [loadInventory])
+
+  // Fetch pending gift count for the badge
+  useEffect(() => {
+    if (!wallet) { setPendingGifts(0); return }
+    fetch('/api/shop/gifts/pending', { headers: { 'x-wallet-address': wallet } })
+      .then((r) => r.ok ? r.json() : { gifts: [] })
+      .then((json: { gifts?: unknown[] }) => setPendingGifts(json.gifts?.length ?? 0))
+      .catch(() => { /* non-fatal */ })
+
+    // Realtime subscription so badge updates instantly
+    const channel = supabase
+      .channel(`shop-gifts-${wallet}`)
+      .on('postgres_changes', {
+        event:  '*',
+        schema: 'public',
+        table:  'shop_gifts',
+        filter: `recipient_wallet=eq.${wallet}`,
+      }, () => {
+        fetch('/api/shop/gifts/pending', { headers: { 'x-wallet-address': wallet } })
+          .then((r) => r.ok ? r.json() : { gifts: [] })
+          .then((json: { gifts?: unknown[] }) => setPendingGifts(json.gifts?.length ?? 0))
+          .catch(() => { /* non-fatal */ })
+      })
+      .subscribe()
+
+    return () => { void supabase.removeChannel(channel) }
+  }, [wallet])
 
   // ── Load characters ────────────────────────────────────────────────────────
 
@@ -406,13 +436,26 @@ export function ShopModal({ isModal = false, sessionId, onClose, onPurchase, ses
               {stageLabel(cur.stage)}
             </span>
           ) : (
-            <button
-              onClick={() => isFree ? void handleClaim(item) : void handleBuy(item)}
-              disabled={busy || (!isFree && !tokenPrice)}
-              className="rounded-md bg-emerald-700 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-600 disabled:opacity-50 min-h-[36px] w-full sm:w-auto"
-            >
-              {isFree ? 'Claim Free' : `Buy · $${item.price_usd?.toFixed(2)}`}
-            </button>
+            <div className="flex gap-1.5 w-full sm:w-auto">
+              <button
+                onClick={() => isFree ? void handleClaim(item) : void handleBuy(item)}
+                disabled={busy || (!isFree && !tokenPrice)}
+                className="flex-1 rounded-md bg-emerald-700 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-600 disabled:opacity-50 min-h-[36px]"
+              >
+                {isFree ? 'Claim Free' : `Buy · $${item.price_usd?.toFixed(2)}`}
+              </button>
+              {/* Gift button — only for paid C/D/E tiers */}
+              {!isFree && isConnected && (
+                <button
+                  onClick={() => setGiftTarget(item)}
+                  disabled={busy || !tokenPrice}
+                  title="Gift this item to another player"
+                  className="rounded-md border border-slate-600 px-2.5 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-amber-300 disabled:opacity-40 min-h-[36px]"
+                >
+                  🎁
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -462,6 +505,15 @@ export function ShopModal({ isModal = false, sessionId, onClose, onPurchase, ses
             Refreshes in:{' '}
             <span className="font-mono text-slate-200">{formatCountdown(countdown)}</span>
           </p>
+          {/* Pending gifts badge */}
+          {pendingGifts > 0 && (
+            <a
+              href="/shop/gifts"
+              className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-amber-700/80 px-2.5 py-0.5 text-[10px] font-semibold text-amber-100 hover:bg-amber-700"
+            >
+              🎁 {pendingGifts} pending gift{pendingGifts !== 1 ? 's' : ''}
+            </a>
+          )}
         </div>
         {isModal && onClose && (
           <button
@@ -560,18 +612,38 @@ export function ShopModal({ isModal = false, sessionId, onClose, onPurchase, ses
   // Standalone page: render without modal chrome
   if (!isModal) {
     return (
-      <div className="mx-auto max-w-3xl min-h-screen bg-slate-950 text-slate-100">
-        {inner}
-      </div>
+      <>
+        <div className="mx-auto max-w-3xl min-h-screen bg-slate-950 text-slate-100">
+          {inner}
+        </div>
+        {giftTarget && (
+          <GiftModal
+            item={giftTarget}
+            tokenPrice={tokenPrice}
+            onClose={() => setGiftTarget(null)}
+            onGiftSent={() => setGiftTarget(null)}
+          />
+        )}
+      </>
     )
   }
 
   // Modal overlay
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70">
-      <div className="w-full sm:w-auto sm:min-w-[480px] sm:max-w-2xl h-[90vh] sm:h-[80vh] rounded-t-2xl sm:rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 flex flex-col overflow-hidden shadow-2xl">
-        {inner}
+    <>
+      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70">
+        <div className="w-full sm:w-auto sm:min-w-[480px] sm:max-w-2xl h-[90vh] sm:h-[80vh] rounded-t-2xl sm:rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 flex flex-col overflow-hidden shadow-2xl">
+          {inner}
+        </div>
       </div>
-    </div>
+      {giftTarget && (
+        <GiftModal
+          item={giftTarget}
+          tokenPrice={tokenPrice}
+          onClose={() => setGiftTarget(null)}
+          onGiftSent={() => setGiftTarget(null)}
+        />
+      )}
+    </>
   )
 }

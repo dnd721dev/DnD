@@ -15,26 +15,38 @@ export type SessionItemClassification = {
   auto_remove_on_session_end: boolean
 }
 
+const CATEGORY_MAP: Record<ShopItem['category'], ItemType> = {
+  consumable:   'consumable',
+  gear:         'gear',
+  'magic-item': 'magic_item',
+  cosmetic:     'cosmetic',
+}
+
 /**
  * Determine item_type and whether the item is auto-removed at session end.
  *
- * Rules:
+ * Rules (normal purchase):
  *  - Tier A / B (free claims) → auto_remove = true  (session-limited bonuses)
  *  - Tier C–E (paid)          → auto_remove = false (player paid, item persists)
- *  - category mapping: consumable→consumable, gear→gear,
- *                      magic-item→magic_item, cosmetic→cosmetic
  */
 export function classifyShopItem(item: ShopItem): SessionItemClassification {
-  const categoryMap: Record<ShopItem['category'], ItemType> = {
-    consumable:   'consumable',
-    gear:         'gear',
-    'magic-item': 'magic_item',
-    cosmetic:     'cosmetic',
-  }
-
   return {
-    item_type:                 categoryMap[item.category] ?? 'consumable',
+    item_type:                 CATEGORY_MAP[item.category] ?? 'consumable',
     auto_remove_on_session_end: item.tier === 'A' || item.tier === 'B',
+  }
+}
+
+/**
+ * Determine item_type and auto-removal for a GIFTED item.
+ *
+ * Gift rules differ from purchases:
+ *  - Tier C / D gifts → auto_remove = true  (1 session use — recipient didn't pay)
+ *  - Tier E gifts     → auto_remove = false (premium gift, recipient keeps it)
+ */
+export function classifyGiftItem(item: ShopItem): SessionItemClassification {
+  return {
+    item_type:                 CATEGORY_MAP[item.category] ?? 'consumable',
+    auto_remove_on_session_end: item.tier !== 'E',
   }
 }
 

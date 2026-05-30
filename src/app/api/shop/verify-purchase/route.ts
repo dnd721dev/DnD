@@ -3,28 +3,15 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createPublicClient, http, decodeEventLog } from 'viem'
-import { base } from 'viem/chains'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getShopItem } from '@/lib/shopData'
-import { usdToDnd721Wei } from '@/lib/shopPricing'
 import { addItemToCharacterInventory, getOrCreateActiveInventory } from '@/lib/shopInventory'
 import { recordSessionItem } from '@/lib/sessionItemProcessor'
-import { DND721_TOKEN_ADDRESS } from '@/lib/dnd721Token'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
+import { verifyDnd721Transfer } from '@/lib/shopVerify'
 
-const TREASURY = (process.env.NEXT_PUBLIC_TREASURY_WALLET ?? '').toLowerCase()
-const MAX_TX_AGE_MS = 15 * 60 * 1000  // 15 minutes
-
-const TRANSFER_ABI = [{
-  name: 'Transfer',
-  type: 'event' as const,
-  inputs: [
-    { name: 'from',  type: 'address' as const, indexed: true  },
-    { name: 'to',    type: 'address' as const, indexed: true  },
-    { name: 'value', type: 'uint256' as const, indexed: false },
-  ],
-}]
+const TREASURY    = (process.env.NEXT_PUBLIC_TREASURY_WALLET ?? '').toLowerCase()
+const BASE_RPC    = process.env.NEXT_PUBLIC_BASE_RPC_URL ?? 'https://mainnet.base.org'
 
 const Schema = z.object({
   txHash:      z.string().regex(/^0x[0-9a-fA-F]{64}$/, 'Invalid tx hash'),
@@ -38,10 +25,6 @@ const Schema = z.object({
   tokenPriceUsd: z.number().positive(),
 })
 
-function makeClient() {
-  const rpc = process.env.NEXT_PUBLIC_BASE_RPC_URL ?? 'https://mainnet.base.org'
-  return createPublicClient({ chain: base, transport: http(rpc) })
-}
 
 export async function POST(req: NextRequest): Promise<Response> {
   const wallet = req.headers.get('x-wallet-address')?.toLowerCase() ?? null
@@ -96,76 +79,20 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   // ── On-chain verification ────────────────────────────────────────────────────
-  if (!TREASURY) {
-    return NextResponse.json({ error: 'Treasury wallet not configured' }, { status: 503 })
-  }
-
   try {
-    const client  = makeClient()
-    const receipt = await client.getTransactionReceipt({ hash: txHash as `0x${string}` })
-
-    if (receipt.status !== 'success') {
-      return NextResponse.json({ error: 'Transaction failed on-chain' }, { status: 400 })
-    }
-
-    // Check transaction age — fetch the block timestamp
-    const block = await client.getBlock({ blockNumber: receipt.blockNumber })
-    const txTimeMs = Number(block.timestamp) * 1000
-    if (Date.now() - txTimeMs > MAX_TX_AGE_MS) {
-      return NextResponse.json({ error: 'Transaction is too old (max 15 minutes)' }, { status: 400 })
-    }
-
-    // Find the Transfer event from the DND721 contract to the treasury
-    const contractAddr = DND721_TOKEN_ADDRESS.toLowerCase()
-    let transferValue: bigint | null = null
-
-    for (const log of receipt.logs) {
-      if (log.address.toLowerCase() !== contractAddr) continue
-
-      try {
-        const decoded = decodeEventLog({
-          abi:    TRANSFER_ABI,
-          data:   log.data,
-          topics: log.topics,
-        })
-        const args = decoded.args as { from: string; to: string; value: bigint }
-        if (args.to.toLowerCase() === TREASURY) {
-          transferValue = args.value
-          break
-        }
-      } catch {
-        // Not a Transfer event — skip
-      }
-    }
-
-    if (transferValue === null) {
-      return NextResponse.json(
-        { error: 'No DND721 transfer to treasury found in this transaction' },
-        { status: 400 },
-      )
-    }
-
-    // Verify amount — allow up to 5% under-pay to account for price fluctuation
-    const expectedWei = usdToDnd721Wei(expectedUsd, tokenPriceUsd)
-    const minRequired = (expectedWei * 95n) / 100n
-
-    if (transferValue < minRequired) {
-      return NextResponse.json(
-        { error: `Insufficient payment. Expected ~${expectedWei} wei, got ${transferValue} wei` },
-        { status: 400 },
-      )
+    const result = await verifyDnd721Transfer(txHash, expectedUsd, tokenPriceUsd, TREASURY, BASE_RPC)
+    if (!result.ok) {
+      return NextResponse.json({ error: result.reason }, { status: result.status })
     }
 
     // ── Record purchase ────────────────────────────────────────────────────────
-    const tokensTransferred = Number(transferValue) / 1e18
-
     const { error: insertErr } = await db.from('shop_purchases').insert({
       wallet_address: wallet,
       item_id:        itemId,
       item_name:      item.name,
       tier,
       price_usd:      item.price_usd,
-      price_tokens:   tokensTransferred,
+      price_tokens:   result.tokensTransferred,
       tx_hash:        txHash,
       session_id:     sessionId ?? null,
       inventory_id:   inventory.id,
