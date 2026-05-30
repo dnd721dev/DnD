@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { WebhookReceiver } from 'livekit-server-sdk'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { transcribeTrack, transcribeComposite } from '@/lib/transcribeRecording'
+import { cascadeFailedTracks } from '@/lib/recordingCascade'
 
 function makeReceiver() {
   const apiKey    = process.env.LIVEKIT_API_KEY
@@ -84,34 +85,55 @@ export async function POST(req: NextRequest) {
       : []
     console.log('[livekit-webhook] room_finished roomName=', roomName, 'egressIds=', eventEgressIds)
 
-    // Always check by roomName when we have one — preserves prior behavior.
+    // Recovery Wave 3: collect every recording id we touch so we can cascade
+    // their still-recording tracks to `failed`. Without this, when LiveKit
+    // tears down the room, the composite goes to `stopped` but the editor
+    // shows "Track still recording…" forever for tracks whose egress_ended
+    // event never arrived.
+    const affectedIds = new Set<string>()
+
     if (roomName) {
-      const { error: roomFinishedErr } = await db
+      const { data: byRoom, error: roomFinishedErr } = await db
         .from('session_recordings')
         .update({ status: 'stopped', stopped_at: new Date().toISOString() })
         .eq('room_name', roomName)
         .eq('status', 'recording')
+        .select('id')
       if (roomFinishedErr) {
         console.error('[livekit-webhook] room_finished update FAILED roomName=', roomName, 'err=', roomFinishedErr)
         return NextResponse.json({ error: roomFinishedErr.message }, { status: 500 })
+      }
+      for (const r of (byRoom as any[] | null) ?? []) {
+        if (r?.id) affectedIds.add(r.id)
       }
     }
 
     // Also stop any recordings matched by egress_id from the payload — covers
     // the rare case where roomName drifted from what we persisted.
     if (eventEgressIds.length > 0) {
-      const { error: egressIdMatchErr } = await db
+      const { data: byEgress, error: egressIdMatchErr } = await db
         .from('session_recordings')
         .update({ status: 'stopped', stopped_at: new Date().toISOString() })
         .in('egress_id', eventEgressIds)
         .eq('status', 'recording')
+        .select('id')
       if (egressIdMatchErr) {
         console.error('[livekit-webhook] room_finished egress_id fallback update FAILED err=', egressIdMatchErr)
-        // Don't return 500 — the primary match by roomName already succeeded
-        // (or returned 500 above). This is a best-effort secondary path.
+        // Don't return 500 — primary match by roomName already succeeded
+        // (or already returned 500 above). Best-effort secondary path.
+      }
+      for (const r of (byEgress as any[] | null) ?? []) {
+        if (r?.id) affectedIds.add(r.id)
       }
     }
-    return NextResponse.json({ ok: true, type: 'room_finished' })
+
+    // Recovery Wave 3: cascade still-recording tracks to `failed` for every
+    // affected recording. Idempotent — only touches rows still in `recording`.
+    for (const id of affectedIds) {
+      await cascadeFailedTracks(db, id, `room_finished: parent recording terminated without egress_ended`)
+    }
+
+    return NextResponse.json({ ok: true, type: 'room_finished', affected: affectedIds.size })
   }
 
   // Fix 4: only act on egress_ended — not egress_started or egress_updated.

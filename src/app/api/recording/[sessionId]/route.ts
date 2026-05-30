@@ -97,6 +97,49 @@ export async function POST(req: NextRequest, { params }: Params) {
   const fileKey  = `recordings/${sessionId}/${timestamp}.${ext}`
   const s3Upload = makeS3Upload(bucket, region, accessKey, secret)
 
+  // ── 0. Storage preflight (Recovery Wave 4) ──────────────────────────────
+  // Before asking LiveKit to start an 18-second egress that may silently die
+  // because Supabase Storage rejected the write, do a tiny test upload via
+  // the Supabase service-role client. If this fails, the LiveKit job WILL
+  // fail too — so abort early with a clear error instead of leaving a zombie
+  // egress + a row stuck at status='recording'.
+  //
+  // This catches the most common configuration mistakes:
+  //   - bucket doesn't exist
+  //   - bucket exists but service role can't write (storage RLS)
+  //   - RECORDING_S3_* keys are stale / rotated
+  //
+  // It does NOT validate the LiveKit-side S3 credentials specifically, but
+  // those nearly always fail when the service-role client can't write either.
+  try {
+    const probeDb = supabaseAdmin()
+    const probeKey = `preflight/${sessionId}-${Date.now()}.txt`
+    const { error: probeErr } = await probeDb.storage
+      .from(bucket)
+      .upload(probeKey, new Blob([new Uint8Array([0x70, 0x6f, 0x6b, 0x65])]), {
+        contentType: 'text/plain',
+        upsert: true,
+      })
+    if (probeErr) {
+      return NextResponse.json(
+        {
+          error:
+            `Recording storage preflight failed: ${probeErr.message}. ` +
+            `Verify the '${bucket}' bucket exists, is writable by the service role, ` +
+            `and that RECORDING_S3_ACCESS_KEY/SECRET point at the same Supabase project.`,
+        },
+        { status: 503 },
+      )
+    }
+    // Best-effort cleanup; failure here is not fatal.
+    void probeDb.storage.from(bucket).remove([probeKey]).catch(() => undefined)
+  } catch (probeThrow: any) {
+    return NextResponse.json(
+      { error: `Recording storage preflight threw: ${probeThrow?.message ?? 'unknown error'}` },
+      { status: 503 },
+    )
+  }
+
   // ── 1. Start composite (room-wide) egress ────────────────────────────────
   let compositeEgress: any
   try {

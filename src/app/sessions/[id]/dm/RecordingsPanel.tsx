@@ -84,6 +84,7 @@ export function RecordingsPanel({ sessionId }: { sessionId: string }) {
   const [tracksByRec, setTracksByRec] = useState<Record<string, TrackRow[]>>({})
   const [loading, setLoading] = useState(true)
   const [recoverBusy, setRecoverBusy] = useState<string | null>(null)
+  const [recoverErrors, setRecoverErrors] = useState<Record<string, string>>({})
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
   const loadAll = useCallback(async () => {
@@ -163,17 +164,37 @@ export function RecordingsPanel({ sessionId }: { sessionId: string }) {
 
   async function recover(recordingId: string) {
     setRecoverBusy(recordingId)
+    setRecoverErrors((prev) => {
+      const next = { ...prev }
+      delete next[recordingId]
+      return next
+    })
     try {
       const res = await fetch(`/api/recording/${sessionId}/recover`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ recordingId }),
       })
+      const body = await res.json().catch(() => ({} as any))
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
+        // Recovery Wave 2: surface the actual error to the UI so the user
+        // sees e.g. "listEgress failed — unauthorized" instead of a silent
+        // no-op.
+        const msg = body?.error ?? `Recover failed (${res.status})`
+        setRecoverErrors((prev) => ({ ...prev, [recordingId]: String(msg) }))
         console.error('recover failed', body)
+      } else if (body?.recovered === false && body?.reason) {
+        // Surface the "nothing to do" reasons too so the user can act on them
+        // (e.g. egress_still_active_or_unknown means LiveKit doesn't have a
+        // terminal status yet).
+        setRecoverErrors((prev) => ({
+          ...prev,
+          [recordingId]: `No update applied — reason: ${body.reason}`,
+        }))
       }
       await loadAll()
+    } catch (e: any) {
+      setRecoverErrors((prev) => ({ ...prev, [recordingId]: String(e?.message ?? 'Network error') }))
     } finally {
       setRecoverBusy(null)
     }
@@ -210,7 +231,13 @@ export function RecordingsPanel({ sessionId }: { sessionId: string }) {
           const ready = tracks.filter((t) => t.file_status === 'ready').length
           const failed = tracks.filter((t) => t.file_status === 'failed').length
           const total = tracks.length
-          const isStuck = r.status === 'stopped' && !r.file_url
+          // Recovery Wave 2: also show Recover on `failed` rows so the user
+          // can re-query LiveKit and pick up newer error detail.
+          const isRecoverable =
+            (r.status === 'stopped' && !r.file_url) ||
+            r.status === 'failed' ||
+            r.status === 'recording'
+          const recoverErr = recoverErrors[r.id]
           return (
             <li key={r.id} className="rounded-lg border border-slate-700/60 bg-slate-900/60 p-3 text-xs">
               <div className="flex items-center justify-between gap-2">
@@ -222,7 +249,7 @@ export function RecordingsPanel({ sessionId }: { sessionId: string }) {
                   <span className="text-slate-500">·</span>
                   <span className="text-slate-400">{formatDuration(r.duration_sec)}</span>
                 </div>
-                {isStuck && (
+                {isRecoverable && (
                   <button
                     onClick={() => recover(r.id)}
                     disabled={recoverBusy === r.id}
@@ -275,6 +302,12 @@ export function RecordingsPanel({ sessionId }: { sessionId: string }) {
                 {r.error && (
                   <div className="mt-1 rounded-md border border-red-900/60 bg-red-950/30 px-2 py-1 text-red-300">
                     <span className="font-semibold">error:</span> {r.error}
+                  </div>
+                )}
+
+                {recoverErr && (
+                  <div className="mt-1 rounded-md border border-amber-900/60 bg-amber-950/30 px-2 py-1 text-amber-300">
+                    <span className="font-semibold">recover:</span> {recoverErr}
                   </div>
                 )}
               </div>

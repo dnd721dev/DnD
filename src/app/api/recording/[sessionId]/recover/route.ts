@@ -1,11 +1,18 @@
 // POST /api/recording/[sessionId]/recover
 // Queries LiveKit for the current egress status of a stuck recording and
-// updates the DB to match.  Useful for recordings that were stuck before the
-// webhook header bug was fixed (and for any future webhook delivery gaps).
+// updates the DB to match. Useful for recordings stuck behind a webhook
+// delivery gap, signature mismatch, or egress failure.
+//
+// Recovery Wave 2: the previous version silently swallowed LiveKit errors
+// (`.catch(() => [])`), making it impossible to tell whether the egress
+// genuinely had no status or whether listEgress itself failed. Now every
+// LiveKit error is captured, persisted into session_recordings.error, AND
+// returned to the caller so the UI can show it.
 import { NextRequest, NextResponse } from 'next/server'
 import { EgressClient } from 'livekit-server-sdk'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { z } from 'zod'
+import { cascadeFailedTracks } from '@/lib/recordingCascade'
 
 const Schema = z.object({
   recordingId: z.string().uuid('recordingId must be a valid UUID'),
@@ -24,6 +31,22 @@ function makeEgressClient() {
   const apiSecret = process.env.LIVEKIT_API_SECRET
   if (!apiKey || !apiSecret) throw new Error('LIVEKIT_API_KEY / LIVEKIT_API_SECRET not configured')
   return new EgressClient(livekitHost(), apiKey, apiSecret)
+}
+
+/**
+ * Recovery Wave 2: call LiveKit listEgress and return either the list or a
+ * structured error. Never throws — the caller decides how to surface the
+ * failure (UI + persisted column).
+ */
+async function safeListEgress(client: any, egressId: string): Promise<
+  { ok: true; list: any[] } | { ok: false; error: string }
+> {
+  try {
+    const list: any[] = await client.listEgress({ egressId })
+    return { ok: true, list: Array.isArray(list) ? list : [] }
+  } catch (err: any) {
+    return { ok: false, error: String(err?.message ?? err ?? 'unknown LiveKit error').slice(0, 480) }
+  }
 }
 
 export async function POST(req: NextRequest, { params }: Params) {
@@ -56,11 +79,26 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   try {
     const client = makeEgressClient()
-    const egressList: any[] = recording.egress_id
-      ? await (client as any).listEgress({ egressId: recording.egress_id }).catch(() => [])
-      : []
 
-    const info = egressList[0]
+    // Recovery Wave 2: capture listEgress failures cleanly.
+    let lookupResult: { ok: true; list: any[] } | { ok: false; error: string }
+    if (recording.egress_id) {
+      lookupResult = await safeListEgress(client, recording.egress_id)
+    } else {
+      lookupResult = { ok: false, error: 'recording row has no egress_id — was it created before LiveKit returned a job?' }
+    }
+
+    if (!lookupResult.ok) {
+      // Persist the actual reason so the dashboard renders it.
+      const detail = `recover: listEgress failed — ${lookupResult.error}`
+      await db.from('session_recordings').update({ error: detail }).eq('id', recordingId)
+      return NextResponse.json(
+        { error: detail, recovered: false, reason: 'livekit_list_failed' },
+        { status: 502 },
+      )
+    }
+
+    const info = lookupResult.list[0]
     // EgressStatus values: 0=starting, 1=active, 2=ending, 3=complete, 4=failed, 5=aborted
     const COMPLETE = 3
     const FAILED   = 4
@@ -71,10 +109,13 @@ export async function POST(req: NextRequest, { params }: Params) {
         ? `${publicBase}/${recording.file_key}`
         : null
 
-      await db
+      const { error: completeUpdErr } = await db
         .from('session_recordings')
         .update({ status: 'completed', completed_at: new Date().toISOString(), file_url: fileUrl })
         .eq('id', recordingId)
+      if (completeUpdErr) {
+        return NextResponse.json({ error: completeUpdErr.message }, { status: 500 })
+      }
 
       // Also recover all tracks for this recording
       const { data: tracks } = await db
@@ -84,10 +125,17 @@ export async function POST(req: NextRequest, { params }: Params) {
 
       for (const track of tracks ?? []) {
         if (track.file_status === 'ready') continue
-        const trackEgressList: any[] = track.egress_id
-          ? await (client as any).listEgress({ egressId: track.egress_id }).catch(() => [])
-          : []
-        const trackInfo = trackEgressList[0]
+        if (!track.egress_id) continue
+        const trackLookup = await safeListEgress(client, track.egress_id)
+        if (!trackLookup.ok) {
+          // Persist per-track error but keep iterating.
+          await db
+            .from('recording_tracks')
+            .update({ error: `recover: ${trackLookup.error}`.slice(0, 480) })
+            .eq('id', track.id)
+          continue
+        }
+        const trackInfo = trackLookup.list[0]
         if (trackInfo?.status === COMPLETE) {
           const trackFileUrl = publicBase && track.file_key
             ? `${publicBase}/${track.file_key}`
@@ -99,7 +147,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         } else if (trackInfo?.status === FAILED || trackInfo?.status === ABORTED) {
           await db
             .from('recording_tracks')
-            .update({ file_status: 'failed', error: `egress status: ${trackInfo.status}` })
+            .update({ file_status: 'failed', error: `LiveKit egress ${trackInfo.status === FAILED ? 'failed' : 'aborted'}: ${trackInfo.error ?? '(no detail)'}`.slice(0, 480) })
             .eq('id', track.id)
         }
       }
@@ -108,24 +156,41 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
 
     if (info?.status === FAILED || info?.status === ABORTED) {
-      await db
+      // Recovery Wave 2 + 3: write the LiveKit failure detail and cascade to
+      // all child tracks so the editor no longer shows "Track still recording…".
+      const livekitErr = info?.error ?? info?.errorCode ?? '(no detail)'
+      const detail = `LiveKit egress ${info.status === FAILED ? 'failed' : 'aborted'}: ${livekitErr}`.slice(0, 480)
+      const { error: failedUpdErr } = await db
         .from('session_recordings')
-        .update({ status: 'failed', error: `egress status: ${info.status}` })
+        .update({ status: 'failed', error: detail })
         .eq('id', recordingId)
-      return NextResponse.json({ recovered: true, reason: 'egress_failed', recordingId })
+      if (failedUpdErr) {
+        return NextResponse.json({ error: failedUpdErr.message }, { status: 500 })
+      }
+      await cascadeFailedTracks(db, recordingId, `parent recording failed: ${detail.slice(0, 200)}`)
+      return NextResponse.json({ recovered: true, reason: 'egress_failed', detail, recordingId })
     }
 
-    // Egress still active or status unknown — mark stopped so at least it's not 'recording'
+    // Egress still active or status unknown — at least don't leave 'recording'
     if (recording.status === 'recording') {
-      await db
+      const { error: stopUpdErr } = await db
         .from('session_recordings')
         .update({ status: 'stopped', stopped_at: new Date().toISOString() })
         .eq('id', recordingId)
+      if (stopUpdErr) {
+        return NextResponse.json({ error: stopUpdErr.message }, { status: 500 })
+      }
     }
 
-    return NextResponse.json({ recovered: false, reason: 'egress_still_active_or_unknown', info })
+    return NextResponse.json({
+      recovered: false,
+      reason: 'egress_still_active_or_unknown',
+      info: info ? { status: info.status, error: info.error ?? null } : null,
+    })
   } catch (err: any) {
     console.error('[recover] error querying LiveKit egress:', err?.message)
-    return NextResponse.json({ error: err?.message ?? 'Failed to query egress status' }, { status: 500 })
+    const detail = String(err?.message ?? 'Failed to query egress status').slice(0, 480)
+    await db.from('session_recordings').update({ error: `recover threw: ${detail}` }).eq('id', recordingId)
+    return NextResponse.json({ error: detail }, { status: 500 })
   }
 }

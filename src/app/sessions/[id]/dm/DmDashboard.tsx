@@ -24,7 +24,10 @@ type SessionRow = {
   gm_wallet: string | null
   status: string | null
   session_type: 'set_level' | 'caya' | null
-  xp_awarded: number | null
+  // Column is `xp_award` (no trailing -ed) per the schema; matched against
+  // src/app/api/sessions/award-xp/route.ts. Earlier typo caused
+  // "column sessions.xp_awarded does not exist" and 500'd the whole dashboard.
+  xp_award: number | null
 }
 
 type SessionPlayerRow = {
@@ -102,7 +105,7 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
       // Session + GM gate
       const { data: session, error: sessErr } = await supabase
         .from('sessions')
-        .select('title, gm_wallet, status, session_type, xp_awarded')
+        .select('title, gm_wallet, status, session_type, xp_award')
         .eq('id', sessionId)
         .maybeSingle<SessionRow>()
       if (sessErr) throw sessErr
@@ -110,7 +113,7 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
       setSessionTitle(session.title ?? 'Session')
       setSessionStatus(session.status ?? null)
       setSessionType(session.session_type ?? null)
-      setXpAwardedAlready(session.xp_awarded ?? null)
+      setXpAwardedAlready(session.xp_award ?? null)
       const gm = (session.gm_wallet ?? '').toLowerCase() === wallet
       setIsGm(gm)
       if (!gm) { setLoading(false); return }
