@@ -3,6 +3,7 @@ import { EgressClient, RoomServiceClient } from 'livekit-server-sdk'
 import { EncodedFileOutput, DirectFileOutput, S3Upload, TrackType } from '@livekit/protocol'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { z } from 'zod'
+import { lookup as dnsLookup } from 'dns/promises'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 
 const StartRecordingSchema = z.object({
@@ -97,7 +98,44 @@ export async function POST(req: NextRequest, { params }: Params) {
   const fileKey  = `recordings/${sessionId}/${timestamp}.${ext}`
   const s3Upload = makeS3Upload(bucket, region, accessKey, secret)
 
-  // ── 0. Storage preflight (Recovery Wave 4) ──────────────────────────────
+  // ── 0a. DNS preflight on RECORDING_S3_ENDPOINT (Recovery Wave 5) ────────
+  // The Supabase-client upload below validates NEXT_PUBLIC_SUPABASE_URL but
+  // NOT the RECORDING_S3_ENDPOINT that LiveKit will use. If those point at
+  // different Supabase projects (rotated URL, typo, stale env), the upload
+  // probe passes but LiveKit then dies 18s later with:
+  //   "dial tcp: lookup <wrong-project>.supabase.co: no such host"
+  // Catch that here so the failure is instant + actionable.
+  const s3Endpoint = process.env.RECORDING_S3_ENDPOINT
+  if (s3Endpoint && s3Endpoint.trim() !== '') {
+    let endpointHost: string | null = null
+    try {
+      endpointHost = new URL(s3Endpoint).hostname
+    } catch {
+      return NextResponse.json(
+        { error: `RECORDING_S3_ENDPOINT is not a valid URL: ${s3Endpoint}` },
+        { status: 503 },
+      )
+    }
+    if (endpointHost) {
+      try {
+        await dnsLookup(endpointHost)
+      } catch (dnsErr: any) {
+        return NextResponse.json(
+          {
+            error:
+              `RECORDING_S3_ENDPOINT host '${endpointHost}' does not resolve via DNS ` +
+              `(${dnsErr?.code ?? dnsErr?.message ?? 'lookup failed'}). ` +
+              `LiveKit's egress worker will also fail to reach it. ` +
+              `Verify the env var points at your actual Supabase project — ` +
+              `e.g. https://<your-project-ref>.supabase.co/storage/v1/s3.`,
+          },
+          { status: 503 },
+        )
+      }
+    }
+  }
+
+  // ── 0b. Storage preflight (Recovery Wave 4) ──────────────────────────────
   // Before asking LiveKit to start an 18-second egress that may silently die
   // because Supabase Storage rejected the write, do a tiny test upload via
   // the Supabase service-role client. If this fails, the LiveKit job WILL
