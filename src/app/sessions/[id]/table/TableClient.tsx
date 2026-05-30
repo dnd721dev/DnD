@@ -825,27 +825,20 @@ export default function TableClient({ sessionId }: TableClientProps) {
   // ---------- Monster spawning helper ----------
   async function spawnMonsterToken(monster: SpawnMonsterParams) {
     if (!encounterId) return
+    if (typeof window === 'undefined') return
 
-    // Spread monster spawns so multiple tokens don't stack at the same pixel.
-    // Count existing tokens in this encounter and offset each new spawn on a grid.
-    const { count: existingCount } = await supabase
-      .from('tokens')
-      .select('id', { count: 'exact', head: true })
-      .eq('encounter_id', encounterId)
-    const n = existingCount ?? 0
-    const SPAWN_TILE = 60 // ~1 tile step between spawns (pixels)
-    const startX = 100 + (n % 10) * SPAWN_TILE
-    const startY = 100 + Math.floor(n / 10) * SPAWN_TILE
-
+    // NPC Wave 2: monster spawn now uses the same armed-placement UX as PCs.
+    // We resolve HP/AC + roll initiative here, then dispatch
+    // 'dnd721-place-token' for MapBoard to consume on the GM's next click.
+    // The hard-coded grid-spread starting coords are gone — the GM picks the
+    // exact tile.
     let baseHp: number | null = null
     let baseAc: number | null = null
     let dexScore: number | null = null
-    // For homebrew monsters, the DB row UUID (used for the FK column)
     const homebrewDbId = monster.homebrewMonsterDbId ?? null
 
     try {
       if (homebrewDbId) {
-        // ── Homebrew monster: data passed inline, no extra fetch needed ──────
         baseHp = monster.hp ?? null
         baseAc = monster.ac ?? null
         dexScore = monster.dexScore ?? null
@@ -883,75 +876,46 @@ export default function TableClient({ sessionId }: TableClientProps) {
       console.warn('Could not derive base HP/AC for monster', monster, err)
     }
 
-    // ✅ auto-roll initiative for the monster (d20 + DEX mod if available)
+    // auto-roll initiative (d20 + DEX mod) and stash it on the payload so
+    // MapBoard creates the initiative_entries row with the right value when
+    // the placement click lands.
     const d20 = Math.floor(Math.random() * 20) + 1
     const dexMod = dexScore != null ? abilityMod(dexScore) : 0
     const initTotal = d20 + dexMod
 
-    // Build the token insert payload.
-    // homebrew tokens: monster_id = null, homebrew_monster_id = UUID
-    // SRD / community tokens: monster_id = 'srd:<id>' or 'db:<id>', homebrew_monster_id = null
-    const tokenPayload: Record<string, unknown> = {
-      encounter_id: encounterId,
-      map_id: currentMapId ?? null,
-      type: 'monster',
-      monster_id: homebrewDbId ? null : monster.id,
-      name: monster.name,
-      label: monster.name,
-      x: startX,
-      y: startY,
-      hp: baseHp,
-      current_hp: baseHp,
-      ac: baseAc,
-    }
-    if (homebrewDbId) {
-      tokenPayload.homebrew_monster_id = homebrewDbId
-    }
+    // Dispatch the armed-placement event. MapBoard's listener sets
+    // placementPending; the next map click INSERTs the token at the chosen
+    // tile and creates the initiative entry.
+    window.dispatchEvent(new CustomEvent('dnd721-place-token', {
+      detail: {
+        label: monster.name,
+        hp: baseHp,
+        ac: baseAc,
+        ownerWallet: null,
+        initiativeEntryId: '',
+        characterId: null,
+        tokenImageUrl: null,
+        type: 'monster',
+        monster_id: homebrewDbId ? null : monster.id,
+        homebrew_monster_id: homebrewDbId,
+        initiativeRoll: initTotal,
+      },
+    }))
 
-    // 1) Spawn the token (associate with current active map so it stays on this map)
-    const { data: tokenRows, error } = await supabase
-      .from('tokens')
-      .insert(tokenPayload)
-      .select('id, name, hp, current_hp')
-
-    const token = (tokenRows && tokenRows[0]) as any | undefined
-
-    if (error) {
-      console.error('Failed to spawn monster token', (error as any).message || (error as any).details || error)
-    } else if (typeof window !== 'undefined') {
-      // 2) Also add it to initiative so monsters show up in turn order automatically
-      try {
-        if (token?.id) {
-          const { error: initErr } = await supabase.from('initiative_entries').insert({
-            encounter_id: encounterId,
-            name: token.name ?? monster.name,
-            init: initTotal,
-            hp: (token.current_hp ?? token.hp ?? baseHp) ?? null,
-            is_pc: false,
-            character_id: null,
-            token_id: token.id,
-            wallet_address: null,
-          })
-          if (initErr) console.error('Failed to add monster to initiative', initErr)
-
-          // optional: log the roll in the shared dice log for the session
-          const modSign = dexMod >= 0 ? '+' : ''
-          const formula = `1d20${modSign}${dexMod}`
-          const rollerName = `GM · ${token.name ?? monster.name}`
-          void persistRollToSupabase({
-            label: `Initiative (${token.name ?? monster.name})`,
-            rollType: 'initiative',
-            formula,
-            result: initTotal,
-            rollerName,
-          })
-          flashRollOverlay({ roller: rollerName, label: 'Initiative', formula, result: initTotal })
-        }
-      } catch (err) {
-        console.warn('Monster initiative insert failed', err)
-      }
-
-    }
+    // Log the auto-rolled initiative for transparency. The token doesn't
+    // exist yet (placement is async) — we still want the roll in the shared
+    // dice log so players see the GM rolled.
+    const modSign = dexMod >= 0 ? '+' : ''
+    const formula = `1d20${modSign}${dexMod}`
+    const rollerName = `GM · ${monster.name}`
+    void persistRollToSupabase({
+      label: `Initiative (${monster.name})`,
+      rollType: 'initiative',
+      formula,
+      result: initTotal,
+      rollerName,
+    })
+    flashRollOverlay({ roller: rollerName, label: 'Initiative', formula, result: initTotal })
   }
 
   // HIGH-5: End Session — uses the lifecycle API so all side effects run:

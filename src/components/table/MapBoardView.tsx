@@ -673,6 +673,12 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       const isPC = t.type === 'pc'
       const isMine = ownerLower && t.owner_wallet?.toLowerCase() === ownerLower
 
+      // NPC Wave 4A: hide tokens flagged hidden by the GM. Players see
+      // nothing; the GM's MapBoard renders them dimmed with a badge. This is
+      // client-side trust (same as the fog-of-war reveal model) — a curious
+      // player could still see the row in realtime payloads via dev tools.
+      if ((t as any).hidden === true) return
+
       // Hide non-PC tokens that are inside unrevealed fog tiles.
       // PC tokens (players' characters) are always visible to everyone.
       if (!isPC) {

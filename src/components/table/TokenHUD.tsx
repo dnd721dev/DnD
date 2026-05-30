@@ -22,6 +22,13 @@ type TokenHUDProps = {
   onRemoveResistance?: (type: string) => void;
   onAddImmunity?: (type: string) => void;
   onRemoveImmunity?: (type: string) => void;
+  // NPC Wave 3: rename + hide/reveal. Gated to non-PC tokens via tokenType.
+  // PC tokens keep player ownership of their identity; only NPC/monster
+  // tokens expose these controls.
+  tokenType?: 'pc' | 'monster' | 'object' | null;
+  hidden?: boolean;
+  onRename?: (newName: string) => void;
+  onToggleHidden?: (next: boolean) => void;
 };
 
 export default function TokenHUD({
@@ -39,10 +46,36 @@ export default function TokenHUD({
   onRemoveResistance,
   onAddImmunity,
   onRemoveImmunity,
+  tokenType,
+  hidden,
+  onRename,
+  onToggleHidden,
 }: TokenHUDProps) {
   const [damageInput, setDamageInput] = useState("");
   const [dmgType, setDmgType] = useState(DAMAGE_TYPES[0]);
   const [lastNote, setLastNote] = useState<string | null>(null);
+
+  // NPC Wave 3A: inline rename state — mirrors CharacterHeader pattern.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(label);
+
+  // Only non-PC tokens expose rename + hide. PC tokens are owned by their
+  // players and managed via the character sheet.
+  const isNpcToken = !!tokenType && tokenType !== 'pc';
+
+  function startRename() {
+    setDraft(label);
+    setEditing(true);
+  }
+  function saveRename() {
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== label) onRename?.(trimmed);
+    setEditing(false);
+  }
+  function cancelRename() {
+    setDraft(label);
+    setEditing(false);
+  }
 
   function applyDamage() {
     const raw = parseInt(damageInput, 10);
@@ -66,10 +99,51 @@ export default function TokenHUD({
       style={{ top: y, left: x }}
     >
       {/* Header */}
-      <div className="mb-1 flex items-center justify-between">
-        <p className="text-xs font-semibold truncate">{label}</p>
-        <button onClick={onClose} className="text-xs text-slate-400 hover:text-slate-200">✕</button>
+      <div className="mb-1 flex items-center justify-between gap-1">
+        {editing && isNpcToken ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={saveRename}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); saveRename(); }
+              if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
+            }}
+            className="flex-1 rounded border border-indigo-600/60 bg-slate-950 px-1.5 py-0.5 text-xs font-semibold text-white outline-none"
+          />
+        ) : (
+          <p className="flex-1 text-xs font-semibold truncate" title={label}>{label}</p>
+        )}
+        {isNpcToken && !editing && onRename && (
+          <button
+            onClick={startRename}
+            title="Rename token"
+            className="shrink-0 text-slate-500 hover:text-indigo-300"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+              <path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z" />
+            </svg>
+          </button>
+        )}
+        {isNpcToken && onToggleHidden && (
+          <button
+            onClick={() => onToggleHidden(!hidden)}
+            title={hidden ? 'Reveal to players' : 'Hide from players'}
+            className={`shrink-0 text-[12px] ${hidden ? 'text-violet-300 hover:text-violet-200' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+            {hidden ? '🙈' : '👁'}
+          </button>
+        )}
+        <button onClick={onClose} className="shrink-0 text-xs text-slate-400 hover:text-slate-200">✕</button>
       </div>
+
+      {/* NPC Wave 3B: hidden indicator under the header for GM clarity */}
+      {isNpcToken && hidden && (
+        <div className="mb-1 rounded-md border border-violet-700/60 bg-violet-950/30 px-2 py-0.5 text-[10px] text-violet-300">
+          Hidden — players don't see this token
+        </div>
+      )}
 
       <div className="space-y-1.5 text-xs">
         <p>HP: {hp ?? "—"} &nbsp;|&nbsp; AC: {ac ?? "—"}</p>

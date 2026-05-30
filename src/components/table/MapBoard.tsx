@@ -98,6 +98,8 @@ const MapBoard: React.FC<MapBoardProps> = ({
   const [measureFrozen, setMeasureFrozen] = useState(false);
 
   // Token placement mode — triggered by GM clicking "📍 Place" in InitiativeTracker
+  // (PCs) or "Spawn" in MonsterLibrary (NPCs/monsters). The payload is the same
+  // shape for both; MapBoard's INSERT branches on `type`.
   type PlacementPayload = {
     label: string;
     hp: number | null;
@@ -106,6 +108,13 @@ const MapBoard: React.FC<MapBoardProps> = ({
     initiativeEntryId: string;
     characterId?: string | null;
     tokenImageUrl?: string | null;
+    // NPC Wave 2: monster/NPC fields. When type === 'monster', these are
+    // forwarded into the tokens INSERT and the initiative entry is created
+    // with the pre-rolled init value rather than the PC auto-link flow.
+    type?: 'pc' | 'monster' | 'object';
+    monster_id?: string | null;
+    homebrew_monster_id?: string | null;
+    initiativeRoll?: number | null;
   };
   const [placementPending, setPlacementPending] = useState<PlacementPayload | null>(null);
   const [ghostPos, setGhostPos] = useState<Point | null>(null);
@@ -474,6 +483,15 @@ const MapBoard: React.FC<MapBoardProps> = ({
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     tokens.forEach((t) => {
+      // NPC Wave 4B: hidden tokens still render for the GM but dimmed so
+      // it's obvious they're invisible to players. The whole-token save/
+      // restore here doesn't interfere with the inner save/restore blocks
+      // because they always pair up.
+      const isHidden = (t as any).hidden === true;
+      if (isHidden) {
+        ctx.save();
+        ctx.globalAlpha = 0.45;
+      }
       const r = gridSize * 0.35;
       const ringLw = Math.max(2, gridSize * 0.07);
       const conditions = tokenConditions[t.id] ?? [];
@@ -553,6 +571,31 @@ const MapBoard: React.FC<MapBoardProps> = ({
           ctx.arc(dotX, dotY, dotR, 0, Math.PI * 2);
           ctx.fill();
         }
+      }
+
+      // NPC Wave 4B: close the dimming wrap and overlay a "hidden" badge at
+      // full opacity above the token. Players don't see this token at all;
+      // the GM gets a clear visual signal.
+      if (isHidden) {
+        ctx.restore();
+        const badgeR = Math.max(7, gridSize * 0.14);
+        const badgeX = t.x - r * 0.85;
+        const badgeY = t.y - r * 0.85;
+        ctx.save();
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(139,92,246,0.95)'; // violet — matches HUD chip
+        ctx.strokeStyle = 'rgba(15,23,42,0.95)';
+        ctx.lineWidth = Math.max(1.5, gridSize * 0.03);
+        ctx.arc(badgeX, badgeY, badgeR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.font = `bold ${Math.max(9, Math.floor(gridSize * 0.18))}px system-ui,sans-serif`;
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        // Eye-slash symbol — works in standard system fonts.
+        ctx.fillText('⌀', badgeX, badgeY + 1);
+        ctx.restore();
       }
     });
     // Draw trigger icons in the top-left corner of each trigger tile (GM only)
@@ -801,9 +844,15 @@ const MapBoard: React.FC<MapBoardProps> = ({
       setPlacementPending(null);
       setGhostPos(null);
 
-      supabase.from('tokens').insert({
+      // NPC Wave 2: branch on payload.type so monster placement INSERTs the
+      // right fields (monster_id, homebrew_monster_id) and creates an
+      // initiative entry with the pre-rolled init from spawnMonsterToken.
+      const tokenType = payload.type ?? 'pc';
+      const isMonsterPlacement = tokenType === 'monster';
+
+      const insertPayload: Record<string, unknown> = {
         encounter_id:    encounterId,
-        type:            'pc',
+        type:            tokenType,
         label:           payload.label,
         x,
         y,
@@ -814,22 +863,52 @@ const MapBoard: React.FC<MapBoardProps> = ({
         map_id:          mapId ?? null,
         character_id:    payload.characterId    ?? null,
         token_image_url: payload.tokenImageUrl  ?? null,
-      }).then(async ({ data, error }) => {
-        if (error) { console.error('Failed to place PC token', error); return; }
+      };
+      if (isMonsterPlacement) {
+        insertPayload.name = payload.label;
+        insertPayload.monster_id = payload.monster_id ?? null;
+        if (payload.homebrew_monster_id) {
+          insertPayload.homebrew_monster_id = payload.homebrew_monster_id;
+        }
+      }
 
-        // Fetch the newly-inserted token's ID (needed for initiative entry linking)
-        const { data: tokenRow } = await supabase
-          .from('tokens')
-          .select('id')
-          .eq('encounter_id', encounterId)
-          .eq('label', payload.label)
-          .eq('owner_wallet', payload.ownerWallet)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        const newTokenId = tokenRow?.id ?? null;
+      supabase.from('tokens').insert(insertPayload).select('id').then(async ({ data: insertedRows, error }) => {
+        if (error) { console.error('Failed to place token', error); return; }
 
-        if (payload.initiativeEntryId) {
+        // Prefer the id returned by INSERT to avoid a races with realtime;
+        // fall back to a SELECT match for legacy callers.
+        let newTokenId: string | null = (insertedRows && insertedRows[0]?.id) ?? null;
+        if (!newTokenId) {
+          const { data: tokenRow } = await supabase
+            .from('tokens')
+            .select('id')
+            .eq('encounter_id', encounterId)
+            .eq('label', payload.label)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          newTokenId = tokenRow?.id ?? null;
+        }
+
+        if (isMonsterPlacement) {
+          // Monster placement — create the initiative entry with the
+          // pre-rolled init from spawnMonsterToken so the tracker is
+          // populated without an extra round-trip.
+          if (newTokenId) {
+            const initVal = Number.isFinite(payload.initiativeRoll) ? Number(payload.initiativeRoll) : 0;
+            const { error: initErr } = await supabase.from('initiative_entries').insert({
+              encounter_id:   encounterId,
+              name:           payload.label,
+              init:           initVal,
+              hp:             payload.hp,
+              is_pc:          false,
+              character_id:   null,
+              token_id:       newTokenId,
+              wallet_address: null,
+            });
+            if (initErr) console.error('Failed to add monster to initiative', initErr);
+          }
+        } else if (payload.initiativeEntryId) {
           // Placement came from InitiativeTracker — link the token to the existing entry
           if (newTokenId) {
             await supabase
@@ -1327,6 +1406,21 @@ const MapBoard: React.FC<MapBoardProps> = ({
             setTokenImmunities(prev => ({ ...prev, [activeHudToken.id]: next }))
             supabase.from('tokens').update({ immunities: next }).eq('id', activeHudToken.id)
               .then(({ error }) => { if (error) console.error('[tokens] immunities persist error', error) })
+          }}
+          // NPC Wave 3: rename + hide controls. The HUD itself gates these on
+          // tokenType !== 'pc' so passing them unconditionally is safe.
+          tokenType={(activeHudToken as any).type ?? null}
+          hidden={Boolean((activeHudToken as any).hidden)}
+          onRename={(newName) => {
+            // Optimistic local update so the canvas label changes instantly.
+            setTokens((prev) => prev.map((t: any) => (t.id === activeHudToken.id ? { ...t, label: newName, name: newName } : t)))
+            supabase.from('tokens').update({ label: newName, name: newName }).eq('id', activeHudToken.id)
+              .then(({ error }) => { if (error) console.error('[tokens] rename error', error) })
+          }}
+          onToggleHidden={(next) => {
+            setTokens((prev) => prev.map((t: any) => (t.id === activeHudToken.id ? { ...t, hidden: next } : t)))
+            supabase.from('tokens').update({ hidden: next }).eq('id', activeHudToken.id)
+              .then(({ error }) => { if (error) console.error('[tokens] hidden toggle error', error) })
           }}
         />
       )}
