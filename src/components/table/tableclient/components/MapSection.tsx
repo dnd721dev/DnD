@@ -1,7 +1,7 @@
 'use client'
 
 import type { ChangeEvent } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import MapBoard from '@/components/table/MapBoard'
 import MapBoardView from '@/components/table/MapBoardView'
 import { DiceLogOverlay } from './DiceLogOverlay'
@@ -41,6 +41,11 @@ export function MapSection(props: {
 
   // Shown inside the map area when no map is set (GM only)
   mapControls?: React.ReactNode
+
+  /** Fullscreen/expanded is controlled by the HUD layout so the panel can swap
+   *  dock→float when the map expands. */
+  expanded?: boolean
+  onToggleExpand?: () => void
 }) {
   const {
     currentMap,
@@ -66,9 +71,13 @@ export function MapSection(props: {
     rollOverlay,
     mapControls,
     sessionStatus,
+    expanded,
+    onToggleExpand,
   } = props
 
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  // Fullscreen is controlled by the HUD layout (falls back to false).
+  const isFullscreen = Boolean(expanded)
+  const toggleFullscreen = () => onToggleExpand?.()
 
   // Sync body class so the root-layout <header> and <main> padding hide/restore
   useEffect(() => {
@@ -84,10 +93,10 @@ export function MapSection(props: {
   // Escape key exits fullscreen
   useEffect(() => {
     if (!isFullscreen) return
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsFullscreen(false) }
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onToggleExpand?.() }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [isFullscreen])
+  }, [isFullscreen, onToggleExpand])
 
   // Derive what to show on the map canvas
   const mapImageUrl = currentMap?.image_url ?? legacyMapUrl ?? ''
@@ -107,7 +116,7 @@ export function MapSection(props: {
       {/* Fullscreen toggle button */}
       <button
         type="button"
-        onClick={() => setIsFullscreen(v => !v)}
+        onClick={toggleFullscreen}
         title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen map'}
         className="pointer-events-auto absolute right-2 top-2 z-10 rounded-md border border-slate-600/60 bg-slate-900/80 px-2 py-1 text-[11px] text-slate-300 hover:border-slate-400/60 hover:text-white backdrop-blur-sm"
       >

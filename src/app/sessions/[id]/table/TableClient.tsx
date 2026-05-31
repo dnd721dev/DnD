@@ -15,6 +15,8 @@ import type { DiceEntry, ExternalRoll } from '@/components/table/tableclient/typ
 import { TableTopBar } from '@/components/table/tableclient/components/TableTopBar'
 import { ShopModal } from '@/components/shop/ShopModal'
 import { MapSection } from '@/components/table/tableclient/components/MapSection'
+import { FloatingWindow } from '@/components/table/hud/FloatingWindow'
+import { useHudLayout } from '@/components/table/hud/useHudLayout'
 import { useSessionWithCampaign } from '@/components/table/tableclient/hooks/useSessionWithCampaign'
 import { useEncounter } from '@/components/table/tableclient/hooks/useEncounter'
 import { useSessionRolls } from '@/components/table/tableclient/hooks/useSessionRolls'
@@ -1043,8 +1045,12 @@ export default function TableClient({ sessionId }: TableClientProps) {
     </>
   )
 
+  const hud = useHudLayout(walletLower ?? null, isGm ? 'gm' : 'player')
+
   const mapSection = (
     <MapSection
+      expanded={hud.mapExpanded}
+      onToggleExpand={() => hud.setMapExpanded(!hud.mapExpanded)}
       currentMap={currentMap}
       legacyMapUrl={legacyMapUrl}
       encounterId={encounterId}
@@ -1241,10 +1247,23 @@ export default function TableClient({ sessionId }: TableClientProps) {
             </div>
           </div>
 
-          {/* GM overlay panel */}
-          <div className="absolute bottom-0 left-0 right-0 z-30 pointer-events-none">
-            <GMSidebar sessionId={session?.id ?? null} encounterId={encounterId} address={walletLower ?? null} activeMapId={currentMapId} onRoll={handleExternalRoll} spawnMonsterToken={spawnMonsterToken} sessionType={(session as any)?.session_type ?? null} sessionStatus={sessionStatus ?? session?.status ?? null} xpAwardedAlready={(session as any)?.xp_award ?? null} sessionStartedAt={(session as any)?.started_at ?? null} sessionCompletedAt={(session as any)?.completed_at ?? null} onSessionStatusChange={setSessionStatus} />
-          </div>
+          {/* GM panel — docked or floating HUD depending on map expansion */}
+          <FloatingWindow
+            mode={hud.panelMode}
+            isMobile={hud.isMobile}
+            title="GM Controls"
+            mapExpanded={hud.mapExpanded}
+            dockedHeight={hud.layout.dockedHeight}
+            floatingRect={hud.layout.floatingRect}
+            collapsed={hud.layout.collapsed}
+            opacity={hud.layout.opacity}
+            onDockedHeight={hud.setDockedHeight}
+            onFloatingRect={hud.setFloatingRect}
+            onToggleCollapse={() => hud.setCollapsed(!hud.layout.collapsed)}
+            onToggleExpand={() => hud.setMapExpanded(!hud.mapExpanded)}
+          >
+            <GMSidebar chromeless sessionId={session?.id ?? null} encounterId={encounterId} address={walletLower ?? null} activeMapId={currentMapId} onRoll={handleExternalRoll} spawnMonsterToken={spawnMonsterToken} sessionType={(session as any)?.session_type ?? null} sessionStatus={sessionStatus ?? session?.status ?? null} xpAwardedAlready={(session as any)?.xp_award ?? null} sessionStartedAt={(session as any)?.started_at ?? null} sessionCompletedAt={(session as any)?.completed_at ?? null} onSessionStatusChange={setSessionStatus} />
+          </FloatingWindow>
         </div>
       </div>
     )
@@ -1291,9 +1310,23 @@ export default function TableClient({ sessionId }: TableClientProps) {
         <div className="absolute inset-0">
           {mapSection}
         </div>
-        {/* Player overlay panel */}
-        <div className="absolute bottom-0 left-0 right-0 z-30 pointer-events-none">
+        {/* Player panel — docked or floating HUD depending on map expansion */}
+        <FloatingWindow
+          mode={hud.panelMode}
+          isMobile={hud.isMobile}
+          title={selectedCharacter?.name || 'Character'}
+          mapExpanded={hud.mapExpanded}
+          dockedHeight={hud.layout.dockedHeight}
+          floatingRect={hud.layout.floatingRect}
+          collapsed={hud.layout.collapsed}
+          opacity={hud.layout.opacity}
+          onDockedHeight={hud.setDockedHeight}
+          onFloatingRect={hud.setFloatingRect}
+          onToggleCollapse={() => hud.setCollapsed(!hud.layout.collapsed)}
+          onToggleExpand={() => hud.setMapExpanded(!hud.mapExpanded)}
+        >
           <PlayerSidebar
+            chromeless
             sessionId={session?.id ?? null}
             address={walletLower ?? null}
             characters={characters}
@@ -1313,7 +1346,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
             onOpenDiceLog={() => setShowDiceLog(true)}
             sessionStatus={sessionStatus}
           />
-        </div>
+        </FloatingWindow>
       </div>
     </div>
   )

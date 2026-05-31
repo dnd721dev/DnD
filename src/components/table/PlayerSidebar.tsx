@@ -46,6 +46,10 @@ type PlayerSidebarProps = {
   onOpenDiceLog?: () => void
   /** Current session lifecycle status — shown as a banner at the top of the sidebar */
   sessionStatus?: SessionStatus | null
+  /** When true, render without the panel's own window chrome (drag handle,
+   *  collapse button, fixed height, rounded wrapper) — the HUD FloatingWindow
+   *  supplies those. The body fills its parent. */
+  chromeless?: boolean
 }
 
 type ActionState = {
@@ -140,6 +144,7 @@ export function PlayerSidebar({
   diceLog = [],
   onOpenDiceLog,
   sessionStatus,
+  chromeless = false,
 }: PlayerSidebarProps) {
   const addressLower = useMemo(() => (address ? address.toLowerCase() : null), [address])
 
@@ -894,28 +899,32 @@ export function PlayerSidebar({
       )
     })()}
 
-    <aside className="pointer-events-auto flex flex-col rounded-t-xl border border-b-0 border-yellow-800/40 bg-slate-950/90 backdrop-blur-md text-xs">
+    <aside className={chromeless
+      ? 'flex h-full flex-col text-xs'
+      : 'pointer-events-auto flex flex-col rounded-t-xl border border-b-0 border-yellow-800/40 bg-slate-950/90 backdrop-blur-md text-xs'}>
 
       {/* Session status banner */}
       {sessionStatus && (() => {
         const cfg = STATUS_CONFIG[sessionStatus]
         if (!cfg) return null
         return (
-          <div className={`flex items-center gap-1.5 rounded-t-xl px-3 py-1 text-[10px] font-semibold text-white/90 ${cfg.color}`}>
+          <div className={`flex items-center gap-1.5 px-3 py-1 text-[10px] font-semibold text-white/90 ${cfg.color}${chromeless ? '' : ' rounded-t-xl'}`}>
             <span>{cfg.icon}</span>
             <span>{cfg.label}</span>
           </div>
         )
       })()}
 
-      {/* Drag handle */}
-      <div
-        className="flex h-4 shrink-0 cursor-ns-resize items-center justify-center"
-        onMouseDown={handleDragStart}
-        onTouchStart={handleDragStart}
-      >
-        <div className="h-1.5 w-12 rounded-full bg-slate-600 hover:bg-yellow-500/60 transition-colors" />
-      </div>
+      {/* Drag handle — only in standalone (non-chromeless) mode */}
+      {!chromeless && (
+        <div
+          className="flex h-4 shrink-0 cursor-ns-resize items-center justify-center"
+          onMouseDown={handleDragStart}
+          onTouchStart={handleDragStart}
+        >
+          <div className="h-1.5 w-12 rounded-full bg-slate-600 hover:bg-yellow-500/60 transition-colors" />
+        </div>
+      )}
 
       {/* Single-row header: badge + tabs + DND721 */}
       <div className="flex shrink-0 items-center gap-2 border-b border-yellow-800/50 bg-gradient-to-r from-slate-950 via-slate-900/95 to-slate-950 px-3 py-2">
@@ -941,21 +950,23 @@ export function PlayerSidebar({
             )
           })}
         </div>
-        <button
-          type="button"
-          onClick={() => setCollapsed((v) => !v)}
-          className="shrink-0 rounded-md border border-yellow-800/60 bg-slate-950/80 px-2 py-0.5 text-[11px] text-yellow-300/80 hover:border-yellow-500/60"
-          title={collapsed ? 'Expand panel' : 'Collapse panel'}
-        >
-          {collapsed ? '▲' : '▼'}
-        </button>
+        {!chromeless && (
+          <button
+            type="button"
+            onClick={() => setCollapsed((v) => !v)}
+            className="shrink-0 rounded-md border border-yellow-800/60 bg-slate-950/80 px-2 py-0.5 text-[11px] text-yellow-300/80 hover:border-yellow-500/60"
+            title={collapsed ? 'Expand panel' : 'Collapse panel'}
+          >
+            {collapsed ? '▲' : '▼'}
+          </button>
+        )}
         <div className="shrink-0 rounded-md border border-yellow-800/60 bg-slate-950/80 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide text-yellow-300">
           DND721
         </div>
       </div>
 
-      {/* Tab content area */}
-      {!collapsed && <div className="overflow-hidden p-2" style={{ height: panelHeight }}>
+      {/* Tab content area. chromeless: fill the FloatingWindow body (it owns height + collapse). */}
+      {(chromeless || !collapsed) && <div className={chromeless ? 'min-h-0 flex-1 overflow-y-auto p-2' : 'overflow-hidden p-2'} style={chromeless ? undefined : { height: panelHeight }}>
 
       {/* ─── CHARACTER TAB ─── */}
       {activeTab === 'character' && (

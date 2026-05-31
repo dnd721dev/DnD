@@ -25,6 +25,10 @@ type GMSidebarProps = {
   sessionStartedAt?: string | null;
   sessionCompletedAt?: string | null;
   onSessionStatusChange?: (newStatus: SessionStatus) => void;
+  /** When true, render without the panel's own window chrome (drag handle,
+   *  collapse button, fixed height, rounded wrapper) — the HUD FloatingWindow
+   *  supplies those. The body fills its parent. */
+  chromeless?: boolean;
 };
 
 type InitiativeEntry = {
@@ -53,6 +57,7 @@ export default function GMSidebar({
   sessionStartedAt,
   sessionCompletedAt,
   onSessionStatusChange,
+  chromeless = false,
 }: GMSidebarProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('combat');
   const [collapsed, setCollapsed] = useState(false);
@@ -190,15 +195,19 @@ export default function GMSidebar({
   ];
 
   return (
-    <div className="pointer-events-auto flex flex-col rounded-t-xl border border-b-0 border-yellow-700/40 bg-slate-950/90 backdrop-blur-md shadow-[0_-4px_24px_rgba(0,0,0,0.7)]">
-      {/* Drag handle */}
-      <div
-        className="flex h-4 shrink-0 cursor-ns-resize items-center justify-center"
-        onMouseDown={handleDragStart}
-        onTouchStart={handleDragStart}
-      >
-        <div className="h-1.5 w-12 rounded-full bg-slate-600 hover:bg-yellow-500/60 transition-colors" />
-      </div>
+    <div className={chromeless
+      ? 'flex h-full flex-col'
+      : 'pointer-events-auto flex flex-col rounded-t-xl border border-b-0 border-yellow-700/40 bg-slate-950/90 backdrop-blur-md shadow-[0_-4px_24px_rgba(0,0,0,0.7)]'}>
+      {/* Drag handle — only in standalone (non-chromeless) mode */}
+      {!chromeless && (
+        <div
+          className="flex h-4 shrink-0 cursor-ns-resize items-center justify-center"
+          onMouseDown={handleDragStart}
+          onTouchStart={handleDragStart}
+        >
+          <div className="h-1.5 w-12 rounded-full bg-slate-600 hover:bg-yellow-500/60 transition-colors" />
+        </div>
+      )}
       {/* Header + Tabs */}
       {/* Single-row header: badge + tabs + DND721 */}
       <div className="flex shrink-0 items-center gap-2 border-b border-yellow-800/50 bg-gradient-to-r from-slate-950 via-slate-900/95 to-slate-950 px-3 py-2">
@@ -224,21 +233,29 @@ export default function GMSidebar({
             );
           })}
         </div>
-        <button
-          type="button"
-          onClick={() => setCollapsed((v) => !v)}
-          className="shrink-0 rounded-md border border-yellow-800/60 bg-slate-950/80 px-2 py-0.5 text-[11px] text-yellow-300/80 hover:border-yellow-500/60"
-          title={collapsed ? 'Expand panel' : 'Collapse panel'}
-        >
-          {collapsed ? '▲' : '▼'}
-        </button>
+        {!chromeless && (
+          <button
+            type="button"
+            onClick={() => setCollapsed((v) => !v)}
+            className="shrink-0 rounded-md border border-yellow-800/60 bg-slate-950/80 px-2 py-0.5 text-[11px] text-yellow-300/80 hover:border-yellow-500/60"
+            title={collapsed ? 'Expand panel' : 'Collapse panel'}
+          >
+            {collapsed ? '▲' : '▼'}
+          </button>
+        )}
         <div className="shrink-0 rounded-md border border-yellow-800/60 bg-slate-950/80 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide text-yellow-300">
           DND721
         </div>
       </div>
 
-      {/* Body — 2-column grid per tab; always rendered to preserve InitiativeTracker state */}
-      <div className={`overflow-hidden p-2 text-xs${collapsed ? ' hidden' : ''}`} style={{ height: panelHeight }}>
+      {/* Body — 2-column grid per tab; always rendered to preserve InitiativeTracker state.
+          chromeless: fill the FloatingWindow body (it owns height + collapse). */}
+      <div
+        className={chromeless
+          ? 'min-h-0 flex-1 overflow-hidden p-2 text-xs'
+          : `overflow-hidden p-2 text-xs${collapsed ? ' hidden' : ''}`}
+        style={chromeless ? undefined : { height: panelHeight }}
+      >
 
         {/* ⚔ Combat: InitiativeTracker (left) + MonsterLibrary (right) */}
         {activeTab === 'combat' && (
