@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useAccount } from 'wagmi'
 import { supabase } from '@/lib/supabase'
 import { InviteManager } from '@/components/invite/InviteManager'
+import { characterMatchesType, mismatchReason } from '@/lib/gameType'
 
 type SessionStatus = 'planned' | 'in_progress' | 'completed' | 'cancelled'
 
@@ -215,23 +216,22 @@ export default function SessionPage() {
 
     // ✅ Enforce session type restrictions
     if (!isGm && campaignCharacterId) {
-      const sessionType = session.session_type
+      const sessionType = (session.session_type === 'caya' ? 'caya' : 'set_level') as 'caya' | 'set_level'
       const requiredLevel = session.required_level
 
-      if (sessionType === 'set_level' && requiredLevel != null) {
-        if (campaignCharacterLevel !== requiredLevel) {
-          setError(
-            `This session requires a level ${requiredLevel} character. Your selected character is level ${campaignCharacterLevel ?? '?'}.`
-          )
-          return
-        }
+      // Both directions: CAYA games need CAYA chars; Free-Level games need
+      // Free-Level (non-CAYA) chars — independent of the level number.
+      if (!characterMatchesType(Boolean(campaignCharacterIsCaya), sessionType)) {
+        setError(mismatchReason(sessionType))
+        return
       }
 
-      if (sessionType === 'caya') {
-        if (!campaignCharacterIsCaya) {
-          setError('This is a CAYA session. You need a CAYA character to join. Create one from the Characters page.')
-          return
-        }
+      // Free-Level: the character must be the exact level the session calls for.
+      if (sessionType === 'set_level' && requiredLevel != null && campaignCharacterLevel !== requiredLevel) {
+        setError(
+          `This session requires a level ${requiredLevel} character. Your selected character is level ${campaignCharacterLevel ?? '?'}.`
+        )
+        return
       }
     }
 

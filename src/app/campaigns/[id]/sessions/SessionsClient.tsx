@@ -22,6 +22,7 @@ type Campaign = {
   id: string
   title: string
   gm_wallet: string | null
+  campaign_type: 'set_level' | 'caya'
 }
 
 interface Props {
@@ -62,7 +63,7 @@ export default function SessionsClient({ campaignId }: Props) {
         await Promise.all([
           supabase
             .from('campaigns')
-            .select('id, title, gm_wallet')
+            .select('id, title, gm_wallet, campaign_type')
             .eq('id', campaignId)
             .limit(1).maybeSingle(),
           supabase
@@ -86,6 +87,8 @@ export default function SessionsClient({ campaignId }: Props) {
       }
 
       setCampaign(campaignData as Campaign)
+      // Sessions inherit the campaign's game type — lock the create form to it.
+      setSessionType(((campaignData as any)?.campaign_type ?? 'set_level') as 'set_level' | 'caya')
       setSessions((sessionData as Session[]) ?? [])
       setLoading(false)
     }
@@ -255,29 +258,16 @@ export default function SessionsClient({ campaignId }: Props) {
 
             <div className="space-y-1 text-sm md:col-span-2">
               <span className="text-slate-200">Session Type</span>
-              <div className="flex gap-2 mt-1">
-                <button
-                  type="button"
-                  onClick={() => setSessionType('set_level')}
-                  className={`flex-1 rounded border px-3 py-2 text-xs font-semibold transition ${
-                    sessionType === 'set_level'
-                      ? 'border-sky-500 bg-sky-500/20 text-sky-200'
-                      : 'border-slate-600 bg-slate-800 text-slate-400 hover:border-slate-400'
-                  }`}
-                >
-                  Set Level
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSessionType('caya')}
-                  className={`flex-1 rounded border px-3 py-2 text-xs font-semibold transition ${
-                    sessionType === 'caya'
-                      ? 'border-amber-500 bg-amber-500/20 text-amber-200'
-                      : 'border-slate-600 bg-slate-800 text-slate-400 hover:border-slate-400'
-                  }`}
-                >
-                  CAYA — Come As You Are
-                </button>
+              {/* Inherited from the campaign's game type — not editable per session. */}
+              <div className="mt-1">
+                <span className={`inline-block rounded border px-3 py-2 text-xs font-semibold ${
+                  sessionType === 'caya'
+                    ? 'border-amber-500 bg-amber-500/20 text-amber-200'
+                    : 'border-sky-500 bg-sky-500/20 text-sky-200'
+                }`}>
+                  {sessionType === 'caya' ? 'CAYA — Come As You Are' : 'Free-Level (Set Level)'}
+                </span>
+                <span className="ml-2 text-[11px] text-slate-500">Set by the campaign type.</span>
               </div>
               {sessionType === 'set_level' && (
                 <div className="mt-2 flex items-center gap-3">

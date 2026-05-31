@@ -24,7 +24,7 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<Respon
 
   const { data: campaign } = await db
     .from('campaigns')
-    .select('id, title')
+    .select('id, title, campaign_type')
     .eq('id', (invite as any).campaign_id)
     .maybeSingle()
 
@@ -41,7 +41,9 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<Respon
   return NextResponse.json({
     status,
     role: (invite as any).role,
-    campaign: campaign ? { id: (campaign as any).id, title: (campaign as any).title } : null,
+    campaign: campaign
+      ? { id: (campaign as any).id, title: (campaign as any).title, campaign_type: (campaign as any).campaign_type ?? 'set_level' }
+      : null,
     session,
   })
 }

@@ -14,6 +14,7 @@ export default function NewCampaignPage() {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [joinMode, setJoinMode] = useState<JoinMode>('open')
+  const [campaignType, setCampaignType] = useState<'set_level' | 'caya'>('set_level')
   const [password, setPassword] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -50,6 +51,7 @@ export default function NewCampaignPage() {
         description: description.trim() || null,
         gm_wallet: address.toLowerCase(),
         join_mode: joinMode,
+        campaign_type: campaignType,
         join_password_hash: passwordHash,
         status: 'active',
       })
@@ -111,6 +113,36 @@ export default function NewCampaignPage() {
             onChange={e => setDescription(e.target.value)}
           />
         </label>
+
+        <div className="space-y-2">
+          <div className="text-sm text-slate-200">Game Type</div>
+          <div className="flex flex-col gap-2">
+            <label className="inline-flex items-start gap-2 text-sm">
+              <input
+                type="radio"
+                className="mt-1 h-4 w-4"
+                checked={campaignType === 'set_level'}
+                onChange={() => setCampaignType('set_level')}
+              />
+              <span>
+                <span className="font-medium">Free-Level</span>
+                <span className="block text-xs text-slate-400">Players create characters at a chosen level; each session sets the level to come as.</span>
+              </span>
+            </label>
+            <label className="inline-flex items-start gap-2 text-sm">
+              <input
+                type="radio"
+                className="mt-1 h-4 w-4"
+                checked={campaignType === 'caya'}
+                onChange={() => setCampaignType('caya')}
+              />
+              <span>
+                <span className="font-medium">CAYA — Come As You Are</span>
+                <span className="block text-xs text-slate-400">Characters start at level 1 and only level up by earning XP in this campaign.</span>
+              </span>
+            </label>
+          </div>
+        </div>
 
         <div className="space-y-2">
           <div className="text-sm text-slate-200">Join Mode</div>

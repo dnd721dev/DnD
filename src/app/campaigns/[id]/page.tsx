@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useAccount } from 'wagmi'
 import { supabase } from '@/lib/supabase'
 import { InviteManager } from '@/components/invite/InviteManager'
+import { characterMatchesType, mismatchReason, typeShort } from '@/lib/gameType'
 
 type JoinMode = 'open' | 'password'
 type ParticipantRole = 'gm' | 'player'
@@ -15,6 +16,7 @@ type Campaign = {
   title: string
   description: string | null
   join_mode: JoinMode
+  campaign_type: 'set_level' | 'caya'
   status: string | null
   gm_wallet: string | null
   join_password_hash: string | null
@@ -31,6 +33,7 @@ type CharacterRow = {
   level: number | null
   main_job: string | null
   race: string | null
+  is_caya: boolean
 }
 
 function shortWallet(w: string) {
@@ -86,7 +89,7 @@ export default function CampaignPage() {
         await Promise.all([
           supabase
             .from('campaigns')
-            .select('id, title, description, join_mode, status, gm_wallet, join_password_hash')
+            .select('id, title, description, join_mode, campaign_type, status, gm_wallet, join_password_hash')
             .eq('id', campaignId)
             .limit(1)
             .maybeSingle(),
@@ -125,7 +128,7 @@ export default function CampaignPage() {
       const [charsRes, selRes] = await Promise.all([
         supabase
           .from('characters')
-          .select('id, name, level, main_job, race')
+          .select('id, name, level, main_job, race, is_caya')
           .eq('wallet_address', (myAddress ?? '').toLowerCase())
           .order('created_at', { ascending: true }),
         supabase
@@ -244,6 +247,16 @@ export default function CampaignPage() {
       return
     }
 
+    // Enforce the campaign's game type (CAYA vs Free-Level) against the picked character.
+    if (!isGm && selectedCharacterId) {
+      const picked = characters.find((c) => c.id === selectedCharacterId)
+      if (picked && !characterMatchesType(picked.is_caya, campaign.campaign_type)) {
+        setError(mismatchReason(campaign.campaign_type))
+        setSavingChar(false)
+        return
+      }
+    }
+
     const { data, error: selErr } = await supabase
       .from('campaign_character_selections')
       .upsert(
@@ -320,6 +333,10 @@ export default function CampaignPage() {
               <p className="text-xs text-slate-400">
                 Status: <span className="font-medium">{campaign.status ?? 'active'}</span> • Join Mode:{' '}
                 <span className="font-medium">{campaign.join_mode === 'open' ? 'Open' : 'Password locked'}</span>
+                {' • '}Type:{' '}
+                <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${campaign.campaign_type === 'caya' ? 'bg-purple-900/60 text-purple-200' : 'bg-sky-900/60 text-sky-200'}`}>
+                  {typeShort(campaign.campaign_type)}
+                </span>
               </p>
               {campaign.description && <p className="mt-2 text-sm text-slate-200">{campaign.description}</p>}
             </div>
@@ -464,27 +481,37 @@ export default function CampaignPage() {
                         if (c.level != null) parts.push(`Lv ${c.level}`)
                         if (c.race) parts.push(c.race)
                         if (c.main_job) parts.push(c.main_job)
+                        if (c.is_caya) parts.push('CAYA')
                         const label = parts.join(' • ')
                         const isSelected = selectedCharacterId === c.id
+                        // Players can only pick characters matching the campaign type. GM is exempt.
+                        const incompatible = !isGm && !characterMatchesType(c.is_caya, campaign.campaign_type)
 
                         return (
                           <label
                             key={c.id}
-                            className={`flex cursor-pointer items-center gap-3 rounded border px-3 py-2 text-xs ${
-                              isSelected
-                                ? 'border-sky-500 bg-sky-900/40'
-                                : 'border-slate-700 bg-slate-900/60 hover:border-sky-500'
+                            className={`flex items-center gap-3 rounded border px-3 py-2 text-xs ${
+                              incompatible
+                                ? 'cursor-not-allowed border-slate-800 bg-slate-900/40 opacity-50'
+                                : isSelected
+                                ? 'cursor-pointer border-sky-500 bg-sky-900/40'
+                                : 'cursor-pointer border-slate-700 bg-slate-900/60 hover:border-sky-500'
                             }`}
+                            title={incompatible ? mismatchReason(campaign.campaign_type) : undefined}
                           >
                             <input
                               type="radio"
                               className="h-4 w-4"
                               checked={isSelected}
+                              disabled={incompatible}
                               onChange={() => setSelectedCharacterId(c.id)}
                             />
                             <div className="min-w-0">
                               <div className="truncate font-semibold text-slate-100">{c.name || 'Unnamed Character'}</div>
                               {label && <div className="text-[11px] text-slate-400">{label}</div>}
+                              {incompatible && (
+                                <div className="text-[10px] text-amber-400">Not eligible for this {typeShort(campaign.campaign_type)} campaign</div>
+                              )}
                             </div>
                           </label>
                         )

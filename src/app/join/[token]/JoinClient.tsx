@@ -7,11 +7,12 @@ import { useAccount } from 'wagmi'
 import { useAppKit } from '@reown/appkit/react'
 import { supabase } from '@/lib/supabase'
 import { getStoredJwt } from '@/lib/walletJwtAuth'
+import { characterMatchesType, mismatchReason, typeShort, type GameType } from '@/lib/gameType'
 
 type Preview = {
   status: 'valid' | 'expired' | 'revoked' | 'maxed' | 'not_found'
   role?: string
-  campaign?: { id: string; title: string | null } | null
+  campaign?: { id: string; title: string | null; campaign_type: GameType } | null
   session?: { id: string; title: string | null; scheduled_start: string | null; status: string } | null
 }
 
@@ -22,7 +23,7 @@ type AcceptResult = {
   needsCharacter: boolean
 }
 
-type CharRow = { id: string; name: string; main_job?: string | null; level?: number | null }
+type CharRow = { id: string; name: string; main_job?: string | null; level?: number | null; is_caya: boolean }
 
 const STATUS_MSG: Record<string, string> = {
   expired:   'This invite link has expired.',
@@ -112,7 +113,7 @@ export function JoinClient({ token }: { token: string }) {
     if (!wallet) return
     const { data } = await supabase
       .from('characters')
-      .select('id, name, main_job, level')
+      .select('id, name, main_job, level, is_caya')
       .eq('wallet_address', wallet)
       .order('updated_at', { ascending: false })
     setCharacters((data ?? []) as CharRow[])
@@ -120,6 +121,12 @@ export function JoinClient({ token }: { token: string }) {
 
   async function chooseCharacter(characterId: string) {
     if (!accepted || !wallet) return
+    const type = preview?.campaign?.campaign_type ?? 'set_level'
+    const picked = characters.find((c) => c.id === characterId)
+    if (picked && !characterMatchesType(picked.is_caya, type)) {
+      setError(mismatchReason(type))
+      return
+    }
     setPhase('joining')
     // Bind the character to the campaign (idempotent), and to the session if any.
     const { error: ccsErr } = await supabase
@@ -186,39 +193,51 @@ export function JoinClient({ token }: { token: string }) {
 
           {phase === 'joining' && <p className="text-sm text-yellow-300">⏳ Joining…</p>}
 
-          {phase === 'character' && (
-            <div className="space-y-3">
-              <p className="text-sm text-slate-300">Choose your character for this campaign:</p>
-              {characters.length === 0 ? (
-                <p className="text-xs text-slate-500">No characters yet.</p>
-              ) : (
-                <ul className="space-y-1.5">
-                  {characters.map((c) => (
-                    <li key={c.id}>
-                      <button
-                        type="button"
-                        onClick={() => void chooseCharacter(c.id)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-left text-sm text-slate-100 hover:border-emerald-600 hover:bg-slate-900"
-                      >
-                        {c.name}
-                        <span className="text-slate-500">
-                          {c.main_job ? ` · ${c.main_job}` : ''}{c.level ? ` Lv.${c.level}` : ''}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="flex items-center justify-between">
-                <Link href="/characters/new" className="text-xs text-amber-400 hover:underline">
-                  + Create a new character
-                </Link>
-                <button type="button" onClick={() => void loadCharacters()} className="text-xs text-slate-400 hover:text-slate-200">
-                  ↻ Refresh
-                </button>
+          {phase === 'character' && (() => {
+            const type: GameType = preview?.campaign?.campaign_type ?? 'set_level'
+            const eligible = characters.filter((c) => characterMatchesType(c.is_caya, type))
+            const ineligible = characters.filter((c) => !characterMatchesType(c.is_caya, type))
+            return (
+              <div className="space-y-3">
+                <p className="text-sm text-slate-300">
+                  Choose your character for this <span className="font-semibold">{typeShort(type)}</span> campaign:
+                </p>
+                {eligible.length === 0 ? (
+                  <p className="text-xs text-amber-400">{mismatchReason(type)} You don&apos;t have an eligible character yet.</p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {eligible.map((c) => (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          onClick={() => void chooseCharacter(c.id)}
+                          className="w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-left text-sm text-slate-100 hover:border-emerald-600 hover:bg-slate-900"
+                        >
+                          {c.name}
+                          <span className="text-slate-500">
+                            {c.main_job ? ` · ${c.main_job}` : ''}{c.level ? ` Lv.${c.level}` : ''}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {ineligible.length > 0 && (
+                  <p className="text-[11px] text-slate-500">
+                    {ineligible.length} other character{ineligible.length === 1 ? '' : 's'} hidden — not eligible for a {typeShort(type)} campaign.
+                  </p>
+                )}
+                <div className="flex items-center justify-between">
+                  <Link href="/characters/new" className="text-xs text-amber-400 hover:underline">
+                    + Create a {type === 'caya' ? 'CAYA' : 'Free-Level'} character
+                  </Link>
+                  <button type="button" onClick={() => void loadCharacters()} className="text-xs text-slate-400 hover:text-slate-200">
+                    ↻ Refresh
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            )
+          })()}
         </div>
       </div>
     </div>
