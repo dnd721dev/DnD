@@ -26,7 +26,10 @@ interface Props {
 }
 
 function inviteUrl(token: string): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? (typeof window !== 'undefined' ? window.location.origin : '')
+  // Use the host the GM is actually browsing (the public domain in production),
+  // not NEXT_PUBLIC_APP_URL — that env var is the wallet deep-link host (often a
+  // LAN IP in dev) and isn't shareable.
+  const base = (typeof window !== 'undefined' ? window.location.origin : '') || process.env.NEXT_PUBLIC_APP_URL || ''
   return `${base}/join/${token}`
 }
 

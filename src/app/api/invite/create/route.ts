@@ -83,6 +83,12 @@ export async function POST(req: NextRequest): Promise<Response> {
     return NextResponse.json({ error: 'Failed to create invite' }, { status: 500 })
   }
 
-  const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(req.url).origin
+  // Prefer the request's own origin (the public domain the GM is on) over
+  // NEXT_PUBLIC_APP_URL (the wallet deep-link host, often a LAN IP in dev).
+  const origin =
+    req.headers.get('origin') ??
+    (req.headers.get('host') ? `${new URL(req.url).protocol}//${req.headers.get('host')}` : null) ??
+    process.env.NEXT_PUBLIC_APP_URL ??
+    new URL(req.url).origin
   return NextResponse.json({ token: invite.token, url: `${origin}/join/${invite.token}` })
 }
