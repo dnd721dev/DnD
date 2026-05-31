@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useAccount } from 'wagmi'
 import { supabase } from '@/lib/supabase'
+import { InviteManager } from '@/components/invite/InviteManager'
 
 type JoinMode = 'open' | 'password'
 type ParticipantRole = 'gm' | 'player'
@@ -382,6 +383,8 @@ export default function CampaignPage() {
               )}
             </div>
           </header>
+
+          {isGm && <InviteManager campaignId={campaign.id} />}
 
           <section className="rounded border border-slate-700 bg-slate-900/60 p-4">
             <div className="flex items-center justify-between gap-2">

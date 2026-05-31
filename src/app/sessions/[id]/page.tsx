@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAccount } from 'wagmi'
 import { supabase } from '@/lib/supabase'
+import { InviteManager } from '@/components/invite/InviteManager'
 
 type SessionStatus = 'planned' | 'in_progress' | 'completed' | 'cancelled'
 
@@ -298,6 +299,10 @@ export default function SessionPage() {
           )}
         </div>
       </header>
+
+      {isGm && session.campaign_id && (
+        <InviteManager campaignId={session.campaign_id} sessionId={session.id} />
+      )}
 
       {!isConnected && (
         <p className="rounded border border-yellow-600 bg-yellow-950/40 px-3 py-2 text-sm text-yellow-200">
