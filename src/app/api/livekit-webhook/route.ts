@@ -44,13 +44,19 @@ async function recordWebhookFailure(
 export async function POST(req: NextRequest) {
   const body = await req.text()
 
-  // Fix 3: LiveKit sends the HMAC-SHA256 signature in X-Livekit-Signature,
-  // NOT in Authorization. Using the wrong header caused receiver.receive() to
-  // always throw, returning 401 and never updating the DB.
-  const signature = req.headers.get('X-Livekit-Signature') ?? ''
+  // LiveKit Cloud sends the signed webhook JWT in the standard Authorization
+  // header — that is what WebhookReceiver.receive(body, authHeader) expects.
+  // (A prior change read X-Livekit-Signature, a header LiveKit does NOT send,
+  // so receive() threw on every call and the DB was never updated.) Accept
+  // X-Livekit-Signature only as a defensive fallback for odd proxies.
+  const authHeader   = req.headers.get('Authorization')
+  const sigHeader    = req.headers.get('X-Livekit-Signature')
+  const signature    = authHeader ?? sigHeader ?? ''
+  const headerUsed   = authHeader ? 'Authorization' : sigHeader ? 'X-Livekit-Signature' : 'none'
 
-  // Fix 1: log every incoming webhook so failures are visible in Vercel logs
-  console.log('[livekit-webhook] received body=', body.slice(0, 200), 'sig=', signature.slice(0, 20))
+  // Log every incoming webhook so failures are visible in Vercel logs
+  console.log('[livekit-webhook] received body=', body.slice(0, 200),
+    'headerUsed=', headerUsed, 'sig=', signature.slice(0, 20))
 
   let event: any
   try {

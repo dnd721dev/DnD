@@ -89,6 +89,10 @@ export default function RecordingEditorPage() {
   // Transcription
   const [transcribing, setTranscribing] = useState(false)
 
+  // Recovery (webhook-independent finalize via LiveKit)
+  const [recovering, setRecovering]     = useState(false)
+  const recoverAttempts                 = useRef(0)
+
   // Chapters
   const [editingMarker, setEditingMarker]   = useState<string | null>(null)
   const [markerEdits, setMarkerEdits]       = useState<Record<string, { label: string; offset_sec: number }>>({})
@@ -180,19 +184,46 @@ export default function RecordingEditorPage() {
     return () => { void supabase.removeChannel(channel) }
   }, [recordingId, fetchRecording])
 
-  // Fix 7: polling fallback — if realtime misses the webhook update, poll every
-  // 15 seconds while the recording is still in a processing state.
+  // Webhook-independent recovery: query LiveKit's actual egress status and
+  // finalize the DB row. Idempotent (recover returns early once completed).
+  const recoverRecording = useCallback(async () => {
+    setRecovering(true)
+    try {
+      await fetch(`/api/recording/${sessionId}/recover`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ recordingId }),
+      })
+    } catch {
+      /* best-effort — fetchRecording below reflects whatever changed */
+    } finally {
+      setRecovering(false)
+      await fetchRecording()
+    }
+  }, [sessionId, recordingId, fetchRecording])
+
+  // Fix 7 + self-heal: while the recording is still processing, poll every 15s.
+  // Instead of only re-reading the DB (a no-op if the webhook never fired), we
+  // actively call /recover so the row finalizes even when the webhook is missed.
+  // Capped at 5 attempts to avoid hammering LiveKit on a genuinely failed egress.
   useEffect(() => {
     if (!recording) return
     const stillProcessing = recording.status === 'recording' || recording.status === 'stopped'
-    if (!stillProcessing) return
+    if (!stillProcessing) { recoverAttempts.current = 0; return }
 
     const interval = setInterval(() => {
-      void fetchRecording()
+      if (recoverAttempts.current >= 5) {
+        // Give up active recovery; keep passively re-reading in case a late
+        // webhook or manual recover lands.
+        void fetchRecording()
+        return
+      }
+      recoverAttempts.current += 1
+      void recoverRecording()
     }, 15_000)
 
     return () => clearInterval(interval)
-  }, [recording?.status, fetchRecording])
+  }, [recording?.status, fetchRecording, recoverRecording])
 
   // ── Script actions ─────────────────────────────────────────────────────────
 
@@ -417,11 +448,21 @@ export default function RecordingEditorPage() {
         </div>
       </div>
 
-      {/* Bug 9: processing notice with auto-refresh hint */}
+      {/* Bug 9: processing notice with auto-refresh hint + manual recover */}
       {isProcessing && (
-        <div className="mb-4 flex items-center gap-2 rounded-md border border-yellow-800/40 bg-yellow-900/20 px-4 py-3 text-sm text-yellow-300">
-          <span className="animate-spin">⏳</span>
-          Recording is being processed… This page updates automatically when it&apos;s ready.
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-yellow-800/40 bg-yellow-900/20 px-4 py-3 text-sm text-yellow-300">
+          <span className="flex items-center gap-2">
+            <span className="animate-spin">⏳</span>
+            Recording is being processed… This page updates automatically when it&apos;s ready.
+          </span>
+          <button
+            onClick={() => void recoverRecording()}
+            disabled={recovering}
+            title="Query LiveKit now and finalize this recording"
+            className="shrink-0 rounded-md border border-yellow-700/60 bg-yellow-900/30 px-3 py-1 text-xs font-semibold text-yellow-200 hover:bg-yellow-900/50 disabled:opacity-50"
+          >
+            {recovering ? 'Refreshing…' : '↻ Refresh status'}
+          </button>
         </div>
       )}
 

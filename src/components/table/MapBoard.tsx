@@ -75,6 +75,10 @@ const MapBoard: React.FC<MapBoardProps> = ({
   const tokenImgCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const [tokenImgVersion, setTokenImgVersion] = useState(0);
   const [activeInitiativeName, setActiveInitiativeName] = useState<string | null>(null);
+  // Identity of the active combatant's token — used to highlight the SPECIFIC
+  // token rather than every token sharing the same name.
+  const [activeTokenId, setActiveTokenId] = useState<string | null>(null);
+  const [activeWallet, setActiveWallet]   = useState<string | null>(null);
   const [tokenConditions, setTokenConditions] = useState<Record<string, string[]>>({});
 
   const [dragTokenId, setDragTokenId] = useState<string | null>(null);
@@ -207,8 +211,12 @@ const MapBoard: React.FC<MapBoardProps> = ({
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const handler = (event: Event) => {
-      const custom = event as CustomEvent<{ name: string | null }>;
+      const custom = event as CustomEvent<{ name: string | null; wallet?: string | null }>;
       setActiveInitiativeName(custom.detail?.name ?? null);
+      // Same-tab fast path can't know the token_id; set wallet for instant PC
+      // highlight and let the realtime applyEntry() fill token_id authoritatively.
+      setActiveWallet(custom.detail?.wallet ?? null);
+      setActiveTokenId(null);
     };
     window.addEventListener('dnd721-active-initiative', handler);
     return () => window.removeEventListener('dnd721-active-initiative', handler);
@@ -283,14 +291,23 @@ const MapBoard: React.FC<MapBoardProps> = ({
     let mounted = true;
 
     async function applyEntry(entryId: string | null) {
-      if (!entryId) { setActiveInitiativeName(null); return; }
+      if (!entryId) {
+        setActiveInitiativeName(null);
+        setActiveTokenId(null);
+        setActiveWallet(null);
+        return;
+      }
       const { data, error } = await supabase
         .from('initiative_entries')
-        .select('name')
+        .select('name, token_id, wallet_address')
         .eq('id', entryId)
         .maybeSingle();
       if (!mounted || error) return;
-      setActiveInitiativeName(data?.name ?? null);
+      // Highlight by identity: token_id for monsters (and linked PCs), and
+      // owner wallet as the PC fallback (PC entries store token_id = null).
+      setActiveInitiativeName((data as any)?.name ?? null);
+      setActiveTokenId((data as any)?.token_id ?? null);
+      setActiveWallet((data as any)?.wallet_address ?? null);
     }
 
     async function load() {
@@ -519,9 +536,14 @@ const MapBoard: React.FC<MapBoardProps> = ({
       ctx.arc(t.x, t.y, r, 0, Math.PI * 2);
       ctx.fill();
 
-      const isHighlighted =
+      // Highlight the SPECIFIC active token by identity, never by name —
+      // matching by name lit up every monster sharing that name.
+      const isHighlighted = Boolean(
         (highlightTokenId && t.id === highlightTokenId) ||
-        (activeInitiativeName && t.label === activeInitiativeName);
+        (activeTokenId && t.id === activeTokenId) ||
+        (activeWallet && (t as any).owner_wallet &&
+          String((t as any).owner_wallet).toLowerCase() === activeWallet.toLowerCase())
+      );
 
       if (isHighlighted) {
         const lw = Math.max(3, gridSize * 0.12);
@@ -615,7 +637,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
       ctx.fillText('!', iconX, iconY);
       ctx.restore();
     });
-  }, [tokens, canvasSize, gridSize, highlightTokenId, activeInitiativeName, tokenConditions, tokenResistances, tokenImmunities, mapTriggers, tokenImgVersion]);
+  }, [tokens, canvasSize, gridSize, highlightTokenId, activeTokenId, activeWallet, tokenConditions, tokenResistances, tokenImmunities, mapTriggers, tokenImgVersion]);
 
   /** Draw fog overlay (GM view: dark = unrevealed, slight green tint = revealed) */
   useEffect(() => {
@@ -1416,6 +1438,10 @@ const MapBoard: React.FC<MapBoardProps> = ({
             setTokens((prev) => prev.map((t: any) => (t.id === activeHudToken.id ? { ...t, label: newName, name: newName } : t)))
             supabase.from('tokens').update({ label: newName, name: newName }).eq('id', activeHudToken.id)
               .then(({ error }) => { if (error) console.error('[tokens] rename error', error) })
+            // Keep the combat tracker in sync — the linked initiative entry
+            // carries its own name column, which the canvas highlight/list use.
+            supabase.from('initiative_entries').update({ name: newName }).eq('token_id', activeHudToken.id)
+              .then(({ error }) => { if (error) console.error('[initiative_entries] rename sync error', error) })
           }}
           onToggleHidden={(next) => {
             setTokens((prev) => prev.map((t: any) => (t.id === activeHudToken.id ? { ...t, hidden: next } : t)))

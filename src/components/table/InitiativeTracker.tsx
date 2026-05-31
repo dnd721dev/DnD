@@ -509,6 +509,17 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
     isPcInput.checked = false;
   }
 
+  // GM manual override: set an entry's initiative directly (no auto-roll).
+  // Used for PCs (e.g. an absent player) and to correct any value.
+  async function updateInit(entryId: string, value: number) {
+    const safe = Number.isFinite(value) ? Math.trunc(value) : 0;
+    const { error } = await supabase
+      .from('initiative_entries')
+      .update({ init: safe })
+      .eq('id', entryId);
+    if (error) console.error('updateInit error:', error);
+  }
+
   // Add any existing monster tokens on the map into initiative (one-click sync)
   async function syncMonsterTokens() {
     if (!encounterId) return;
@@ -850,20 +861,45 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
                     <span className={`truncate text-[11px] font-semibold ${e.is_pc ? 'text-emerald-200' : 'text-slate-100'}`}>
                       {idx + 1}. {e.name}
                     </span>
-                    <span className="text-[10px] text-slate-400">Init {e.init}</span>
+                    {/* Init: inline GM manual override. Unrolled PCs show "waiting". */}
+                    <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                      Init
+                      <input
+                        type="number"
+                        defaultValue={e.init}
+                        key={`init-${e.id}-${e.init}`}
+                        onBlur={(ev) => {
+                          const v = Number(ev.currentTarget.value);
+                          if (v !== e.init) void updateInit(e.id, v);
+                        }}
+                        onKeyDown={(ev) => {
+                          if (ev.key === 'Enter') ev.currentTarget.blur();
+                        }}
+                        title="Set initiative (GM override)"
+                        className="w-9 rounded border border-slate-700 bg-slate-800 px-1 py-0.5 text-[10px] text-slate-200 focus:border-amber-600 focus:outline-none"
+                      />
+                      {e.is_pc && e.init === 0 && (
+                        <span className="italic text-slate-500" title="Player has not rolled initiative yet">
+                          waiting…
+                        </span>
+                      )}
+                    </span>
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  {/* Bug 4: Roll initiative button — rolls 1d20 and sets init */}
-                  <button
-                    type="button"
-                    onClick={() => rollInitiative(e)}
-                    disabled={!sessionId}
-                    className="rounded border border-amber-700/60 bg-amber-950/60 px-1.5 py-0.5 text-[10px] text-amber-300 hover:bg-amber-900/60 disabled:opacity-40"
-                    title={sessionId ? 'Roll 1d20 for initiative' : 'Session ID required to roll'}
-                  >
-                    🎲
-                  </button>
+                  {/* Auto-roll 1d20 — monsters/NPCs only. Players roll from their
+                      own panel; the DM cannot roll initiative for a player. */}
+                  {!e.is_pc && (
+                    <button
+                      type="button"
+                      onClick={() => rollInitiative(e)}
+                      disabled={!sessionId}
+                      className="rounded border border-amber-700/60 bg-amber-950/60 px-1.5 py-0.5 text-[10px] text-amber-300 hover:bg-amber-900/60 disabled:opacity-40"
+                      title={sessionId ? 'Roll 1d20 for initiative' : 'Session ID required to roll'}
+                    >
+                      🎲
+                    </button>
+                  )}
                   {/* Place button for unplaced PCs */}
                   {e.is_pc && !e.token_id && (
                     <button
