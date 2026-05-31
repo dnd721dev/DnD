@@ -528,6 +528,11 @@ export function PlayerSidebar({
   // dnd721-active-initiative window event never reaches them.
   // MED-6: Also detect round_number increments to reset the reaction on all devices.
   const lastSeenRoundRef = useRef<number | null>(null)
+  // Track the last active wallet we observed so we can detect the rising edge
+  // where it becomes THIS player's turn and reset per-turn flags on our own
+  // character row. The GM-side reset (InitiativeTracker) is RLS-blocked from
+  // writing another wallet's character, so the owner must do it here.
+  const lastActiveWalletRef = useRef<string | null | undefined>(undefined)
   useEffect(() => {
     if (!sessionId) return
 
@@ -542,6 +547,26 @@ export function PlayerSidebar({
           const name   = rec?.active_name   ? String(rec.active_name)   : null
           setActiveWalletLower(wallet)
           setActiveName(name)
+
+          // Reset per-turn flags when it becomes THIS player's turn (rising edge).
+          // Skip the first observation so a mid-turn refresh doesn't wipe movement
+          // the player has already used this turn.
+          if (
+            lastActiveWalletRef.current !== undefined &&
+            wallet !== lastActiveWalletRef.current &&
+            wallet !== null &&
+            addressLower !== null &&
+            wallet === addressLower
+          ) {
+            updateActionState({
+              action_used_turn: false,
+              bonus_used_turn:  false,
+              sneak_used_turn:  false,
+              dashing:          false,
+              move_used_ft:     0,
+            })
+          }
+          lastActiveWalletRef.current = wallet
 
           // Reset reaction whenever round_number increments (cross-device)
           const newRound = rec?.round_number != null ? Number(rec.round_number) : null
