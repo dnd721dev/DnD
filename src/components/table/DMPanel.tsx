@@ -50,11 +50,15 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
   // ── Tab state ──────────────────────────────────────────────────────────────
   const [dmTab, setDmTab] = useState<DmTab>('tools')
 
-  // ── Combat tab: selected target token ─────────────────────────────────────
+  // ── Combat tab: selected token (inspection / HP / conditions) ──────────────
   const [selectedToken, setSelectedToken] = useState<any | null>(null)
   const [targetConditions, setTargetConditions] = useState<string[]>([])
   const [hpDeltaInput, setHpDeltaInput] = useState('')
-  const [monsterData, setMonsterData] = useState<any | null>(null)
+
+  // ── Attacker = the active-turn monster (drives the attack panel) ───────────
+  const [attackerToken, setAttackerToken] = useState<any | null>(null)
+  const [attackerMonster, setAttackerMonster] = useState<any | null>(null)
+  const [attackerConditions, setAttackerConditions] = useState<string[]>([])
 
   // Listen for token clicks on the map — auto-switch to Combat tab
   useEffect(() => {
@@ -63,71 +67,122 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
       const tok = (ev as CustomEvent).detail?.token ?? null
       if (!tok) return
       setSelectedToken(tok)
-      setTargetConditions([])    // reset conditions when a new token is targeted
-      setMonsterData(null)       // clear previous monster data until reload
+      setTargetConditions([])    // reset conditions when a new token is selected
       setDmTab('combat')         // jump to Combat tab so GM sees it immediately
     }
     window.addEventListener('dnd721-target-selected', handler)
     return () => window.removeEventListener('dnd721-target-selected', handler)
   }, [])
 
-  // Load monster stat data whenever the selected token changes
+  // Load a monster stat block for a given token (SRD / homebrew / legacy DB).
+  async function loadStatblockForToken(tok: any): Promise<any | null> {
+    if (!tok) return null
+    if (tok.homebrew_monster_id) {
+      const { data, error } = await supabase
+        .from('homebrew_monsters')
+        .select('*')
+        .eq('id', tok.homebrew_monster_id)
+        .limit(1)
+        .maybeSingle()
+      if (error) console.error('[DMPanel] Error loading homebrew monster', error)
+      return data ?? null
+    }
+    if (tok.type !== 'monster' || !tok.monster_id) return null
+
+    const monsterId = String(tok.monster_id)
+    if (monsterId.startsWith('srd:')) {
+      const key = monsterId.replace('srd:', '')
+      return (MONSTERS as any[]).find(
+        (m: any) =>
+          m.id === key ||
+          m.slug === key ||
+          m.name?.toLowerCase() === tok.label?.toLowerCase()
+      ) ?? null
+    }
+    if (monsterId.startsWith('db:')) {
+      const dbId = monsterId.replace('db:', '')
+      const { data, error } = await supabase
+        .from('monsters')
+        .select('*')
+        .eq('id', dbId)
+        .limit(1)
+        .maybeSingle()
+      if (error) console.error('[DMPanel] Error loading monster from DB', error)
+      return data ?? null
+    }
+    return null
+  }
+
+  // Resolve the attacker from the encounter's active turn:
+  //   encounters.active_entry_id → initiative_entries.token_id → token + statblock
   useEffect(() => {
-    async function loadMonster() {
-      // ── Homebrew token: has homebrew_monster_id set ────────────────────────
-      // Check this first — homebrew tokens have monster_id = null so the
-      // monster_id branches below would bail early without this check.
-      if (selectedToken?.homebrew_monster_id) {
-        const { data, error } = await supabase
-          .from('homebrew_monsters')
-          .select('*')
-          .eq('id', selectedToken.homebrew_monster_id)
-          .limit(1)
-          .maybeSingle()
-        if (error) console.error('[DMPanel] Error loading homebrew monster', error)
-        setMonsterData(data ?? null)
-        return
-      }
+    let mounted = true
 
-      if (selectedToken?.type !== 'monster' || !selectedToken?.monster_id) {
-        setMonsterData(null)
-        return
-      }
+    async function resolveAttacker(activeEntryId: string | null) {
+      const clear = () => { if (mounted) { setAttackerToken(null); setAttackerMonster(null); setAttackerConditions([]) } }
+      if (!activeEntryId) { clear(); return }
 
-      const monsterId = String(selectedToken.monster_id)
+      const { data: entry } = await supabase
+        .from('initiative_entries')
+        .select('token_id')
+        .eq('id', activeEntryId)
+        .maybeSingle()
+      const tokenId = (entry as any)?.token_id ?? null
+      if (!tokenId) { clear(); return }
 
-      // SRD monster from bundled MONSTERS list
-      if (monsterId.startsWith('srd:')) {
-        const key = monsterId.replace('srd:', '')
-        const found = (MONSTERS as any[]).find(
-          (m: any) =>
-            m.id === key ||
-            m.slug === key ||
-            m.name?.toLowerCase() === selectedToken.label?.toLowerCase()
-        )
-        setMonsterData(found ?? null)
-        return
-      }
+      const { data: tok } = await supabase
+        .from('tokens')
+        .select('*')
+        .eq('id', tokenId)
+        .maybeSingle()
+      if (!mounted) return
 
-      // Custom monster stored in Supabase monsters table (old community system)
-      if (monsterId.startsWith('db:')) {
-        const dbId = monsterId.replace('db:', '')
-        const { data, error } = await supabase
-          .from('monsters')
-          .select('*')
-          .eq('id', dbId)
-          .limit(1)
-          .maybeSingle()
-        if (error) console.error('[DMPanel] Error loading monster from DB', error)
-        setMonsterData(data ?? null)
-        return
-      }
+      const isMonster = tok && (tok.type === 'monster' || tok.homebrew_monster_id)
+      if (!tok || !isMonster) { clear(); return }
 
-      setMonsterData(null)
+      setAttackerToken(tok)
+      setAttackerConditions(Array.isArray((tok as any).conditions) ? (tok as any).conditions : [])
+      const sb = await loadStatblockForToken(tok)
+      if (mounted) setAttackerMonster(sb)
     }
 
-    void loadMonster()
-  }, [selectedToken])
+    async function seed() {
+      const { data } = await supabase
+        .from('encounters')
+        .select('active_entry_id')
+        .eq('id', encounterId)
+        .maybeSingle()
+      await resolveAttacker((data as any)?.active_entry_id ?? null)
+    }
+    void seed()
+
+    const channel = supabase
+      .channel(`dmpanel-attacker-${encounterId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'encounters', filter: `id=eq.${encounterId}` },
+        (payload) => { void resolveAttacker((payload as any).new?.active_entry_id ?? null) }
+      )
+      .subscribe()
+
+    return () => { mounted = false; supabase.removeChannel(channel) }
+  }, [encounterId])
+
+  // Toggle a condition on the active attacker token (GM-writable; rings sync via event).
+  function toggleAttackerCondition(cond: string) {
+    if (!attackerToken?.id) return
+    setAttackerConditions((prev) => {
+      const next = prev.includes(cond) ? prev.filter((c) => c !== cond) : [...prev, cond]
+      supabase.from('tokens').update({ conditions: next }).eq('id', attackerToken.id)
+        .then(({ error }) => { if (error) console.error('[DMPanel] attacker condition error', error) })
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('dnd721-conditions-toggle', {
+          detail: { tokenId: attackerToken.id, conditions: next },
+        }))
+      }
+      return next
+    })
+  }
 
   async function adjustTargetHp(delta: number) {
     if (!selectedToken?.id) return
@@ -272,6 +327,23 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
       {/* ── COMBAT TAB ─────────────────────────────────────────────────────── */}
       {dmTab === 'combat' && (
         <div className="flex flex-col gap-3 overflow-y-auto">
+          {/* Active-turn monster attack panel — pick a target and attack */}
+          {attackerMonster && attackerToken && (
+            <section>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-amber-400">
+                Active turn — Attacker
+              </p>
+              <MonsterStatPanel
+                token={attackerToken}
+                monster={attackerMonster}
+                conditions={attackerConditions}
+                onToggleCondition={toggleAttackerCondition}
+                onClose={() => { setAttackerToken(null); setAttackerMonster(null) }}
+                onRoll={onRoll}
+              />
+            </section>
+          )}
+
           {!selectedToken ? (
             <p className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-center text-[11px] text-slate-500">
               Click any token on the map to select it as a target.
@@ -287,7 +359,7 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
                   </div>
                   <button
                     type="button"
-                    onClick={() => { setSelectedToken(null); setTargetConditions([]); setMonsterData(null) }}
+                    onClick={() => { setSelectedToken(null); setTargetConditions([]) }}
                     className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400 hover:text-slate-200"
                   >
                     Clear
@@ -389,17 +461,6 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
                   })}
                 </div>
               </section>
-              {/* Monster Stat Block — inline below conditions when token is a monster */}
-              {monsterData && (
-                <MonsterStatPanel
-                  token={selectedToken}
-                  monster={monsterData}
-                  conditions={targetConditions}
-                  onToggleCondition={toggleTargetCondition}
-                  onClose={() => setMonsterData(null)}
-                  onRoll={onRoll}
-                />
-              )}
             </>
           )}
         </div>

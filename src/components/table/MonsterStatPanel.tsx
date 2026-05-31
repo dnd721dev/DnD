@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
 type MonsterStatPanelProps = {
@@ -26,20 +26,45 @@ export function MonsterStatPanel({
   const name = m.name || token.label || 'Unknown Monster'
 
 
-  // 🎯 Target selection (click a token on the map)
-  const [target, setTarget] = useState<any | null>(null)
+  // 🎯 Target selection — pick any other token in this encounter (PC or NPC)
+  const [encounterTokens, setEncounterTokens] = useState<any[]>([])
+  const [targetId, setTargetId] = useState<string | null>(null)
   // Track whether the last attack roll was a hit so damage can be auto-applied
   const lastAttackHitRef = useRef<boolean | null>(null)
 
+  // Load the encounter's tokens (excluding the attacker) for the target picker.
+  const loadEncounterTokens = useCallback(async () => {
+    const encId = token?.encounter_id
+    if (!encId) { setEncounterTokens([]); return }
+    const { data, error } = await supabase
+      .from('tokens')
+      .select('id,label,ac,hp,current_hp,type,character_id')
+      .eq('encounter_id', encId)
+    if (error) { console.error('[MonsterStatPanel] load tokens error', error); return }
+    setEncounterTokens((data ?? []).filter((t: any) => t.id !== token?.id))
+  }, [token?.encounter_id, token?.id])
+
+  useEffect(() => { void loadEncounterTokens() }, [loadEncounterTokens])
+
+  // Keep the picker fresh as HP changes (e.g. after applying damage).
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    const handler = (ev: any) => {
-      const t = (ev?.detail ?? {})?.token ?? null
-      setTarget(t)
-    }
-    window.addEventListener('dnd721-target-selected', handler)
-    return () => window.removeEventListener('dnd721-target-selected', handler)
-  }, [])
+    const encId = token?.encounter_id
+    if (!encId) return
+    const channel = supabase
+      .channel(`monster-panel-tokens-${encId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tokens', filter: `encounter_id=eq.${encId}` },
+        () => { void loadEncounterTokens() }
+      )
+      .subscribe()
+    return () => { void supabase.removeChannel(channel) }
+  }, [token?.encounter_id, loadEncounterTokens])
+
+  const target = useMemo(
+    () => encounterTokens.find((t: any) => t.id === targetId) ?? null,
+    [encounterTokens, targetId]
+  )
 
   const targetAC = useMemo(() => {
     const n = Number((target as any)?.ac)
@@ -230,7 +255,7 @@ export function MonsterStatPanel({
   }
 
   function handleAttackRoll(action: any) {
-    const toHitRaw = action.to_hit ?? action.toHit ?? action.attack_bonus ?? 0
+    const toHitRaw = action.to_hit ?? action.toHit ?? action.attack_bonus ?? action.attackBonus ?? 0
     const toHit = Number(toHitRaw)
     const bonus = Number.isFinite(toHit) ? toHit : 0
 
@@ -279,15 +304,16 @@ export function MonsterStatPanel({
       result,
     })
 
-    // HIGH-3: If the preceding attack roll hit, apply the damage to the target token.
+    // If the preceding attack roll hit, apply the damage to the target.
+    // Uses a GM-authorized RPC so PC targets also have their character sheet
+    // HP synced (tokens.current_hp is GM-writable, but characters HP is owner-only).
     if (lastAttackHitRef.current === true && target?.id) {
-      const currentHp = Number(target.current_hp ?? target.hp ?? 0)
-      const newHp = Math.max(0, currentHp - result)
       supabase
-        .from('tokens')
-        .update({ current_hp: newHp })
-        .eq('id', target.id)
-        .then(({ error }) => { if (error) console.error('[MonsterStatPanel] damage apply error', error) })
+        .rpc('apply_combat_damage', { p_token_id: target.id, p_amount: result })
+        .then(({ error }) => {
+          if (error) console.error('[MonsterStatPanel] damage apply error', error)
+          else void loadEncounterTokens()  // refresh target HP display
+        })
     }
     // Consume the hit result — requires a new attack roll before next damage applies
     lastAttackHitRef.current = null
@@ -524,6 +550,35 @@ export function MonsterStatPanel({
         </div>
       )}
 
+      {/* 🎯 Target picker — any other token in this encounter (PC or NPC) */}
+      <div>
+        <p className="mb-1 text-[11px] font-semibold text-slate-100">Target</p>
+        <select
+          value={targetId ?? ''}
+          onChange={(e) => setTargetId(e.target.value || null)}
+          className="w-full rounded-md border border-slate-700 bg-slate-950/70 px-2 py-1 text-[11px] text-slate-100 focus:border-sky-500 focus:outline-none"
+        >
+          <option value="">— Select a target —</option>
+          {encounterTokens.map((t: any) => {
+            const ac  = Number.isFinite(Number(t.ac)) ? Number(t.ac) : null
+            const cur = Number(t.current_hp ?? t.hp ?? 0)
+            const max = Number(t.hp ?? t.current_hp ?? 0)
+            return (
+              <option key={t.id} value={t.id}>
+                {(t.label || 'Token')}{ac != null ? ` — AC ${ac}` : ''} · HP {cur}/{max}
+              </option>
+            )
+          })}
+        </select>
+        {target && (
+          <p className="mt-1 text-[10px] text-slate-400">
+            Attacking → <span className="text-slate-200">{target.label}</span>
+            {targetAC != null ? ` (AC ${targetAC})` : ' (no AC set)'} · HP{' '}
+            {Number(target.current_hp ?? target.hp ?? 0)}/{Number(target.hp ?? target.current_hp ?? 0)}
+          </p>
+        )}
+      </div>
+
       {/* Actions */}
       {actions.length > 0 && (
         <div className="space-y-1">
@@ -545,7 +600,7 @@ export function MonsterStatPanel({
                   </p>
                 )}
                 <div className="mt-1 flex flex-wrap gap-1.5">
-                  {(a.to_hit ?? a.toHit ?? a.attack_bonus) != null && (
+                  {(a.to_hit ?? a.toHit ?? a.attack_bonus ?? a.attackBonus) != null && (
                     <button
                       type="button"
                       onClick={() => handleAttackRoll(a)}

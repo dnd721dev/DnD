@@ -376,12 +376,11 @@ export function PlayerSidebar({
     const consumedHit = lastAttackHit === true
     setLastAttackHit(null)
     if (consumedHit && (target as any)?.id) {
-      const currentHp = Number((target as any).current_hp ?? (target as any).hp ?? 0)
-      const newHp = Math.max(0, currentHp - finalResult)
+      // Apply via the session-authorized RPC. A direct tokens.update is blocked
+      // by RLS (migration 033: owner-or-GM) when the target is a monster the
+      // player doesn't own. The RPC also syncs PC character-sheet HP.
       supabase
-        .from('tokens')
-        .update({ current_hp: newHp })
-        .eq('id', (target as any).id)
+        .rpc('apply_combat_damage', { p_token_id: (target as any).id, p_amount: finalResult })
         .then(({ error }) => { if (error) console.error('[PlayerSidebar] damage apply error', error) })
     }
   }
@@ -484,16 +483,11 @@ export function PlayerSidebar({
             result: dmgResult.total,
             outcome: `${dmgResult.total} damage (trigger)`,
           })
-          const { data: tokenRow } = await supabase
-            .from('tokens')
-            .select('current_hp, hp')
-            .eq('id', tokenId)
-            .maybeSingle()
-          if (tokenRow) {
-            const currentHp = Number(tokenRow.current_hp ?? tokenRow.hp ?? 0)
-            const newHp = Math.max(0, currentHp - dmgResult.total)
-            await supabase.from('tokens').update({ current_hp: newHp }).eq('id', tokenId)
-          }
+          // Apply via the session-authorized RPC so the token HP AND the
+          // player's character-sheet HP both update (clamped server-side).
+          const { error: dmgErr } = await supabase
+            .rpc('apply_combat_damage', { p_token_id: tokenId, p_amount: dmgResult.total })
+          if (dmgErr) console.error('[rollSave] damage apply error', dmgErr)
         } catch (err) {
           console.error('[rollSave] damage apply error', err)
         }

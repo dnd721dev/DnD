@@ -260,22 +260,24 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
           }
           return next;
         });
-        // Restore death saves from DB (only overwrite if not already set locally)
+        // Sync death saves from DB authoritatively so changes made on another
+        // device (via the initiative_entries realtime subscription → reload)
+        // reflect here without a manual refresh.
         setDeathMap(prev => {
           const next = { ...prev };
           for (const e of entries) {
-            if (e.death_saves && !(e.id in next)) {
+            if (e.death_saves) {
               next[e.id] = { s: e.death_saves.s ?? 0, f: e.death_saves.f ?? 0 };
             }
           }
           return next;
         });
-        // Restore legendary_used from DB
+        // Sync legendary_used from DB authoritatively (cross-device).
         setLegendaryMap(prev => {
           const next = { ...prev };
           for (const e of entries) {
             const lu = (e as any).legendary_used ?? 0;
-            if (lu > 0 && !(e.id in next)) {
+            if (lu > 0) {
               next[e.id] = { type: 'legendary', usesMax: 3, usesLeft: Math.max(0, 3 - lu) };
             }
           }
