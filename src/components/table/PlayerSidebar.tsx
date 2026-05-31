@@ -10,6 +10,7 @@ import TableChat from '@/components/table/TableChat'
 import { computeMainAttack } from '@/components/character-sheet/equipment-calc'
 import type { Abilities } from '../../types/character'
 import { CLASS_ACTIONS, SUBCLASS_ACTIONS, DND721_ACTIONS } from '@/lib/actions/registry'
+import { applyTabPrefs } from '@/components/table/hud/tabPrefs'
 import { canUseAction } from '@/lib/actions/canUseAction'
 import { getClassResources, CLASS_HIT_DIE } from '@/lib/classResources'
 import type { ClassKey } from '@/lib/subclasses'
@@ -50,6 +51,9 @@ type PlayerSidebarProps = {
    *  collapse button, fixed height, rounded wrapper) — the HUD FloatingWindow
    *  supplies those. The body fills its parent. */
   chromeless?: boolean
+  /** HUD tab customization (order + hidden), persisted by useHudLayout. */
+  tabOrder?: string[]
+  hiddenTabs?: string[]
 }
 
 type ActionState = {
@@ -61,6 +65,13 @@ type ActionState = {
 }
 
 type PlayerTabKey = 'character' | 'rolls' | 'session'
+
+/** Static tab metadata — exported so the HUD WidgetPicker can list/reorder. */
+export const PLAYER_TABS_META: { key: PlayerTabKey; label: string }[] = [
+  { key: 'character', label: '🛡 Character' },
+  { key: 'rolls', label: '🎲 Rolls' },
+  { key: 'session', label: '💬 Session' },
+]
 
 function abilityMod(score: number) {
   const s = Number(score)
@@ -145,6 +156,8 @@ export function PlayerSidebar({
   onOpenDiceLog,
   sessionStatus,
   chromeless = false,
+  tabOrder,
+  hiddenTabs,
 }: PlayerSidebarProps) {
   const addressLower = useMemo(() => (address ? address.toLowerCase() : null), [address])
 
@@ -798,11 +811,12 @@ export function PlayerSidebar({
   const bonusUsed = Boolean(actionState.bonus_used_turn)
   const reactionUsed = Boolean(actionState.reaction_used_round)
 
-  const playerTabs: { key: PlayerTabKey; label: string }[] = [
-    { key: 'character', label: '🛡 Character' },
-    { key: 'rolls', label: '🎲 Rolls' },
-    { key: 'session', label: '💬 Session' },
-  ]
+  const playerTabs = useMemo(() => applyTabPrefs(PLAYER_TABS_META, tabOrder, hiddenTabs), [tabOrder, hiddenTabs])
+
+  // If the active tab was hidden/reordered away, fall back to the first visible one.
+  useEffect(() => {
+    if (!playerTabs.some((t) => t.key === activeTab)) setActiveTab(playerTabs[0]!.key)
+  }, [playerTabs, activeTab])
 
   return (
     <>
@@ -939,10 +953,10 @@ export function PlayerSidebar({
                 key={tab.key}
                 type="button"
                 onClick={() => setActiveTab(tab.key)}
-                className={`flex-1 rounded-md px-2 py-1 text-[11px] font-medium transition ${
+                className={`flex min-h-11 flex-1 items-center justify-center rounded-md px-2 py-2 text-xs font-medium transition ${
                   isActive
                     ? 'bg-gradient-to-b from-yellow-500/80 to-amber-600/90 text-slate-950 shadow-[0_0_6px_rgba(250,204,21,0.7)]'
-                    : 'bg-slate-950/40 text-slate-300 hover:bg-slate-800/80 hover:text-yellow-200'
+                    : 'bg-slate-950/40 text-slate-200 hover:bg-slate-800/80 hover:text-yellow-200'
                 }`}
               >
                 {tab.label}

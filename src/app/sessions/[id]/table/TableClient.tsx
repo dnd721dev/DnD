@@ -17,6 +17,9 @@ import { ShopModal } from '@/components/shop/ShopModal'
 import { MapSection } from '@/components/table/tableclient/components/MapSection'
 import { FloatingWindow } from '@/components/table/hud/FloatingWindow'
 import { useHudLayout } from '@/components/table/hud/useHudLayout'
+import { WidgetPicker } from '@/components/table/hud/WidgetPicker'
+import { GM_TABS_META } from '@/components/table/GMSidebar'
+import { PLAYER_TABS_META } from '@/components/table/PlayerSidebar'
 import { useSessionWithCampaign } from '@/components/table/tableclient/hooks/useSessionWithCampaign'
 import { useEncounter } from '@/components/table/tableclient/hooks/useEncounter'
 import { useSessionRolls } from '@/components/table/tableclient/hooks/useSessionRolls'
@@ -1261,8 +1264,19 @@ export default function TableClient({ sessionId }: TableClientProps) {
             onFloatingRect={hud.setFloatingRect}
             onToggleCollapse={() => hud.setCollapsed(!hud.layout.collapsed)}
             onToggleExpand={() => hud.setMapExpanded(!hud.mapExpanded)}
+            onOpacity={hud.setOpacity}
+            onSnapZone={hud.setSnapZone}
+            headerExtras={
+              <WidgetPicker
+                meta={GM_TABS_META}
+                tabOrder={hud.layout.tabOrder}
+                hiddenTabs={hud.layout.hiddenTabs}
+                onTabOrder={hud.setTabOrder}
+                onHiddenTabs={hud.setHiddenTabs}
+              />
+            }
           >
-            <GMSidebar chromeless sessionId={session?.id ?? null} encounterId={encounterId} address={walletLower ?? null} activeMapId={currentMapId} onRoll={handleExternalRoll} spawnMonsterToken={spawnMonsterToken} sessionType={(session as any)?.session_type ?? null} sessionStatus={sessionStatus ?? session?.status ?? null} xpAwardedAlready={(session as any)?.xp_award ?? null} sessionStartedAt={(session as any)?.started_at ?? null} sessionCompletedAt={(session as any)?.completed_at ?? null} onSessionStatusChange={setSessionStatus} />
+            <GMSidebar chromeless tabOrder={hud.layout.tabOrder} hiddenTabs={hud.layout.hiddenTabs} sessionId={session?.id ?? null} encounterId={encounterId} address={walletLower ?? null} activeMapId={currentMapId} onRoll={handleExternalRoll} spawnMonsterToken={spawnMonsterToken} sessionType={(session as any)?.session_type ?? null} sessionStatus={sessionStatus ?? session?.status ?? null} xpAwardedAlready={(session as any)?.xp_award ?? null} sessionStartedAt={(session as any)?.started_at ?? null} sessionCompletedAt={(session as any)?.completed_at ?? null} onSessionStatusChange={setSessionStatus} />
           </FloatingWindow>
         </div>
       </div>
@@ -1324,9 +1338,20 @@ export default function TableClient({ sessionId }: TableClientProps) {
           onFloatingRect={hud.setFloatingRect}
           onToggleCollapse={() => hud.setCollapsed(!hud.layout.collapsed)}
           onToggleExpand={() => hud.setMapExpanded(!hud.mapExpanded)}
+          onOpacity={hud.setOpacity}
+          onSnapZone={hud.setSnapZone}
+          headerExtras={
+            <WidgetPicker
+              meta={PLAYER_TABS_META}
+              tabOrder={hud.layout.tabOrder}
+              hiddenTabs={hud.layout.hiddenTabs}
+              onTabOrder={hud.setTabOrder}
+              onHiddenTabs={hud.setHiddenTabs}
+            />
+          }
         >
           <PlayerSidebar
-            chromeless
+            chromeless tabOrder={hud.layout.tabOrder} hiddenTabs={hud.layout.hiddenTabs}
             sessionId={session?.id ?? null}
             address={walletLower ?? null}
             characters={characters}

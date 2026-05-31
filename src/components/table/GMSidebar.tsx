@@ -11,6 +11,7 @@ import TableChat from '@/components/table/TableChat';
 import SponsorsPanel from '@/components/table/SponsorsPanel'
 import { SessionControlPanel } from '@/components/table/SessionControlPanel';
 import { TriggersPanel } from '@/components/table/TriggersPanel';
+import { applyTabPrefs } from '@/components/table/hud/tabPrefs';
 
 type GMSidebarProps = {
   sessionId?: string | null;
@@ -29,6 +30,9 @@ type GMSidebarProps = {
    *  collapse button, fixed height, rounded wrapper) — the HUD FloatingWindow
    *  supplies those. The body fills its parent. */
   chromeless?: boolean;
+  /** HUD tab customization (order + hidden), persisted by useHudLayout. */
+  tabOrder?: string[];
+  hiddenTabs?: string[];
 };
 
 type InitiativeEntry = {
@@ -44,6 +48,14 @@ type InitiativeEntry = {
 
 type TabKey = 'combat' | 'tools' | 'session' | 'admin';
 
+/** Static tab metadata — exported so the HUD WidgetPicker can list/reorder. */
+export const GM_TABS_META: { key: TabKey; label: string }[] = [
+  { key: 'combat', label: '⚔ Combat' },
+  { key: 'tools', label: '🎲 Tools' },
+  { key: 'session', label: '📜 Session' },
+  { key: 'admin', label: '⭐ Admin' },
+];
+
 export default function GMSidebar({
   sessionId,
   encounterId,
@@ -58,6 +70,8 @@ export default function GMSidebar({
   sessionCompletedAt,
   onSessionStatusChange,
   chromeless = false,
+  tabOrder,
+  hiddenTabs,
 }: GMSidebarProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('combat');
   const [collapsed, setCollapsed] = useState(false);
@@ -187,12 +201,12 @@ export default function GMSidebar({
 
   // GM notes lived here previously; moved to the DM Dashboard.
 
-  const tabs: { key: TabKey; label: string }[] = [
-    { key: 'combat', label: '⚔ Combat' },
-    { key: 'tools', label: '🎲 Tools' },
-    { key: 'session', label: '📜 Session' },
-    { key: 'admin', label: '⭐ Admin' },
-  ];
+  const tabs = useMemo(() => applyTabPrefs(GM_TABS_META, tabOrder, hiddenTabs), [tabOrder, hiddenTabs]);
+
+  // If the active tab was hidden/reordered away, fall back to the first visible one.
+  useEffect(() => {
+    if (!tabs.some((t) => t.key === activeTab)) setActiveTab(tabs[0]!.key);
+  }, [tabs, activeTab]);
 
   return (
     <div className={chromeless
@@ -222,10 +236,10 @@ export default function GMSidebar({
                 key={tab.key}
                 type="button"
                 onClick={() => setActiveTab(tab.key)}
-                className={`flex-1 rounded-md px-2 py-1 text-[11px] font-medium transition ${
+                className={`flex min-h-11 flex-1 items-center justify-center rounded-md px-2 py-2 text-xs font-medium transition ${
                   isActive
                     ? 'bg-gradient-to-b from-yellow-500/80 to-amber-600/90 text-slate-950 shadow-[0_0_6px_rgba(250,204,21,0.7)]'
-                    : 'bg-slate-950/40 text-slate-300 hover:bg-slate-800/80 hover:text-yellow-200'
+                    : 'bg-slate-950/40 text-slate-200 hover:bg-slate-800/80 hover:text-yellow-200'
                 }`}
               >
                 {tab.label}
