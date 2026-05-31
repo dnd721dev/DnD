@@ -12,6 +12,7 @@ const CreateSchema = z.object({
   name:             z.string().min(1).max(80).default('Trap'),
   saveType:         z.enum(['DEX', 'STR', 'CON', 'INT', 'WIS', 'CHA']).default('DEX'),
   dc:               z.number().int().min(1).max(30).default(15),
+  saveDc:           z.number().int().min(1).max(30).default(15),
   description:      z.string().max(500).optional(),
   triggerType:      z.string().max(30).optional(),
   damageDice:       z.string().max(20).optional(),
@@ -87,7 +88,7 @@ export async function POST(req: NextRequest) {
   const parsed = CreateSchema.safeParse(await req.json().catch(() => ({})))
   if (!parsed.success) return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
 
-  const { sessionId, gmWallet, mapId, tileX, tileY, name, saveType, dc, description,
+  const { sessionId, gmWallet, mapId, tileX, tileY, name, saveType, dc, saveDc, description,
           triggerType, damageDice, damageType, conditionApplied } = parsed.data
   const db = supabaseAdmin()
 
@@ -105,6 +106,7 @@ export async function POST(req: NextRequest) {
       name,
       save_type:         saveType,
       dc,
+      save_dc:           saveDc,
       description:       description        ?? null,
       trigger_type:      triggerType        ?? 'custom',
       damage_dice:       damageDice         ?? null,

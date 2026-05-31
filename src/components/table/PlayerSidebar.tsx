@@ -440,6 +440,7 @@ export function PlayerSidebar({
     name: string
     saveType: string
     dc: number
+    saveDc: number
     description: string | null
     damageDice: string | null
     conditionApplied: string | null
@@ -456,6 +457,7 @@ export function PlayerSidebar({
         name:             t.name,
         saveType:         t.save_type,
         dc:               t.dc,
+        saveDc:           t.save_dc ?? t.dc,
         description:      t.description ?? null,
         damageDice:       t.damage_dice ?? null,
         conditionApplied: t.condition_applied ?? null,
@@ -478,13 +480,13 @@ export function PlayerSidebar({
     const pb = proficiencyBonus(sheet.level)
     const d20 = Math.floor(Math.random() * 20) + 1
     const total = d20 + mod + pb
-    const success = total >= triggerPrompt.dc
+    const success = total >= triggerPrompt.saveDc
 
     onRoll?.({
       label: `${triggerPrompt.saveType} Save (${triggerPrompt.name})`,
       formula: `1d20${fmtMod(mod + pb)}`,
       result: total,
-      outcome: success ? `SUCCESS vs DC ${triggerPrompt.dc}` : `FAIL vs DC ${triggerPrompt.dc}`,
+      outcome: success ? `SUCCESS vs DC ${triggerPrompt.saveDc}` : `FAIL vs DC ${triggerPrompt.saveDc}`,
     })
 
     // On a failed save, apply damage and/or condition to the player's token
@@ -834,7 +836,7 @@ export function PlayerSidebar({
           <p className="mb-4 text-sm text-slate-200">
             Make a{' '}
             <span className="font-bold text-orange-200">{triggerPrompt.saveType} saving throw</span>{' '}
-            against DC <span className="font-bold text-orange-200">{triggerPrompt.dc}</span>!
+            against DC <span className="font-bold text-orange-200">{triggerPrompt.saveDc}</span>!
           </p>
           <div className="flex gap-2">
             <button

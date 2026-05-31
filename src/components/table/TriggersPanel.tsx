@@ -9,6 +9,7 @@ type Trigger = {
   name: string
   save_type: string
   dc: number
+  save_dc: number | null
   tile_x: number
   tile_y: number
   map_id: string | null
@@ -27,6 +28,7 @@ type TriggerForm = {
   triggerType: string
   saveType: string
   dc: number
+  saveDc: number
   damageDice: string
   damageType: string
   conditionApplied: string
@@ -55,7 +57,7 @@ const CONDITIONS = [
 ]
 
 const BLANK_FORM: TriggerForm = {
-  name: '', triggerType: 'trap', saveType: 'DEX', dc: 15,
+  name: '', triggerType: 'trap', saveType: 'DEX', dc: 15, saveDc: 15,
   damageDice: '', damageType: 'piercing', conditionApplied: 'None', description: '',
 }
 
@@ -132,6 +134,7 @@ export function TriggersPanel({
         triggerType:      trigger.trigger_type     ?? 'custom',
         saveType:         trigger.save_type,
         dc:               trigger.dc,
+        saveDc:           trigger.save_dc ?? trigger.dc,
         damageDice:       trigger.damage_dice       ?? '',
         damageType:       trigger.damage_type       ?? 'piercing',
         conditionApplied: trigger.condition_applied ?? 'None',
@@ -200,6 +203,7 @@ export function TriggersPanel({
             name:             form.name.trim() || 'Trap',
             saveType:         form.saveType,
             dc:               form.dc,
+            saveDc:           form.saveDc,
             triggerType:      form.triggerType,
             damageDice:       form.damageDice    || undefined,
             damageType:       form.damageType    !== 'None' ? form.damageType    : undefined,
@@ -291,7 +295,7 @@ export function TriggersPanel({
               </div>
 
               {/* Save + DC row */}
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <div>
                   <label className="block text-[10px] text-slate-400 mb-0.5">Perception DC</label>
                   <input
@@ -310,6 +314,15 @@ export function TriggersPanel({
                   >
                     {SAVE_TYPES.map(s => <option key={s}>{s}</option>)}
                   </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-0.5">Save DC</label>
+                  <input
+                    type="number" min={1} max={30}
+                    value={form.saveDc}
+                    onChange={(e) => setForm(f => ({ ...f, saveDc: parseInt(e.target.value) || 15 }))}
+                    className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-100 focus:border-orange-500 focus:outline-none"
+                  />
                 </div>
               </div>
 
@@ -436,7 +449,7 @@ export function TriggersPanel({
                 <div className="min-w-0">
                   <div className="font-semibold text-slate-100 truncate">{t.name}</div>
                   <div className="text-[10px] text-slate-400 mt-0.5">
-                    {t.save_type} DC {t.dc}
+                    Perception DC {t.dc} · {t.save_type} save DC {t.save_dc ?? t.dc}
                     {t.damage_dice && ` · ${t.damage_dice} ${t.damage_type ?? ''}`}
                     {t.condition_applied && t.condition_applied !== 'None' && ` · ${t.condition_applied}`}
                     {' · '}Tile ({t.tile_x}, {t.tile_y})
@@ -470,6 +483,7 @@ export function TriggersPanel({
                         triggerType:      t.trigger_type     ?? 'custom',
                         saveType:         t.save_type,
                         dc:               t.dc,
+                        saveDc:           t.save_dc ?? t.dc,
                         damageDice:       t.damage_dice       ?? '',
                         damageType:       t.damage_type       ?? 'piercing',
                         conditionApplied: t.condition_applied ?? 'None',
