@@ -1,4 +1,3 @@
-// src/app/api/health/supabase/route.ts
 // Pure env-var check — NO async, NO DB calls, always responds instantly.
 import { NextResponse } from 'next/server'
 
