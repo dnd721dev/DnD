@@ -1,4 +1,4 @@
-// POST /api/sessions/[sessionId]/status
+// POST /api/sessions/[id]/status
 // DM-only endpoint for session lifecycle transitions.
 //
 // Body: { action: 'open_lobby' | 'start_session' | 'pause' | 'resume' | 'end_session' }
@@ -40,14 +40,14 @@ const BodySchema = z.object({
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ sessionId: string }> },
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const wallet = req.headers.get('x-wallet-address')?.toLowerCase() ?? null
   if (!wallet || !/^0x[0-9a-f]{40}$/.test(wallet)) {
     return NextResponse.json({ error: 'Wallet not connected' }, { status: 401 })
   }
 
-  const { sessionId } = await params
+  const { id: sessionId } = await params
   if (!sessionId) {
     return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 })
   }

@@ -1,4 +1,4 @@
-// GET /api/sessions/[sessionId]/items
+// GET /api/sessions/[id]/items
 // Returns session_items split into toRemove / toKeep for the DM end-session modal.
 // DM-only.
 
@@ -8,14 +8,14 @@ import { getSessionItemPreview } from '@/lib/sessionItemProcessor'
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ sessionId: string }> },
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const wallet = req.headers.get('x-wallet-address')?.toLowerCase() ?? null
   if (!wallet || !/^0x[0-9a-f]{40}$/.test(wallet)) {
     return NextResponse.json({ error: 'Wallet not connected' }, { status: 401 })
   }
 
-  const { sessionId } = await params
+  const { id: sessionId } = await params
   const db = supabaseAdmin()
 
   // DM guard
