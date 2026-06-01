@@ -81,6 +81,7 @@ export function HandoutsPanel({ sessionId, isGm, gmWallet }: Props) {
   }
 
   async function handleToggleReveal(h: Handout) {
+    if (!gmWallet) return
     const res = await fetch('/api/handouts', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -93,7 +94,8 @@ export function HandoutsPanel({ sessionId, isGm, gmWallet }: Props) {
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this handout?')) return
-    const params = new URLSearchParams({ id, gmWallet: gmWallet ?? '' })
+    if (!gmWallet) return
+    const params = new URLSearchParams({ id, gmWallet })
     const res = await fetch(`/api/handouts?${params}`, { method: 'DELETE' })
     if (res.ok) setHandouts(prev => prev.filter(x => x.id !== id))
   }
@@ -153,7 +155,7 @@ export function HandoutsPanel({ sessionId, isGm, gmWallet }: Props) {
 
           <button
             onClick={handleCreate}
-            disabled={creating || !title.trim() || !content.trim()}
+            disabled={creating || !title.trim() || !content.trim() || !gmWallet}
             className="w-full rounded-md bg-amber-700 py-1.5 text-xs font-semibold text-amber-50 hover:bg-amber-600 disabled:opacity-50"
           >
             {creating ? 'Creating…' : 'Create Handout'}

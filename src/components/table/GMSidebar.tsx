@@ -322,8 +322,8 @@ export default function GMSidebar({
           <div className="grid h-full grid-cols-1 gap-2 sm:grid-cols-2">
             <div className="flex flex-col gap-2 overflow-y-auto">
               <div className="rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
-                {sessionId ? (
-                  <HandoutsPanel sessionId={sessionId} isGm={true} gmWallet={address ?? null} />
+                {sessionId && address ? (
+                  <HandoutsPanel sessionId={sessionId} isGm={true} gmWallet={address} />
                 ) : (
                   <p className="text-[11px] text-slate-400">Session not loaded.</p>
                 )}

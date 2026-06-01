@@ -94,6 +94,7 @@ export function TriggersPanel({
     setLoading(true)
     setErr(null)
     try {
+      if (!gmWallet) { setErr('Wallet not connected'); setLoading(false); return }
       const params = new URLSearchParams({ sessionId, gmWallet })
       if (mapId) params.set('mapId', mapId)
       const res  = await fetch(`/api/triggers?${params}`)
@@ -175,6 +176,7 @@ export function TriggersPanel({
 
   async function handleSave() {
     if (!form.name.trim() || !pendingTile) return
+    if (!gmWallet) { setErr('Wallet not connected'); return }
     setSaving(true)
     setErr(null)
 
