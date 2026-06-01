@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAccount } from 'wagmi'
 import { supabase } from '@/lib/supabase'
@@ -45,6 +45,7 @@ export default function CampaignPage() {
   const params = useParams<{ id: string }>()
   const { address, isConnected } = useAccount()
 
+  const router = useRouter()
   const campaignId = typeof params?.id === 'string' ? params.id : ''
   const myAddress = address?.toLowerCase() ?? null
 
@@ -56,6 +57,8 @@ export default function CampaignPage() {
   const [joinPassword, setJoinPassword] = useState('')
   const [joining, setJoining] = useState(false)
   const [leaving, setLeaving] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   // Campaign character selection flow
   const [characters, setCharacters] = useState<CharacterRow[]>([])
@@ -318,6 +321,32 @@ export default function CampaignPage() {
     setLeaving(false)
   }
 
+  const handleDeleteCampaign = async () => {
+    if (!campaign || !myAddress) return
+    setDeleting(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/campaigns/${campaign.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet: myAddress }),
+      })
+      const body = await res.json()
+      if (!res.ok) {
+        setError(body.error ?? 'Failed to delete campaign')
+        setDeleting(false)
+        setShowDeleteModal(false)
+        return
+      }
+      router.push('/campaigns')
+    } catch (err: any) {
+      console.error(err)
+      setError('Failed to delete campaign')
+      setDeleting(false)
+      setShowDeleteModal(false)
+    }
+  }
+
   return (
     <main className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-8">
       {loading && <p className="text-sm text-slate-300">Loading…</p>}
@@ -403,6 +432,18 @@ export default function CampaignPage() {
 
           {isGm && <InviteManager campaignId={campaign.id} />}
 
+          {isGm && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowDeleteModal(true)}
+                className="rounded border border-red-800 px-3 py-1.5 text-xs font-medium text-red-400 hover:border-red-500 hover:text-red-300"
+              >
+                Delete Campaign
+              </button>
+            </div>
+          )}
+
           <section className="rounded border border-slate-700 bg-slate-900/60 p-4">
             <div className="flex items-center justify-between gap-2">
               <div>
@@ -438,6 +479,24 @@ export default function CampaignPage() {
               ))}
             </div>
           </section>
+
+          {/* Delete campaign modal */}
+          {showDeleteModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+              <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 w-80 text-white space-y-4 shadow-2xl">
+                <h2 className="text-lg font-bold text-red-400">Delete Campaign?</h2>
+                <p className="text-sm text-slate-300">
+                  <span className="font-semibold text-white">{campaign.title}</span> and all its sessions will be permanently deleted and cannot be recovered.
+                </p>
+                <div className="flex gap-3 justify-end">
+                  <button onClick={() => setShowDeleteModal(false)} className="px-4 py-2 text-sm bg-slate-700 hover:bg-slate-600 rounded-lg">Cancel</button>
+                  <button onClick={handleDeleteCampaign} disabled={deleting} className="px-4 py-2 text-sm bg-red-600 hover:bg-red-500 rounded-lg font-semibold disabled:opacity-50">
+                    {deleting ? 'Deleting…' : 'Delete Forever'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Character picker modal */}
           {showCharacterModal && (

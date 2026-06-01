@@ -44,6 +44,8 @@ export default function SessionsClient({ campaignId }: Props) {
   const [sessionType, setSessionType] = useState<'set_level' | 'caya'>('set_level')
   const [requiredLevel, setRequiredLevel] = useState('1')
   const [creating, setCreating] = useState(false)
+  const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null)
+  const [deletingSession, setDeletingSession] = useState(false)
 
   const myAddress = address?.toLowerCase() ?? null
 
@@ -195,6 +197,32 @@ export default function SessionsClient({ campaignId }: Props) {
     setSessionType('set_level')
     setRequiredLevel('1')
     setCreating(false)
+  }
+
+  const handleDeleteSession = async () => {
+    if (!deleteSessionId || !myAddress) return
+    setDeletingSession(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/sessions/${deleteSessionId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet: myAddress }),
+      })
+      const body = await res.json()
+      if (!res.ok) {
+        setError(body.error ?? 'Failed to delete session')
+        setDeletingSession(false)
+        setDeleteSessionId(null)
+        return
+      }
+      setSessions(prev => prev.filter(s => s.id !== deleteSessionId))
+      setDeleteSessionId(null)
+    } catch (err: any) {
+      console.error(err)
+      setError('Failed to delete session')
+    }
+    setDeletingSession(false)
   }
 
   return (
@@ -399,12 +427,40 @@ export default function SessionsClient({ campaignId }: Props) {
                   >
                     Join Table
                   </Link>
+                  {isGm && (
+                    <button
+                      type="button"
+                      onClick={() => setDeleteSessionId(session.id)}
+                      className="rounded border border-red-800 px-3 py-1.5 text-xs font-medium text-red-400 hover:border-red-500 hover:text-red-300"
+                    >
+                      Delete
+                    </button>
+                  )}
                 </div>
               </div>
             )
           })}
         </div>
       </section>
+      {deleteSessionId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 w-80 text-white space-y-4 shadow-2xl">
+            <h2 className="text-lg font-bold text-red-400">Delete Session?</h2>
+            <p className="text-sm text-slate-300">
+              <span className="font-semibold text-white">
+                {sessions.find(s => s.id === deleteSessionId)?.title ?? 'This session'}
+              </span>{' '}
+              will be permanently deleted and cannot be recovered.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setDeleteSessionId(null)} className="px-4 py-2 text-sm bg-slate-700 hover:bg-slate-600 rounded-lg">Cancel</button>
+              <button onClick={handleDeleteSession} disabled={deletingSession} className="px-4 py-2 text-sm bg-red-600 hover:bg-red-500 rounded-lg font-semibold disabled:opacity-50">
+                {deletingSession ? 'Deleting…' : 'Delete Forever'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
