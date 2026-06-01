@@ -44,7 +44,7 @@ const STARTER_MONSTERS: Monster[] = [
         damage: '1d6+2 piercing',
       },
     ],
-    tokenImage: '/tokens/goblin.png',
+    tokenImage: '/tokens/goblin.svg',
     tags: ['low level', 'humanoid', 'sneaky'],
   },
   {
@@ -75,7 +75,7 @@ const STARTER_MONSTERS: Monster[] = [
         damage: '1d8+1 piercing',
       },
     ],
-    tokenImage: '/tokens/bandit.png',
+    tokenImage: '/tokens/bandit.svg',
     tags: ['low level', 'humanoid'],
   },
   {
@@ -116,7 +116,7 @@ const STARTER_MONSTERS: Monster[] = [
         damage: '1d6+3 piercing',
       },
     ],
-    tokenImage: '/tokens/orc.png',
+    tokenImage: '/tokens/orc.svg',
     tags: ['mid level', 'brute'],
   },
 ]
