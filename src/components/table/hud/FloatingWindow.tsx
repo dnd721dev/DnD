@@ -245,10 +245,13 @@ export function FloatingWindow({
 
         {titleBar}
 
-        {/* Body — stable position; {children} persist across docked↔floating */}
+        {/* Body — stable position; {children} persist across docked↔floating.
+            Floating fills the window (flex-1); docked is bounded to dockedHeight
+            (NO flex-1 — the bottom-anchored container would otherwise grow to
+            fill the viewport). */}
         {!collapsed ? (
           <div
-            className="min-h-0 flex-1 overflow-y-auto"
+            className={floating ? 'min-h-0 flex-1 overflow-y-auto' : 'min-h-0 overflow-y-auto'}
             style={floating ? { opacity } : { height: dockedHeight }}
           >
             {children}
