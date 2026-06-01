@@ -23,13 +23,18 @@ export async function GET() {
   const pubLegacy  = Boolean(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY)
   const hasJwt     = Boolean(process.env.SUPABASE_JWT_SECRET)
 
-  // Try the admin client against the DB
+  // Try the admin client against the DB — with a 5s timeout so this never hangs
   let adminOk = false
   let adminError: string | null = null
   try {
     const db = supabaseAdmin()
-    const { error } = await db.from('sessions').select('id').limit(1)
-    if (error) adminError = `${error.code ?? ''}: ${error.message}`.trim()
+    const result = await Promise.race([
+      db.from('sessions').select('id').limit(1),
+      new Promise<{ data: null; error: { message: string; code: string } }>((resolve) =>
+        setTimeout(() => resolve({ data: null, error: { message: 'Timed out after 5s — Supabase URL may be wrong or project paused', code: 'TIMEOUT' } }), 5000)
+      ),
+    ])
+    if (result.error) adminError = `${result.error.code}: ${result.error.message}`
     else adminOk = true
   } catch (e: any) {
     adminError = e?.message ?? String(e)
