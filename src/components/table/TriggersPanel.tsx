@@ -177,15 +177,31 @@ export function TriggersPanel({
     if (!form.name.trim() || !pendingTile) return
     setSaving(true)
     setErr(null)
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 10_000)
+
     try {
       if (editingId) {
-        // PATCH existing trigger
-        const res  = await fetch('/api/triggers', {
+        // PATCH existing trigger — send all form fields so edits persist
+        const res = await fetch('/api/triggers', {
           method:  'PATCH',
           headers: { 'Content-Type': 'application/json' },
+          signal:  controller.signal,
           body: JSON.stringify({
-            id: editingId, sessionId, gmWallet,
-            isActive: triggers.find(t => t.id === editingId)?.is_active ?? true,
+            id:               editingId,
+            sessionId,
+            gmWallet,
+            isActive:         triggers.find(t => t.id === editingId)?.is_active ?? true,
+            name:             form.name.trim(),
+            saveType:         form.saveType,
+            dc:               form.dc,
+            saveDc:           form.saveDc,
+            triggerType:      form.triggerType,
+            damageDice:       form.damageDice       || undefined,
+            damageType:       form.damageType       !== 'None' ? form.damageType       : undefined,
+            conditionApplied: form.conditionApplied !== 'None' ? form.conditionApplied : undefined,
+            description:      form.description      || undefined,
           }),
         })
         if (!res.ok) throw new Error((await res.json()).error ?? 'Failed to update')
@@ -194,6 +210,7 @@ export function TriggersPanel({
         const res = await fetch('/api/triggers', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal:  controller.signal,
           body: JSON.stringify({
             sessionId,
             gmWallet,
@@ -205,10 +222,10 @@ export function TriggersPanel({
             dc:               form.dc,
             saveDc:           form.saveDc,
             triggerType:      form.triggerType,
-            damageDice:       form.damageDice    || undefined,
-            damageType:       form.damageType    !== 'None' ? form.damageType    : undefined,
+            damageDice:       form.damageDice       || undefined,
+            damageType:       form.damageType       !== 'None' ? form.damageType       : undefined,
             conditionApplied: form.conditionApplied !== 'None' ? form.conditionApplied : undefined,
-            description:      form.description   || undefined,
+            description:      form.description      || undefined,
           }),
         })
         if (!res.ok) throw new Error((await res.json()).error ?? 'Failed to create')
@@ -216,8 +233,9 @@ export function TriggersPanel({
       handleModalClose()
       void fetchTriggers()
     } catch (e: any) {
-      setErr(e.message)
+      setErr(e.name === 'AbortError' ? 'Request timed out — please try again.' : e.message)
     } finally {
+      clearTimeout(timer)
       setSaving(false)
     }
   }

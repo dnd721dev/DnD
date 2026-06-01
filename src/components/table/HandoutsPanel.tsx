@@ -62,26 +62,29 @@ export function HandoutsPanel({ sessionId, isGm, gmWallet }: Props) {
   async function handleCreate() {
     if (!title.trim() || !content.trim() || !gmWallet) return
     setCreating(true)
-    const res = await fetch('/api/handouts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, uploaderWallet: gmWallet, title: title.trim(), content: content.trim(), contentType }),
-    })
-    if (res.ok) {
-      const { handout } = await res.json()
-      setHandouts(prev => [...prev, handout])
-      setTitle('')
-      setContent('')
-      setFormOpen(false)
+    try {
+      const res = await fetch('/api/handouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, uploaderWallet: gmWallet, title: title.trim(), content: content.trim(), contentType }),
+      })
+      if (res.ok) {
+        const { handout } = await res.json()
+        setHandouts(prev => [...prev, handout])
+        setTitle('')
+        setContent('')
+        setFormOpen(false)
+      }
+    } finally {
+      setCreating(false)
     }
-    setCreating(false)
   }
 
   async function handleToggleReveal(h: Handout) {
     const res = await fetch('/api/handouts', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: h.id, revealed: !h.revealed }),
+      body: JSON.stringify({ id: h.id, revealed: !h.revealed, gmWallet }),
     })
     if (res.ok) {
       setHandouts(prev => prev.map(x => x.id === h.id ? { ...x, revealed: !x.revealed } : x))
@@ -90,7 +93,8 @@ export function HandoutsPanel({ sessionId, isGm, gmWallet }: Props) {
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this handout?')) return
-    const res = await fetch(`/api/handouts?id=${id}`, { method: 'DELETE' })
+    const params = new URLSearchParams({ id, gmWallet: gmWallet ?? '' })
+    const res = await fetch(`/api/handouts?${params}`, { method: 'DELETE' })
     if (res.ok) setHandouts(prev => prev.filter(x => x.id !== id))
   }
 

@@ -21,11 +21,22 @@ const CreateSchema = z.object({
 })
 
 const PatchSchema = z.object({
-  id: z.string().uuid(),
-  gmWallet: z.string().min(1),
-  sessionId: z.string().uuid(),
-  isActive: z.boolean().optional(),
-  isHidden: z.boolean().optional(),
+  id:               z.string().uuid(),
+  gmWallet:         z.string().min(1),
+  sessionId:        z.string().uuid(),
+  // toggle fields
+  isActive:         z.boolean().optional(),
+  isHidden:         z.boolean().optional(),
+  // full-edit fields
+  name:             z.string().min(1).max(80).optional(),
+  saveType:         z.enum(['DEX', 'STR', 'CON', 'INT', 'WIS', 'CHA']).optional(),
+  dc:               z.number().int().min(1).max(30).optional(),
+  saveDc:           z.number().int().min(1).max(30).optional(),
+  triggerType:      z.string().max(30).optional(),
+  damageDice:       z.string().max(20).optional(),
+  damageType:       z.string().max(30).optional(),
+  conditionApplied: z.string().max(30).optional(),
+  description:      z.string().max(500).optional(),
 })
 
 async function verifyGm(db: ReturnType<typeof supabaseAdmin>, sessionId: string, wallet: string) {
@@ -125,7 +136,10 @@ export async function PATCH(req: NextRequest) {
   const parsed = PatchSchema.safeParse(await req.json().catch(() => ({})))
   if (!parsed.success) return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
 
-  const { id, gmWallet, sessionId, isActive, isHidden } = parsed.data
+  const {
+    id, gmWallet, sessionId, isActive, isHidden,
+    name, saveType, dc, saveDc, triggerType, damageDice, damageType, conditionApplied, description,
+  } = parsed.data
   const db = supabaseAdmin()
 
   if (!(await verifyGm(db, sessionId, gmWallet))) {
@@ -133,8 +147,17 @@ export async function PATCH(req: NextRequest) {
   }
 
   const update: Record<string, any> = {}
-  if (isActive !== undefined) update.is_active = isActive
-  if (isHidden !== undefined) update.is_hidden = isHidden
+  if (isActive         !== undefined) update.is_active         = isActive
+  if (isHidden         !== undefined) update.is_hidden         = isHidden
+  if (name             !== undefined) update.name              = name
+  if (saveType         !== undefined) update.save_type         = saveType
+  if (dc               !== undefined) update.dc               = dc
+  if (saveDc           !== undefined) update.save_dc           = saveDc
+  if (triggerType      !== undefined) update.trigger_type      = triggerType
+  if (damageDice       !== undefined) update.damage_dice       = damageDice
+  if (damageType       !== undefined) update.damage_type       = damageType
+  if (conditionApplied !== undefined) update.condition_applied = conditionApplied
+  if (description      !== undefined) update.description       = description
 
   const { data, error } = await db
     .from('map_triggers')
