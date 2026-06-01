@@ -161,7 +161,17 @@ export function PlayerSidebar({
 }: PlayerSidebarProps) {
   const addressLower = useMemo(() => (address ? address.toLowerCase() : null), [address])
 
-  const [activeTab, setActiveTab] = useState<PlayerTabKey>('character')
+  // Persisted across remounts (panel swapping docked↔floating on map expand).
+  const [activeTab, setActiveTab] = useState<PlayerTabKey>(() => {
+    if (typeof window === 'undefined') return 'character'
+    const saved = window.localStorage.getItem('dnd721:tab:player')
+    return (['character', 'rolls', 'session'] as const).includes(saved as PlayerTabKey)
+      ? (saved as PlayerTabKey)
+      : 'character'
+  })
+  useEffect(() => {
+    try { window.localStorage.setItem('dnd721:tab:player', activeTab) } catch { /* ignore */ }
+  }, [activeTab])
   const [collapsed, setCollapsed] = useState(false)
 
   // Resizable panel

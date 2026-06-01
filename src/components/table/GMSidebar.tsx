@@ -73,7 +73,18 @@ export default function GMSidebar({
   tabOrder,
   hiddenTabs,
 }: GMSidebarProps) {
-  const [activeTab, setActiveTab] = useState<TabKey>('combat');
+  // Persisted across remounts (e.g. the panel swapping docked↔floating when the
+  // map expands/collapses) so the GM doesn't get snapped back to Combat.
+  const [activeTab, setActiveTab] = useState<TabKey>(() => {
+    if (typeof window === 'undefined') return 'combat';
+    const saved = window.localStorage.getItem('dnd721:tab:gm');
+    return (['combat', 'tools', 'session', 'admin'] as const).includes(saved as TabKey)
+      ? (saved as TabKey)
+      : 'combat';
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem('dnd721:tab:gm', activeTab); } catch { /* ignore */ }
+  }, [activeTab]);
   const [collapsed, setCollapsed] = useState(false);
   const [combatRound, setCombatRound] = useState(1);
 

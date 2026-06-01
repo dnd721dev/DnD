@@ -61,6 +61,20 @@ const BLANK_FORM: TriggerForm = {
   damageDice: '', damageType: 'piercing', conditionApplied: 'None', description: '',
 }
 
+/** Extract a useful error message from a non-ok response, tolerating non-JSON
+ *  bodies (e.g. a 500 HTML page) so the real status is always surfaced. */
+async function readError(res: Response, fallback: string): Promise<string> {
+  try {
+    const text = await res.text()
+    try {
+      const json = JSON.parse(text)
+      if (json?.error) return `${json.error} (HTTP ${res.status})`
+    } catch { /* not JSON */ }
+    if (text) return `${fallback} (HTTP ${res.status}): ${text.slice(0, 120)}`
+  } catch { /* body unreadable */ }
+  return `${fallback} (HTTP ${res.status})`
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function TriggersPanel({
@@ -206,7 +220,7 @@ export function TriggersPanel({
             description:      form.description      || undefined,
           }),
         })
-        if (!res.ok) throw new Error((await res.json()).error ?? 'Failed to update')
+        if (!res.ok) throw new Error(await readError(res, 'Failed to update'))
       } else {
         // POST new trigger
         const res = await fetch('/api/triggers', {
@@ -230,12 +244,13 @@ export function TriggersPanel({
             description:      form.description      || undefined,
           }),
         })
-        if (!res.ok) throw new Error((await res.json()).error ?? 'Failed to create')
+        if (!res.ok) throw new Error(await readError(res, 'Failed to create'))
       }
       handleModalClose()
       void fetchTriggers()
     } catch (e: any) {
-      setErr(e.name === 'AbortError' ? 'Request timed out — please try again.' : e.message)
+      console.error('[TriggersPanel] save failed', e)
+      setErr(e.name === 'AbortError' ? 'Request timed out — please try again.' : (e.message || 'Save failed'))
     } finally {
       clearTimeout(timer)
       setSaving(false)

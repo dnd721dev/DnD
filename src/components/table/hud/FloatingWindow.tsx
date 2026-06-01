@@ -203,72 +203,72 @@ export function FloatingWindow({
     </div>
   )
 
-  const body = collapsed ? null : (
-    <div className="min-h-0 flex-1 overflow-y-auto" style={floating ? { opacity } : undefined}>
-      {children}
-    </div>
-  )
+  // ── Single stable render tree ───────────────────────────────────────────────
+  // Both docked and floating modes render the SAME element structure so that
+  // toggling `mode` (when the map expands/collapses) only changes attributes —
+  // it never unmounts/remounts {children}. That preserves the sidebar's active
+  // tab and any open modal across map expand/collapse. Each mode-only chrome bit
+  // renders `null` (rather than being omitted) so sibling positions never shift.
+  const hl = floating && hoverZone ? rectForZone(hoverZone, floatingRect) : null
 
-  if (floating) {
-    const hl = hoverZone ? rectForZone(hoverZone, floatingRect) : null
-    return (
-      <>
-        {/* Snap highlight while dragging near a zone */}
-        {hl && (
-          <div
-            className="pointer-events-none fixed z-[59] rounded-xl border-2 border-yellow-400/70 bg-yellow-400/10"
-            style={{ left: hl.x, top: hl.y, width: hl.w, height: collapsed ? 48 : hl.h }}
-          />
-        )}
-        <div
-          className="pointer-events-auto fixed z-[60] flex flex-col overflow-hidden rounded-xl border border-yellow-700/40 bg-slate-950/95 text-slate-100 shadow-2xl backdrop-blur-md"
-          style={{
-            left: floatingRect.x,
-            top: floatingRect.y,
-            width: floatingRect.w,
-            height: collapsed ? undefined : floatingRect.h,
-          }}
-        >
-          {titleBar}
-          {body}
-          {!collapsed && (
-            <div
-              onPointerDown={onResizeDown}
-              onPointerMove={onResizeMove}
-              onPointerUp={onResizeUp}
-              className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize"
-              title="Resize"
-              style={{ touchAction: 'none' }}
-            >
-              <div className="absolute bottom-0.5 right-0.5 h-2.5 w-2.5 border-b-2 border-r-2 border-slate-500" />
-            </div>
-          )}
-        </div>
-      </>
-    )
-  }
-
-  // Docked (bottom). Parent provides a positioned (relative) ancestor.
   return (
-    <div className="pointer-events-auto absolute inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden rounded-t-xl border border-b-0 border-yellow-700/40 bg-slate-950/95 text-slate-100 shadow-[0_-4px_24px_rgba(0,0,0,0.7)] backdrop-blur-md">
-      {!isMobile && !collapsed && (
+    <>
+      {/* Snap highlight slot — position 0 (null unless floating + dragging near a zone) */}
+      {hl ? (
         <div
-          onPointerDown={onDockHandleDown}
-          onPointerMove={onDockHandleMove}
-          onPointerUp={onDockHandleUp}
-          className="flex h-3 shrink-0 cursor-ns-resize items-center justify-center"
-          style={{ touchAction: 'none' }}
-          title="Drag to resize"
-        >
-          <div className="h-1.5 w-12 rounded-full bg-slate-600 hover:bg-yellow-500/60" />
-        </div>
-      )}
-      {titleBar}
-      {!collapsed && (
-        <div className="min-h-0 overflow-y-auto" style={{ height: dockedHeight }}>
-          {children}
-        </div>
-      )}
-    </div>
+          className="pointer-events-none fixed z-[59] rounded-xl border-2 border-yellow-400/70 bg-yellow-400/10"
+          style={{ left: hl.x, top: hl.y, width: hl.w, height: collapsed ? 48 : hl.h }}
+        />
+      ) : null}
+
+      <div
+        className={floating
+          ? 'pointer-events-auto fixed z-[60] flex flex-col overflow-hidden rounded-xl border border-yellow-700/40 bg-slate-950/95 text-slate-100 shadow-2xl backdrop-blur-md'
+          : 'pointer-events-auto absolute inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden rounded-t-xl border border-b-0 border-yellow-700/40 bg-slate-950/95 text-slate-100 shadow-[0_-4px_24px_rgba(0,0,0,0.7)] backdrop-blur-md'}
+        style={floating
+          ? { left: floatingRect.x, top: floatingRect.y, width: floatingRect.w, height: collapsed ? undefined : floatingRect.h }
+          : undefined}
+      >
+        {/* Dock resize handle slot — null when floating/mobile/collapsed */}
+        {!floating && !isMobile && !collapsed ? (
+          <div
+            onPointerDown={onDockHandleDown}
+            onPointerMove={onDockHandleMove}
+            onPointerUp={onDockHandleUp}
+            className="flex h-3 shrink-0 cursor-ns-resize items-center justify-center"
+            style={{ touchAction: 'none' }}
+            title="Drag to resize"
+          >
+            <div className="h-1.5 w-12 rounded-full bg-slate-600 hover:bg-yellow-500/60" />
+          </div>
+        ) : null}
+
+        {titleBar}
+
+        {/* Body — stable position; {children} persist across docked↔floating */}
+        {!collapsed ? (
+          <div
+            className="min-h-0 flex-1 overflow-y-auto"
+            style={floating ? { opacity } : { height: dockedHeight }}
+          >
+            {children}
+          </div>
+        ) : null}
+
+        {/* Floating resize handle slot — null when docked/collapsed */}
+        {floating && !collapsed ? (
+          <div
+            onPointerDown={onResizeDown}
+            onPointerMove={onResizeMove}
+            onPointerUp={onResizeUp}
+            className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize"
+            title="Resize"
+            style={{ touchAction: 'none' }}
+          >
+            <div className="absolute bottom-0.5 right-0.5 h-2.5 w-2.5 border-b-2 border-r-2 border-slate-500" />
+          </div>
+        ) : null}
+      </div>
+    </>
   )
 }
