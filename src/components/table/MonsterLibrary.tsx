@@ -99,12 +99,23 @@ export type SpawnMonsterParams = {
   homebrewMonsterDbId?: string | null
 }
 
+export type SpawnNpcParams = {
+  name: string
+  color?: string
+  tokenImageUrl?: string | null
+}
+
 type MonsterLibraryProps = {
   onSpawnMonster?: (monster: SpawnMonsterParams) => void | Promise<void>
+  /** Optional — when provided, the "🧙 NPC" tab is enabled so the GM can place
+   *  non-combatant tokens (shopkeepers, quest givers, etc.) that don't roll
+   *  initiative. */
+  onSpawnNpc?: (params: SpawnNpcParams) => void
 }
 
 export default function MonsterLibrary({
   onSpawnMonster,
+  onSpawnNpc,
 }: MonsterLibraryProps) {
   // ── SRD / community tab state ───────────────────────────────────────────────
   const [search, setSearch] = useState('')
@@ -114,7 +125,7 @@ export default function MonsterLibrary({
   const [dbMonsters, setDbMonsters] = useState<DbMonsterRow[]>([])
 
   // ── Homebrew tab state ──────────────────────────────────────────────────────
-  const [activeLibTab, setActiveLibTab] = useState<'srd' | 'homebrew'>('srd')
+  const [activeLibTab, setActiveLibTab] = useState<'srd' | 'homebrew' | 'npc'>('srd')
   const [homebrewMonsters, setHomebrewMonsters] = useState<HomebrewMonsterRow[]>([])
   const [homebrewLoading, setHomebrewLoading] = useState(false)
   const [homebrewError, setHomebrewError] = useState<string | null>(null)
@@ -329,31 +340,46 @@ export default function MonsterLibrary({
           >
             👾 My Homebrew
           </button>
+          {onSpawnNpc && (
+            <button
+              type="button"
+              onClick={() => { setActiveLibTab('npc'); setSelectedMonsterId(null); setSelectedHomebrewId(null) }}
+              className={`flex-1 rounded-md py-1 text-[11px] font-semibold transition ${
+                activeLibTab === 'npc'
+                  ? 'bg-amber-700/60 text-amber-100'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              🧙 NPC
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Search + CR filter — shared across both tabs */}
-      <div className="mb-3 flex gap-2">
-        <input
-          type="text"
-          placeholder={activeLibTab === 'srd' ? 'Search monsters…' : 'Search homebrew…'}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="h-9 flex-1 rounded-lg border border-slate-700 bg-slate-800 px-2 text-sm outline-none focus:border-blue-500"
-        />
-        {activeLibTab === 'srd' && (
-          <select
-            value={crFilter}
-            onChange={(e) => setCrFilter(e.target.value)}
-            className="h-9 rounded-lg border border-slate-700 bg-slate-800 px-2 text-xs uppercase tracking-wide text-slate-200"
-          >
-            <option value="all">CR All</option>
-            <option value="low">CR 0–2</option>
-            <option value="mid">CR 3–8</option>
-            <option value="high">CR 9+</option>
-          </select>
-        )}
-      </div>
+      {/* Search + CR filter — shared by SRD/Homebrew tabs; hidden on NPC tab */}
+      {activeLibTab !== 'npc' && (
+        <div className="mb-3 flex gap-2">
+          <input
+            type="text"
+            placeholder={activeLibTab === 'srd' ? 'Search monsters…' : 'Search homebrew…'}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-9 flex-1 rounded-lg border border-slate-700 bg-slate-800 px-2 text-sm outline-none focus:border-blue-500"
+          />
+          {activeLibTab === 'srd' && (
+            <select
+              value={crFilter}
+              onChange={(e) => setCrFilter(e.target.value)}
+              className="h-9 rounded-lg border border-slate-700 bg-slate-800 px-2 text-xs uppercase tracking-wide text-slate-200"
+            >
+              <option value="all">CR All</option>
+              <option value="low">CR 0–2</option>
+              <option value="mid">CR 3–8</option>
+              <option value="high">CR 9+</option>
+            </select>
+          )}
+        </div>
+      )}
 
       {/* ══════════════════════════════════════════════════════════════════════ */}
       {/* SRD + COMMUNITY TAB                                                   */}
@@ -753,6 +779,194 @@ export default function MonsterLibrary({
           )}
         </div>
       )}
+
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* NPC TAB — non-combatant tokens (shopkeepers, quest givers, etc.)      */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {activeLibTab === 'npc' && onSpawnNpc && (
+        <NpcTab onSpawnNpc={onSpawnNpc} />
+      )}
+    </div>
+  )
+}
+
+// ─── NPC Tab ─────────────────────────────────────────────────────────────────
+// Local subcomponent — kept in this file so it can sit alongside the SRD and
+// homebrew tabs without proliferating files. Persists a "recent NPCs" list in
+// localStorage so the GM can re-place common NPCs (innkeeper, guard captain,
+// etc.) with one click.
+
+type RecentNpc = { name: string; color: string; tokenImageUrl: string | null }
+
+const NPC_RECENT_KEY = 'dnd721:recent_npcs'
+const NPC_RECENT_MAX = 8
+
+const NPC_COLORS = [
+  '#64748b', // slate (default)
+  '#16a34a', // green — friendly
+  '#2563eb', // blue
+  '#a855f7', // purple
+  '#ea580c', // orange
+  '#0891b2', // teal
+  '#d97706', // amber
+  '#e11d48', // rose
+]
+
+function loadRecentNpcs(): RecentNpc[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(NPC_RECENT_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((n): n is RecentNpc => n && typeof n.name === 'string' && typeof n.color === 'string')
+      .slice(0, NPC_RECENT_MAX)
+  } catch {
+    return []
+  }
+}
+
+function saveRecentNpcs(list: RecentNpc[]) {
+  if (typeof window === 'undefined') return
+  try { window.localStorage.setItem(NPC_RECENT_KEY, JSON.stringify(list.slice(0, NPC_RECENT_MAX))) } catch { /* quota */ }
+}
+
+function NpcTab({ onSpawnNpc }: { onSpawnNpc: (params: SpawnNpcParams) => void }) {
+  const [name, setName] = useState('')
+  const [color, setColor] = useState<string>(NPC_COLORS[0])
+  const [portrait, setPortrait] = useState('')
+  const [recent, setRecent] = useState<RecentNpc[]>(() => loadRecentNpcs())
+
+  function placeNpc(npc: { name: string; color: string; tokenImageUrl: string | null }) {
+    const trimmedName = npc.name.trim().slice(0, 40)
+    if (!trimmedName) return
+
+    onSpawnNpc({
+      name: trimmedName,
+      color: npc.color,
+      tokenImageUrl: npc.tokenImageUrl || null,
+    })
+
+    // Update recent: move-to-front, dedupe by lowercased name
+    const next: RecentNpc[] = [
+      { name: trimmedName, color: npc.color, tokenImageUrl: npc.tokenImageUrl || null },
+      ...recent.filter((r) => r.name.toLowerCase() !== trimmedName.toLowerCase()),
+    ].slice(0, NPC_RECENT_MAX)
+    setRecent(next)
+    saveRecentNpcs(next)
+  }
+
+  function handlePlaceForm() {
+    if (!name.trim()) return
+    placeNpc({ name, color, tokenImageUrl: portrait.trim() || null })
+    // Keep color so rapid placement of multiple NPCs is fast; clear name + portrait
+    setName('')
+    setPortrait('')
+  }
+
+  function removeRecent(targetName: string) {
+    const next = recent.filter((r) => r.name.toLowerCase() !== targetName.toLowerCase())
+    setRecent(next)
+    saveRecentNpcs(next)
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="space-y-3">
+        {/* ── New NPC form ───────────────────────────────────────────────── */}
+        <div className="rounded-lg border border-amber-800/40 bg-slate-950/70 p-2.5">
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-amber-200/80">
+            New NPC
+          </div>
+
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Innkeeper, town guard, etc."
+            maxLength={40}
+            className="mb-2 h-8 w-full rounded-md border border-slate-700 bg-slate-900 px-2 text-[12px] text-slate-100 placeholder:text-slate-500 focus:border-amber-600 focus:outline-none"
+            onKeyDown={(e) => { if (e.key === 'Enter') handlePlaceForm() }}
+          />
+
+          <div className="mb-2 flex items-center gap-1.5">
+            <span className="text-[10px] text-slate-400">Color:</span>
+            {NPC_COLORS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setColor(c)}
+                title={c}
+                className={`h-5 w-5 rounded-full border transition ${
+                  color === c ? 'border-amber-300 ring-2 ring-amber-400/60' : 'border-slate-700 hover:border-slate-400'
+                }`}
+                style={{ backgroundColor: c }}
+              />
+            ))}
+          </div>
+
+          <input
+            type="text"
+            value={portrait}
+            onChange={(e) => setPortrait(e.target.value)}
+            placeholder="Portrait URL (optional)"
+            className="mb-2 h-7 w-full rounded-md border border-slate-700 bg-slate-900 px-2 text-[11px] text-slate-100 placeholder:text-slate-500 focus:border-amber-600 focus:outline-none"
+          />
+
+          <button
+            type="button"
+            onClick={handlePlaceForm}
+            disabled={!name.trim()}
+            className="w-full rounded-md bg-amber-700/70 px-2 py-1.5 text-[11px] font-semibold text-amber-50 transition hover:bg-amber-600/80 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            ⊕ Place NPC
+          </button>
+        </div>
+
+        {/* ── Recent NPCs ────────────────────────────────────────────────── */}
+        {recent.length > 0 && (
+          <div>
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              Recent
+            </div>
+            <div className="space-y-1">
+              {recent.map((r) => (
+                <div
+                  key={r.name}
+                  className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-950/60 px-2 py-1.5"
+                >
+                  <span
+                    className="h-3.5 w-3.5 shrink-0 rounded-full border border-slate-700"
+                    style={{ backgroundColor: r.color }}
+                  />
+                  <span className="flex-1 truncate text-[11px] text-slate-200">{r.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => placeNpc(r)}
+                    className="rounded bg-amber-700/50 px-2 py-0.5 text-[10px] font-semibold text-amber-100 hover:bg-amber-600/70"
+                    title="Place this NPC"
+                  >
+                    ⊕ Place
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeRecent(r.name)}
+                    className="text-[12px] text-slate-500 hover:text-rose-400"
+                    title="Remove from recent"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <p className="text-[10px] leading-relaxed text-slate-500">
+          NPCs appear on the map but are <em>not</em> added to initiative. Use TokenHUD to rename, hide, or remove them.
+        </p>
+      </div>
     </div>
   )
 }

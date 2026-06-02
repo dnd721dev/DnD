@@ -923,6 +923,34 @@ export default function TableClient({ sessionId }: TableClientProps) {
     flashRollOverlay({ roller: rollerName, label: 'Initiative', formula, result: initTotal })
   }
 
+  // Place a non-combatant NPC token (shopkeeper, quest giver, set-dressing).
+  // Dispatches the same dnd721-place-token event as a monster, but with
+  // type: 'object' and no initiativeRoll → MapBoard's existing guard
+  // (`if (isMonsterPlacement)`) skips the initiative_entries insert, so the
+  // NPC never appears in the initiative tracker. Rename / hide / delete all
+  // work via the existing TokenHUD (which already treats non-PC tokens as
+  // NPCs).
+  function spawnNpcToken(params: { name: string; color?: string; tokenImageUrl?: string | null }) {
+    const trimmedName = params.name.trim().slice(0, 40)
+    if (!trimmedName) return
+    window.dispatchEvent(new CustomEvent('dnd721-place-token', {
+      detail: {
+        label:               trimmedName,
+        color:               params.color ?? '#64748b', // slate-500 default
+        type:                'object',
+        tokenImageUrl:       params.tokenImageUrl ?? null,
+        hp:                  null,
+        ac:                  null,
+        monster_id:          null,
+        homebrew_monster_id: null,
+        characterId:         null,
+        ownerWallet:         null,
+        initiativeRoll:      null, // ← critical: tells MapBoard to skip initiative
+        initiativeEntryId:   null,
+      },
+    }))
+  }
+
   // HIGH-5: End Session — uses the lifecycle API so all side effects run:
   // processSessionEndItems, stop recordings, end active encounters.
   // Wrapped in useCallback so TableTopBar (React.memo'd) does not re-render
@@ -1276,7 +1304,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
               />
             }
           >
-            <GMSidebar chromeless tabOrder={hud.layout.tabOrder} hiddenTabs={hud.layout.hiddenTabs} sessionId={session?.id ?? null} encounterId={encounterId} address={walletLower ?? null} activeMapId={currentMapId} onRoll={handleExternalRoll} spawnMonsterToken={spawnMonsterToken} sessionType={(session as any)?.session_type ?? null} sessionStatus={sessionStatus ?? session?.status ?? null} xpAwardedAlready={(session as any)?.xp_award ?? null} sessionStartedAt={(session as any)?.started_at ?? null} sessionCompletedAt={(session as any)?.completed_at ?? null} onSessionStatusChange={setSessionStatus} />
+            <GMSidebar chromeless tabOrder={hud.layout.tabOrder} hiddenTabs={hud.layout.hiddenTabs} sessionId={session?.id ?? null} encounterId={encounterId} address={walletLower ?? null} activeMapId={currentMapId} onRoll={handleExternalRoll} spawnMonsterToken={spawnMonsterToken} spawnNpcToken={spawnNpcToken} sessionType={(session as any)?.session_type ?? null} sessionStatus={sessionStatus ?? session?.status ?? null} xpAwardedAlready={(session as any)?.xp_award ?? null} sessionStartedAt={(session as any)?.started_at ?? null} sessionCompletedAt={(session as any)?.completed_at ?? null} onSessionStatusChange={setSessionStatus} />
           </FloatingWindow>
         </div>
       </div>

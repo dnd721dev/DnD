@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionStatus } from '@/lib/sessionGates';
 import { supabase } from '@/lib/supabase';
-import MonsterLibrary, { type SpawnMonsterParams } from '@/components/table/MonsterLibrary';
+import MonsterLibrary, { type SpawnMonsterParams, type SpawnNpcParams } from '@/components/table/MonsterLibrary';
 import InitiativeTracker from '@/components/table/InitiativeTracker';
 import DMPanel from '@/components/table/DMPanel';
 import { HandoutsPanel } from '@/components/table/HandoutsPanel';
@@ -20,6 +20,7 @@ type GMSidebarProps = {
   activeMapId?: string | null;
   onRoll: (entry: any) => void;
   spawnMonsterToken: (monster: SpawnMonsterParams) => void | Promise<void>;
+  spawnNpcToken?: (params: SpawnNpcParams) => void;
   sessionType?: 'set_level' | 'caya' | null;
   sessionStatus?: SessionStatus | string | null;
   xpAwardedAlready?: number | null;
@@ -63,6 +64,7 @@ export default function GMSidebar({
   activeMapId,
   onRoll,
   spawnMonsterToken,
+  spawnNpcToken,
   sessionType,
   sessionStatus,
   xpAwardedAlready,
@@ -290,7 +292,7 @@ export default function GMSidebar({
             </div>
             <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
               {encounterId ? (
-                <MonsterLibrary onSpawnMonster={spawnMonsterToken} />
+                <MonsterLibrary onSpawnMonster={spawnMonsterToken} onSpawnNpc={spawnNpcToken} />
               ) : (
                 <p className="text-[11px] text-slate-400">Start an encounter to spawn monsters from the library.</p>
               )}
