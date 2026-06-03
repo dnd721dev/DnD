@@ -21,6 +21,7 @@ import {
 } from '@/lib/spellcastingProgression'
 import { getEligibleInvocations, getInvocationCount, INVOCATIONS } from '@/lib/invocations'
 import { proficiencyForLevel } from '@/lib/rules'
+import { getPreparedSpellCount } from '@/lib/classes'
 
 type Abilities = {
   str: number
@@ -258,9 +259,13 @@ export default function NewCharacterStep4Page() {
   // For Wizard: spellbook size (leveled spells only)
   const wizardSpellbookSize = isWizard ? getWizardSpellbookSize(level) : null
 
-  // For prepared casters: max prepared = ability mod + level (Paladin uses half level)
+  // For prepared casters: prefer the 2024 PHB fixed prepared-spell table per
+  // class (matches D&D Beyond). Fall back to the 2014 formula (level + mod, or
+  // half-level + mod for Paladin) only when no 2024 table is registered.
   const maxPrepared: number | null = (() => {
     if (!castingAbilityKey || !isPreparedCaster) return null
+    const tableValue = getPreparedSpellCount(classKey, level)
+    if (tableValue != null && tableValue > 0) return tableValue
     const mod = abilityMod(finalAbilities[castingAbilityKey])
     if (classKey === 'paladin') return Math.max(1, Math.floor(level / 2) + mod)
     return Math.max(1, level + mod)

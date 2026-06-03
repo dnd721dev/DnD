@@ -13,6 +13,10 @@ import { getFeat } from '@/lib/feats'
 // ✅ pull subclasses from the real library
 import { CLASS_SUBCLASSES, type ClassKey, type SubclassKey } from '@/lib/subclasses'
 
+// Class proficiency + skill data (Audit Wave 1)
+import { CLASS_DATA, getClassDef, type ClassKey as ClassDataKey } from '@/lib/classes'
+import { SKILLS } from '@/lib/dnd5e'
+
 // 2024 rules: all classes unlock their subclass at level 3
 const SUBCLASS_UNLOCK_LEVEL: Record<string, number> = {
   barbarian: 3,
@@ -136,6 +140,24 @@ export default function NewCharacterStep2Page() {
     const bgData = BACKGROUNDS[backgroundKey as BackgroundKey]
     const originFeat = existing.originFeat ?? bgData?.originFeatKey ?? undefined
 
+    // Audit Wave 2 — backfill saving throws for existing drafts that were
+    // created before this fix. If no saves are recorded, populate them from
+    // the chosen class. (Only fires when missing entirely, so a user who has
+    // intentionally cleared their saves stays cleared.)
+    const classDef = getClassDef(classKey)
+    const savingThrows: CharacterDraft['savingThrows'] = existing.savingThrows ?? (
+      classDef
+        ? {
+            str: classDef.savingThrowProfs.includes('str'),
+            dex: classDef.savingThrowProfs.includes('dex'),
+            con: classDef.savingThrowProfs.includes('con'),
+            int: classDef.savingThrowProfs.includes('int'),
+            wis: classDef.savingThrowProfs.includes('wis'),
+            cha: classDef.savingThrowProfs.includes('cha'),
+          }
+        : undefined
+    )
+
     const merged: CharacterDraft = {
       ...existing,
       level,
@@ -146,6 +168,7 @@ export default function NewCharacterStep2Page() {
       proficiencyBonus,
       subclassKey: safeSubclass,
       originFeat,
+      savingThrows,
     }
 
     setDraft(merged)
@@ -336,9 +359,37 @@ export default function NewCharacterStep2Page() {
               const allowed = new Set(nextSubclassOptions.map((o) => String(o.key)))
               const currentSubclass = String(draft.subclassKey ?? '')
 
+              // ── Audit Wave 2 ───────────────────────────────────────────────
+              // Auto-populate saving throw proficiencies from CLASS_DATA, and
+              // reset previously-picked class-skill proficiencies so the user
+              // re-picks from the new class's list. Background-granted skills
+              // are merged separately in step6 and are untouched here.
+              const classDef = getClassDef(String(nextClass))
+              const nextSavingThrows: CharacterDraft['savingThrows'] = classDef
+                ? {
+                    str: classDef.savingThrowProfs.includes('str'),
+                    dex: classDef.savingThrowProfs.includes('dex'),
+                    con: classDef.savingThrowProfs.includes('con'),
+                    int: classDef.savingThrowProfs.includes('int'),
+                    wis: classDef.savingThrowProfs.includes('wis'),
+                    cha: classDef.savingThrowProfs.includes('cha'),
+                  }
+                : draft.savingThrows
+              // Clear any class-skill picks but keep background-granted profs.
+              // The class skill picker (below) lets the user pick fresh.
+              const prevProfs = draft.skillProficiencies ?? {}
+              const prevClassDef = getClassDef(String(draft.classKey ?? ''))
+              const prevClassSkillSet = new Set(prevClassDef?.skillChoices.options ?? [])
+              const filteredSkillProfs: CharacterDraft['skillProficiencies'] = {}
+              for (const [k, v] of Object.entries(prevProfs)) {
+                if (!prevClassSkillSet.has(k)) filteredSkillProfs[k] = v
+              }
+
               updateDraft({
                 classKey: nextClass,
                 subclassKey: currentSubclass && !allowed.has(currentSubclass) ? null : draft.subclassKey ?? null,
+                savingThrows: nextSavingThrows,
+                skillProficiencies: filteredSkillProfs,
               })
             }}
           >
@@ -401,6 +452,14 @@ export default function NewCharacterStep2Page() {
           </div>
         </div>
       </div>
+
+      {/* ── Audit Wave 2 — Class skill picker + auto-set saves preview ──── */}
+      <ClassProficienciesSection
+        classKey={draft.classKey ?? null}
+        savingThrows={draft.savingThrows}
+        skillProficiencies={draft.skillProficiencies}
+        onChangeSkills={(next) => updateDraft({ skillProficiencies: next })}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-1 text-xs">
@@ -579,6 +638,132 @@ export default function NewCharacterStep2Page() {
         >
           Next: Abilities &amp; Skills <span aria-hidden>→</span>
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Class proficiencies section (Audit Wave 2) ──────────────────────────────
+// Renders:
+//   • Read-only display of the class's saving throw proficiencies (auto-set
+//     when the class is chosen above).
+//   • A checkbox list of the class's skill choices — capped at the class's
+//     `count`. The user's picks merge with background skills in step6's save
+//     handler (already wired).
+function ClassProficienciesSection({
+  classKey,
+  savingThrows,
+  skillProficiencies,
+  onChangeSkills,
+}: {
+  classKey: string | null | undefined
+  savingThrows: CharacterDraft['savingThrows']
+  skillProficiencies: CharacterDraft['skillProficiencies']
+  onChangeSkills: (next: CharacterDraft['skillProficiencies']) => void
+}) {
+  const classDef = getClassDef(classKey ?? null)
+  if (!classDef) return null
+
+  const profs = skillProficiencies ?? {}
+  const optionSet = new Set(classDef.skillChoices.options)
+  const pickedFromClass = Object.entries(profs).filter(
+    ([k, v]) => v === 'proficient' && optionSet.has(k)
+  ).map(([k]) => k)
+
+  const remaining = Math.max(0, classDef.skillChoices.count - pickedFromClass.length)
+
+  function toggleSkill(skillKey: string) {
+    const next = { ...(profs as Record<string, 'none' | 'proficient' | 'expertise'>) }
+    if (next[skillKey] === 'proficient') {
+      // Deselect
+      delete next[skillKey]
+    } else {
+      // Select — only if we haven't exceeded the cap
+      if (pickedFromClass.length >= classDef!.skillChoices.count) return
+      next[skillKey] = 'proficient'
+    }
+    onChangeSkills(next)
+  }
+
+  const skillNameByKey = new Map(SKILLS.map(s => [s.key, s.name]))
+  const skillAbilityByKey = new Map(SKILLS.map(s => [s.key, s.ability]))
+
+  return (
+    <div className="space-y-3 rounded-lg border border-cyan-900/40 bg-slate-950/60 p-3">
+      <div className="text-xs font-semibold uppercase tracking-wide text-cyan-300/80">
+        Class proficiencies
+      </div>
+
+      {/* Saving throws — auto-set, read-only display */}
+      <div>
+        <div className="mb-1 text-[11px] font-semibold text-slate-300">Saving throws</div>
+        <div className="flex flex-wrap gap-1.5">
+          {(['str', 'dex', 'con', 'int', 'wis', 'cha'] as const).map((ab) => {
+            const isProf = !!savingThrows?.[ab]
+            return (
+              <span
+                key={ab}
+                className={`rounded-md px-2 py-0.5 text-[10px] font-mono uppercase ${
+                  isProf
+                    ? 'bg-cyan-900/40 text-cyan-200 ring-1 ring-cyan-700/60'
+                    : 'bg-slate-800/50 text-slate-500'
+                }`}
+              >
+                {ab}
+              </span>
+            )
+          })}
+        </div>
+        <p className="mt-1 text-[10px] text-slate-500">
+          Auto-set from class. {classDef.savingThrowProfs.map(s => s.toUpperCase()).join(' + ')}.
+        </p>
+      </div>
+
+      {/* Class skill picker */}
+      <div>
+        <div className="mb-1 flex items-center justify-between">
+          <div className="text-[11px] font-semibold text-slate-300">
+            Class skills — pick {classDef.skillChoices.count}
+          </div>
+          <span className={`text-[10px] font-semibold ${remaining > 0 ? 'text-amber-300' : 'text-emerald-400'}`}>
+            {remaining > 0 ? `${remaining} remaining` : '✓ done'}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-1 sm:grid-cols-3">
+          {classDef.skillChoices.options.map((skillKey) => {
+            const name = skillNameByKey.get(skillKey) ?? skillKey
+            const ability = skillAbilityByKey.get(skillKey)
+            const isChecked = profs[skillKey] === 'proficient'
+            const disabled = !isChecked && pickedFromClass.length >= classDef.skillChoices.count
+            return (
+              <label
+                key={skillKey}
+                className={`flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] transition ${
+                  isChecked
+                    ? 'border-cyan-700/60 bg-cyan-900/30 text-cyan-100'
+                    : disabled
+                      ? 'border-slate-800 bg-slate-900/30 text-slate-600 cursor-not-allowed'
+                      : 'border-slate-700 bg-slate-900/60 text-slate-300 hover:border-cyan-700/40'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  disabled={disabled}
+                  onChange={() => toggleSkill(skillKey)}
+                  className="accent-cyan-500"
+                />
+                <span className="flex-1">{name}</span>
+                {ability && (
+                  <span className="text-[9px] font-mono uppercase text-slate-500">{ability}</span>
+                )}
+              </label>
+            )
+          })}
+        </div>
+        <p className="mt-1 text-[10px] text-slate-500">
+          Background skills are added automatically and don't count against this pick.
+        </p>
       </div>
     </div>
   )

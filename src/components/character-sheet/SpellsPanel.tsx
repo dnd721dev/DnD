@@ -5,6 +5,7 @@ import type { CharacterSheetData, SpellSlotsSummary } from './types'
 import { SRD_SPELLS, type SrdSpell } from '@/lib/srdspells'
 import { formatMod } from './utils'
 import { supabase } from '@/lib/supabase'
+import { getPreparedSpellCount } from '@/lib/classes'
 import {
   getDomainSpells,
   getMaxLeveledSpellsKnown,
@@ -287,8 +288,13 @@ export function SpellsPanel({
     return job === 'cleric' || job === 'druid' || job === 'wizard' || job === 'paladin'
   }, [c.main_job])
 
-  // Magic audit section C.4: Paladin prepared cap uses HALF level (not full)
-  // per 5e rules. The previous formula gave Paladins level+mod, which was wrong.
+  // Magic audit section C.4 + Audit Wave 3:
+  //   1) D&D 2024 PHB introduced fixed prepared-spell tables per class
+  //      (Cleric/Druid/Paladin/Wizard at L1 = 4, etc.). Use that table when
+  //      available — it's what D&D Beyond shows by default.
+  //   2) Fall back to the legacy 2014 formula (level + casting_mod) only when
+  //      no 2024 table is registered for the class.
+  //   3) Paladin's 2014 formula uses HALF level — preserved as the fallback.
   const maxPrepared = useMemo(() => {
     if (!isPreparedCaster) return null
     const level = Number(c.level ?? 1)
@@ -296,6 +302,12 @@ export function SpellsPanel({
     const score = Number((c.abilities as any)?.[abilityKey] ?? 10)
     const mod = Math.floor((score - 10) / 2)
     const job = String(c.main_job ?? '').toLowerCase().trim()
+
+    // 2024 PHB table when available
+    const tableValue = getPreparedSpellCount(job, level)
+    if (tableValue != null && tableValue > 0) return tableValue
+
+    // 2014 fallback
     if (job === 'paladin') return Math.max(1, Math.floor(level / 2) + mod)
     return Math.max(1, level + mod)
   }, [isPreparedCaster, c.level, c.spellcasting_ability, c.abilities, c.main_job])
