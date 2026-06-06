@@ -23,10 +23,18 @@ declare global {
 
 export function ConnectButton() {
   return (
-    <appkit-button
-      label="Connect Wallet"
-      balance="hide"
-      size="md"
-    />
+    <div className="flex flex-col items-center gap-1.5">
+      <appkit-button
+        label="Connect Wallet"
+        balance="hide"
+        size="md"
+      />
+      <p className="max-w-xs text-center text-[10px] leading-snug text-slate-400">
+        Wallet has no built-in QR scanner (Rabby, Frame, etc.)?{' '}
+        <span className="text-slate-300">Click your wallet's tile</span> in the
+        modal — that shows a wallet-specific QR your phone camera can open
+        directly.
+      </p>
+    </div>
   )
 }
