@@ -54,8 +54,26 @@ export function MonsterStatPanel({
       .channel(`monster-panel-tokens-${encId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'tokens', filter: `encounter_id=eq.${encId}` },
+        { event: 'UPDATE', schema: 'public', table: 'tokens', filter: `encounter_id=eq.${encId}` },
+        (payload) => {
+          const row = (payload as any).new
+          if (!row?.id) return
+          setEncounterTokens((prev) => prev.map((t: any) => t.id === row.id ? { ...t, ...row } : t))
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'tokens', filter: `encounter_id=eq.${encId}` },
         () => { void loadEncounterTokens() }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'tokens', filter: `encounter_id=eq.${encId}` },
+        (payload) => {
+          const row = (payload as any).old
+          if (!row?.id) return
+          setEncounterTokens((prev) => prev.filter((t: any) => t.id !== row.id))
+        }
       )
       .subscribe()
     return () => { void supabase.removeChannel(channel) }
@@ -555,7 +573,19 @@ export function MonsterStatPanel({
         <p className="mb-1 text-[11px] font-semibold text-slate-100">Target</p>
         <select
           value={targetId ?? ''}
-          onChange={(e) => setTargetId(e.target.value || null)}
+          onChange={(e) => {
+            const id = e.target.value || null
+            setTargetId(id)
+            // Sync the map's target highlight (amber ring) with the GM's pick.
+            if (typeof window !== 'undefined') {
+              if (id) {
+                const tok = encounterTokens.find((t: any) => t.id === id) ?? null
+                if (tok) window.dispatchEvent(new CustomEvent('dnd721-target-selected', { detail: { token: tok } }))
+              } else {
+                window.dispatchEvent(new CustomEvent('dnd721-target-cleared'))
+              }
+            }
+          }}
           className="w-full rounded-md border border-slate-700 bg-slate-950/70 px-2 py-1 text-[11px] text-slate-100 focus:border-sky-500 focus:outline-none"
         >
           <option value="">— Select a target —</option>

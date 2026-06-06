@@ -56,8 +56,21 @@ export type Background = {
   /**
    * Ability score bonuses granted by this background (2024 rules).
    * Typically +2 to one ability and +1 to another.
+   *
+   * DEPRECATED for player-facing distribution — kept as the DEFAULT preset
+   * shown in the step-3 background-ASI picker so existing flows still work.
+   * The actual stored distribution lives in `CharacterDraft.backgroundAsi`,
+   * which the player picks freely from `abilityScoreOptions` below.
    */
   abilityScoreModifiers: Partial<Record<AbilityModKey, number>>
+  /**
+   * 2024 PHB rules: each background offers THREE ability scores. The player
+   * picks how to distribute a fixed +3 total — either +2/+1 (one stat gets
+   * +2, another +1) or +1/+1/+1 (all three get +1). This list defines which
+   * three stats are legal for THIS background; the player's choice is saved
+   * to `CharacterDraft.backgroundAsi`.
+   */
+  abilityScoreOptions: AbilityModKey[]
   /**
    * Origin Feat automatically granted by this background (2024 rules).
    * Each background prescribes exactly one Origin Feat — not player-chosen.
@@ -102,6 +115,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
         'You belong to a religious community that offers you modest shelter, support, and guidance at temples of your faith.',
     },
     abilityScoreModifiers: { wis: 2, int: 1 },
+    abilityScoreOptions: ['int', 'wis', 'cha'],
     originFeatKey: 'magicInitiateCleric',
     personalityTraits: [
       'I see omens in every event — the gods are always trying to speak to those who listen.',
@@ -145,6 +159,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
         'You maintain a well-developed second persona, complete with forged papers and disguises, that can pass casual scrutiny.',
     },
     abilityScoreModifiers: { cha: 2, dex: 1 },
+    abilityScoreOptions: ['dex', 'con', 'cha'],
     originFeatKey: 'skilled',
     personalityTraits: [
       'I fall in and out of love easily and am always pursuing someone.',
@@ -188,6 +203,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
         'You have a reliable underworld contact who can pass messages and help you find illicit information or goods.',
     },
     abilityScoreModifiers: { dex: 2, int: 1 },
+    abilityScoreOptions: ['dex', 'con', 'int'],
     originFeatKey: 'alert',
     personalityTraits: [
       'I always have an eye on the exits.',
@@ -231,6 +247,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
         'You can usually find a place to perform, earning food and lodging in exchange for your talents.',
     },
     abilityScoreModifiers: { cha: 2, dex: 1 },
+    abilityScoreOptions: ['str', 'dex', 'cha'],
     originFeatKey: 'musician',
     personalityTraits: [
       'I know a story relevant to almost every situation.',
@@ -275,6 +292,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
         "Common folk recognize you as one of their own and are inclined to shelter you and your companions, as long as you don't abuse their trust.",
     },
     abilityScoreModifiers: { wis: 2, con: 1 },
+    abilityScoreOptions: ['str', 'con', 'wis'],
     originFeatKey: 'tough',
     personalityTraits: [
       'I judge people by their actions, not their words.',
@@ -318,6 +336,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
         'You belong to a trade guild that offers support, legal help, and contacts in exchange for dues and obligations.',
     },
     abilityScoreModifiers: { cha: 2, int: 1 },
+    abilityScoreOptions: ['str', 'int', 'cha'],
     originFeatKey: 'skilled',
     personalityTraits: [
       'I believe that anything worth doing is worth doing right.',
@@ -362,6 +381,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
         'During your isolation, you uncovered a significant insight or secret that shapes your path in the world.',
     },
     abilityScoreModifiers: { wis: 2, con: 1 },
+    abilityScoreOptions: ['con', 'wis', 'cha'],
     originFeatKey: 'magicInitiateDruid',
     personalityTraits: [
       'I\'ve been in the wilderness so long that I find crowds and noise deeply unsettling.',
@@ -405,6 +425,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
         'Your noble birth opens doors: many commoners defer to you, and you can often secure audiences with local leaders.',
     },
     abilityScoreModifiers: { cha: 2, int: 1 },
+    abilityScoreOptions: ['str', 'int', 'cha'],
     originFeatKey: 'skilled',
     personalityTraits: [
       'I don\'t like to get my hands dirty, and I won\'t start now.',
@@ -449,6 +470,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
         'You have a strong memory for maps and terrain and can usually find food and fresh water for yourself and companions in the wild.',
     },
     abilityScoreModifiers: { str: 2, wis: 1 },
+    abilityScoreOptions: ['str', 'con', 'wis'],
     originFeatKey: 'tough',
     personalityTraits: [
       'I watch over my companions as if they were part of my family.',
@@ -493,6 +515,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
         "You know how to track down lore: if you don't know an answer, you often know where or whom to ask.",
     },
     abilityScoreModifiers: { int: 2, wis: 1 },
+    abilityScoreOptions: ['con', 'int', 'wis'],
     originFeatKey: 'magicInitiateWizard',
     personalityTraits: [
       'I use polite euphemisms when I truly mean something harsh.',
@@ -537,6 +560,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
         "You can secure free passage on sailing vessels for yourself and companions in exchange for labor. You know how to read weather, navigate by stars, and find safe harbor.",
     },
     abilityScoreModifiers: { str: 2, dex: 1 },
+    abilityScoreOptions: ['str', 'dex', 'wis'],
     originFeatKey: 'tavernBrawler',
     personalityTraits: [
       'My friends know they can rely on me, no matter what.',
@@ -581,6 +605,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
         'You carry a rank from your service; soldiers of lower rank, and sometimes civilians, recognize your authority in military matters.',
     },
     abilityScoreModifiers: { str: 2, con: 1 },
+    abilityScoreOptions: ['str', 'dex', 'con'],
     originFeatKey: 'savageAttacker',
     personalityTraits: [
       'I\'m always polite and respectful to those in authority.',
@@ -625,6 +650,7 @@ export const BACKGROUNDS: Record<BackgroundKey, Background> = {
         'You know hidden paths and shortcuts through urban environments, letting you travel quickly through back streets and alleys.',
     },
     abilityScoreModifiers: { dex: 2, int: 1 },
+    abilityScoreOptions: ['dex', 'con', 'int'],
     originFeatKey: 'lucky',
     personalityTraits: [
       'I hide scraps of food and trinkets in my pockets, out of old habit.',

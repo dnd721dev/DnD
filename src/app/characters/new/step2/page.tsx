@@ -501,9 +501,13 @@ export default function NewCharacterStep2Page() {
             onChange={(e) => {
               const bgKey = e.target.value as BackgroundKey
               const bgEntry = BACKGROUNDS[bgKey]
+              // Audit Wave 4 — when the player switches background, clear any
+              // prior background ASI so step 3 re-initializes the picker with
+              // the new background's defaults / allowed stats.
               updateDraft({
                 backgroundKey: bgKey,
                 originFeat: bgEntry?.originFeatKey ?? undefined,
+                backgroundAsi: undefined,
               })
             }}
           >

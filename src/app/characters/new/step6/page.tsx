@@ -288,14 +288,23 @@ export default function NewCharacterStep6Page() {
         ...(finalAbilities ?? (draft.baseAbilities as Abilities | null) ?? DEFAULT_ABILITIES),
       }
 
-      // Apply 2024-style ability score modifiers from selected background
+      // Apply 2024-style ability score modifiers from selected background.
+      // Audit Wave 4 (Bug B): prefer the PLAYER-CHOSEN distribution from
+      // draft.backgroundAsi (set by the step-3 background-ASI picker). Fall
+      // back to the background's legacy hardcoded `abilityScoreModifiers`
+      // only when the draft doesn't have one (older drafts / drafts that
+      // bypassed step 3).
       const bgKey = draft.backgroundKey as BackgroundKey | undefined
       const bg = bgKey ? BACKGROUNDS[bgKey] : undefined
-      if (bg?.abilityScoreModifiers) {
-        for (const [stat, bonus] of Object.entries(bg.abilityScoreModifiers)) {
-          const k = stat as keyof Abilities
-          abilitiesPayload[k] = ((abilitiesPayload[k] as number) ?? 10) + (bonus ?? 0)
-        }
+      const bgAsiSource: Record<string, number | undefined> = (
+        (draft.backgroundAsi && Object.keys(draft.backgroundAsi).length > 0)
+          ? (draft.backgroundAsi as Record<string, number | undefined>)
+          : ((bg?.abilityScoreModifiers ?? {}) as Record<string, number | undefined>)
+      )
+      for (const [stat, bonus] of Object.entries(bgAsiSource)) {
+        if (typeof bonus !== 'number' || bonus <= 0) continue
+        const k = stat as keyof Abilities
+        abilitiesPayload[k] = ((abilitiesPayload[k] as number) ?? 10) + bonus
       }
 
       // Apply ASI numeric bumps from step3 choices

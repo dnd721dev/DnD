@@ -438,8 +438,33 @@ export function PlayerSidebar({
       setTarget(t)
     }
     window.addEventListener('dnd721-target-selected', handler)
-    return () => window.removeEventListener('dnd721-target-selected', handler)
+    const clear = () => setTarget(null)
+    window.addEventListener('dnd721-target-cleared', clear)
+    return () => {
+      window.removeEventListener('dnd721-target-selected', handler)
+      window.removeEventListener('dnd721-target-cleared', clear)
+    }
   }, [])
+
+  // Keep the target's HP/AC/conditions live so damage applied by anyone shows
+  // up in the Target panel without re-selecting.
+  useEffect(() => {
+    const id = (target as any)?.id
+    if (!id) return
+    const ch = supabase
+      .channel(`player-target-${id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'tokens', filter: `id=eq.${id}` },
+        (payload) => {
+          const row = (payload as any).new
+          if (!row) return
+          setTarget((prev: any) => (prev && prev.id === row.id ? { ...prev, ...row } : prev))
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [(target as any)?.id])
 
   const targetAC = useMemo(() => {
     const n = Number((target as any)?.ac)
@@ -1771,7 +1796,7 @@ export function PlayerSidebar({
                       <span className="text-[10px] font-semibold uppercase tracking-wide text-yellow-300/60">Target</span>
                     </div>
                     {target && (
-                      <button type="button" onClick={() => { setTarget(null); setLastAttackHit(null) }} className="text-[10px] text-slate-500 hover:text-slate-300">
+                      <button type="button" onClick={() => { setTarget(null); setLastAttackHit(null); if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('dnd721-target-cleared')) }} className="text-[10px] text-slate-500 hover:text-slate-300">
                         ✕ Clear
                       </button>
                     )}

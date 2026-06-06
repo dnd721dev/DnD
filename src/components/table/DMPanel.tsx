@@ -74,6 +74,26 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
     return () => window.removeEventListener('dnd721-target-selected', handler)
   }, [])
 
+  // Keep the selected target's HP/conditions in sync with realtime updates so
+  // damage applied elsewhere shows up here without re-selecting the token.
+  useEffect(() => {
+    const id = selectedToken?.id
+    if (!id) return
+    const ch = supabase
+      .channel(`dmpanel-target-${id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'tokens', filter: `id=eq.${id}` },
+        (payload) => {
+          const row = (payload as any).new
+          if (!row) return
+          setSelectedToken((prev: any) => (prev && prev.id === row.id ? { ...prev, ...row } : prev))
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [selectedToken?.id])
+
   // Load a monster stat block for a given token (SRD / homebrew / legacy DB).
   async function loadStatblockForToken(tok: any): Promise<any | null> {
     if (!tok) return null

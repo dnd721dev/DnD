@@ -44,6 +44,15 @@ export interface CharacterDraft {
 
   proficiencyBonus?: number
 
+  /**
+   * 2024 PHB rules: the player picks how to distribute a +3 ability-score
+   * bonus from their background's `abilityScoreOptions` list. Either +2/+1
+   * across two stats, or +1/+1/+1 across three. This object stores the
+   * resulting per-ability bonus (0–2). When unset, step 6 falls back to the
+   * background's legacy `abilityScoreModifiers` for backwards compat.
+   */
+  backgroundAsi?: Partial<Record<'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha', number>>
+
   savingThrows?: Record<'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha', boolean>
 
   skillProficiencies?: Record<string, 'none' | 'proficient' | 'expertise'>

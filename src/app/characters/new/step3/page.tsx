@@ -244,6 +244,12 @@ export default function NewCharacterStep3Page() {
         })}
       </div>
 
+      {/* Background ASI picker (Audit Wave 4 — Bug B fix) */}
+      <BackgroundAsiSection
+        draft={currentDraft}
+        onChange={(next) => { setDraft(next); saveDraft(next) }}
+      />
+
       {/* ASI / Feat section */}
       {(() => {
         const asiCount = asiSlotsForClassLevel(currentDraft.classKey ?? 'fighter', currentDraft.level ?? 1)
@@ -397,6 +403,165 @@ export default function NewCharacterStep3Page() {
           Next: Spellcasting / Equipment
           <span aria-hidden>→</span>
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Background ASI picker (Audit Wave 4 — Bug B) ────────────────────────────
+// 2024 PHB: each background offers 3 ability scores. Player picks distribution:
+//   • +2 to one + +1 to a different one   (pattern '2-1'), OR
+//   • +1 to each of all three             (pattern '1-1-1')
+// Total = +3. Stored on the draft as `backgroundAsi` (per-ability bonus map).
+// If draft.backgroundAsi is unset, we initialize from the background's legacy
+// `abilityScoreModifiers` so the existing default carries forward.
+function BackgroundAsiSection({
+  draft,
+  onChange,
+}: {
+  draft: CharacterDraft
+  onChange: (next: CharacterDraft) => void
+}) {
+  const bg = draft.backgroundKey ? BACKGROUNDS[draft.backgroundKey as BackgroundKey] : null
+
+  // Initialize backgroundAsi from legacy modifiers if unset, ONCE per background.
+  // This runs in a useEffect-safe way via render-time check + onChange callback.
+  useEffect(() => {
+    if (!bg) return
+    if (draft.backgroundAsi && Object.keys(draft.backgroundAsi).length > 0) return
+    const init: NonNullable<CharacterDraft['backgroundAsi']> = {}
+    for (const [k, v] of Object.entries(bg.abilityScoreModifiers ?? {})) {
+      if (typeof v === 'number' && v > 0) init[k as AbilityKey] = v
+    }
+    if (Object.keys(init).length > 0) {
+      onChange({ ...draft, backgroundAsi: init })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.backgroundKey])
+
+  if (!bg) return null
+  const opts = (bg.abilityScoreOptions ?? []) as AbilityKey[]
+  if (opts.length === 0) return null
+
+  const asi = (draft.backgroundAsi ?? {}) as Record<AbilityKey, number | undefined>
+  // Detect current pattern from the asi map
+  const filledStats = opts.filter((k) => (asi[k] ?? 0) > 0)
+  const allOnes = filledStats.length === 3 && filledStats.every((k) => asi[k] === 1)
+  const isPattern111 = allOnes
+  // +2/+1 pattern: one stat has 2, another has 1
+  const plus2Stat = (opts.find((k) => asi[k] === 2) ?? null) as AbilityKey | null
+  const plus1Stat = (opts.find((k) => asi[k] === 1 && k !== plus2Stat) ?? null) as AbilityKey | null
+
+  function setPattern111() {
+    const next: NonNullable<CharacterDraft['backgroundAsi']> = {}
+    for (const k of opts) next[k] = 1
+    onChange({ ...draft, backgroundAsi: next })
+  }
+
+  function set21(stat2: AbilityKey | null, stat1: AbilityKey | null) {
+    const next: NonNullable<CharacterDraft['backgroundAsi']> = {}
+    if (stat2) next[stat2] = 2
+    if (stat1 && stat1 !== stat2) next[stat1] = 1
+    onChange({ ...draft, backgroundAsi: next })
+  }
+
+  const total = opts.reduce((sum, k) => sum + (asi[k] ?? 0), 0)
+  const valid = total === 3 && (
+    isPattern111 ||
+    (plus2Stat && plus1Stat && plus2Stat !== plus1Stat)
+  )
+
+  return (
+    <div className="space-y-3 rounded-lg border border-violet-900/50 bg-slate-950/60 p-3 text-xs">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-violet-300/80">
+            Background ability scores
+          </div>
+          <div className="text-[10px] text-slate-400">
+            {bg.name}: choose <em>where</em> to apply your +3 bonus
+          </div>
+        </div>
+        <span className={`text-[10px] font-semibold ${valid ? 'text-emerald-400' : 'text-amber-300'}`}>
+          {valid ? '✓ valid' : `Total ${total}/3`}
+        </span>
+      </div>
+
+      {/* Pattern picker */}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => set21(plus2Stat ?? opts[0], plus1Stat ?? opts[1])}
+          className={`flex-1 rounded-md border px-2 py-1.5 text-[11px] font-semibold transition ${
+            !isPattern111
+              ? 'border-violet-700/60 bg-violet-900/40 text-violet-100'
+              : 'border-slate-700 bg-slate-900/60 text-slate-400 hover:border-violet-700/40'
+          }`}
+        >
+          +2 / +1
+        </button>
+        <button
+          type="button"
+          onClick={setPattern111}
+          className={`flex-1 rounded-md border px-2 py-1.5 text-[11px] font-semibold transition ${
+            isPattern111
+              ? 'border-violet-700/60 bg-violet-900/40 text-violet-100'
+              : 'border-slate-700 bg-slate-900/60 text-slate-400 hover:border-violet-700/40'
+          }`}
+        >
+          +1 / +1 / +1
+        </button>
+      </div>
+
+      {/* Per-pattern controls */}
+      {!isPattern111 && (
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-[10px] font-semibold text-slate-400 mb-1">+2 to</label>
+            <select
+              value={plus2Stat ?? ''}
+              onChange={(e) => set21(e.target.value ? (e.target.value as AbilityKey) : null, plus1Stat)}
+              className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 focus:border-violet-500 focus:outline-none"
+            >
+              <option value="">— pick —</option>
+              {opts.map((k) => (
+                <option key={k} value={k}>{ABILITY_LABELS[k]}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-semibold text-slate-400 mb-1">+1 to</label>
+            <select
+              value={plus1Stat ?? ''}
+              onChange={(e) => set21(plus2Stat, e.target.value ? (e.target.value as AbilityKey) : null)}
+              className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 focus:border-violet-500 focus:outline-none"
+            >
+              <option value="">— pick —</option>
+              {opts.filter((k) => k !== plus2Stat).map((k) => (
+                <option key={k} value={k}>{ABILITY_LABELS[k]}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+
+      {/* Summary */}
+      <div className="flex flex-wrap gap-1.5">
+        {opts.map((k) => {
+          const v = asi[k] ?? 0
+          return (
+            <span
+              key={k}
+              className={`rounded-md px-2 py-0.5 text-[10px] font-mono uppercase ${
+                v > 0
+                  ? 'bg-violet-900/40 text-violet-100 ring-1 ring-violet-700/60'
+                  : 'bg-slate-800/50 text-slate-500'
+              }`}
+            >
+              {ABILITY_LABELS[k]} {v > 0 ? `+${v}` : ''}
+            </span>
+          )
+        })}
       </div>
     </div>
   )

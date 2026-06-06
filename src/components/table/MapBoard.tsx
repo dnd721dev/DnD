@@ -79,6 +79,25 @@ const MapBoard: React.FC<MapBoardProps> = ({
   // token rather than every token sharing the same name.
   const [activeTokenId, setActiveTokenId] = useState<string | null>(null);
   const [activeWallet, setActiveWallet]   = useState<string | null>(null);
+
+  // Target highlight — listens to the same `dnd721-target-selected` event that
+  // MonsterStatPanel already consumes. `dnd721-target-cleared` is dispatched by
+  // the sidebar / stat-panel close button to drop the ring.
+  const [targetTokenId, setTargetTokenId] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onSelect = (e: Event) => {
+      const tok = (e as CustomEvent).detail?.token ?? null;
+      setTargetTokenId(tok?.id ?? null);
+    };
+    const onClear = () => setTargetTokenId(null);
+    window.addEventListener('dnd721-target-selected', onSelect);
+    window.addEventListener('dnd721-target-cleared',  onClear);
+    return () => {
+      window.removeEventListener('dnd721-target-selected', onSelect);
+      window.removeEventListener('dnd721-target-cleared',  onClear);
+    };
+  }, []);
   const [tokenConditions, setTokenConditions] = useState<Record<string, string[]>>({});
 
   const [dragTokenId, setDragTokenId] = useState<string | null>(null);
@@ -558,6 +577,21 @@ const MapBoard: React.FC<MapBoardProps> = ({
         ctx.restore();
       }
 
+      // Target highlight — amber ring, drawn outside the active green ring so
+      // both can coexist when the active turn-taker IS the target.
+      if (targetTokenId && t.id === targetTokenId) {
+        const lw = Math.max(3, gridSize * 0.12);
+        ctx.save();
+        ctx.beginPath();
+        ctx.lineWidth = lw;
+        ctx.strokeStyle = 'rgba(245,158,11,0.95)'; // amber-500
+        ctx.shadowColor = 'rgba(245,158,11,0.65)';
+        ctx.shadowBlur = Math.max(10, gridSize * 0.35);
+        ctx.arc(t.x, t.y, r + lw * 1.4, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       // Portrait image if available, otherwise text label
       const tokenImg = t.token_image_url ? tokenImgCacheRef.current.get(t.token_image_url) : undefined;
       if (tokenImg && tokenImg.complete && tokenImg.naturalWidth > 0) {
@@ -637,7 +671,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
       ctx.fillText('!', iconX, iconY);
       ctx.restore();
     });
-  }, [tokens, canvasSize, gridSize, highlightTokenId, activeTokenId, activeWallet, tokenConditions, tokenResistances, tokenImmunities, mapTriggers, tokenImgVersion]);
+  }, [tokens, canvasSize, gridSize, highlightTokenId, activeTokenId, activeWallet, tokenConditions, tokenResistances, tokenImmunities, mapTriggers, tokenImgVersion, targetTokenId]);
 
   /** Draw fog overlay (GM view: dark = unrevealed, slight green tint = revealed) */
   useEffect(() => {

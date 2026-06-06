@@ -120,6 +120,26 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   const [activeWalletLower, setActiveWalletLower] = useState<string | null>(null)
   const [activeInitiativeName, setActiveInitiativeName] = useState<string | null>(null)
 
+  // Target highlight — listens to the same `dnd721-target-selected` event that
+  // PlayerSidebar / MonsterStatPanel already consume. Stored as just the token
+  // id so a draw lookup is O(1) inside the render loop. `dnd721-target-cleared`
+  // is dispatched by the sidebar's ✕ button.
+  const [targetTokenId, setTargetTokenId] = useState<string | null>(null)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onSelect = (e: Event) => {
+      const tok = (e as CustomEvent).detail?.token ?? null
+      setTargetTokenId(tok?.id ?? null)
+    }
+    const onClear = () => setTargetTokenId(null)
+    window.addEventListener('dnd721-target-selected', onSelect)
+    window.addEventListener('dnd721-target-cleared',  onClear)
+    return () => {
+      window.removeEventListener('dnd721-target-selected', onSelect)
+      window.removeEventListener('dnd721-target-cleared',  onClear)
+    }
+  }, [])
+
   // Token image cache: URL → loaded HTMLImageElement
   const tokenImgCacheRef = useRef<Map<string, HTMLImageElement>>(new Map())
   const [tokenImgVersion, setTokenImgVersion] = useState(0)
@@ -724,6 +744,21 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
         ctx.restore()
       }
 
+      // Target highlight — amber ring drawn slightly outside the active/self
+      // rings so both can coexist when the active turn-taker IS the target.
+      if (targetTokenId && t.id === targetTokenId) {
+        const lw = Math.max(3, gridSize * 0.12)
+        ctx.save()
+        ctx.beginPath()
+        ctx.lineWidth = lw
+        ctx.strokeStyle = 'rgba(245,158,11,0.95)' // amber-500
+        ctx.shadowColor = 'rgba(245,158,11,0.65)'
+        ctx.shadowBlur = Math.max(10, gridSize * 0.35)
+        ctx.arc(t.x, t.y, r + lw * 1.4, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.restore()
+      }
+
       // Bug 16: tap-selected highlight — white dashed ring
       if (t.id === tapSelectTokenId) {
         const lw = Math.max(2, gridSize * 0.08)
@@ -756,7 +791,7 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
         ctx.fillText(t.label || 'T', t.x, t.y)
       }
     })
-  }, [tokens, canvasSize, gridSize, ownerLower, revealSet, activeInitiativeName, activeWalletLower, tokenImgVersion, tapSelectTokenId])
+  }, [tokens, canvasSize, gridSize, ownerLower, revealSet, activeInitiativeName, activeWalletLower, tokenImgVersion, tapSelectTokenId, targetTokenId])
 
   // Draw fog overlay (PERSISTENT reveals only)
   useEffect(() => {
