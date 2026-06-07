@@ -8,6 +8,8 @@ import type { CharacterSheetData } from '@/components/character-sheet/types'
 import { HandoutsPanel } from '@/components/table/HandoutsPanel'
 import TableChat from '@/components/table/TableChat'
 import { computeMainAttack } from '@/components/character-sheet/equipment-calc'
+import { deriveStats } from '@/components/character-sheet/calc'
+import { skillDisplay } from '@/components/character-sheet/skills'
 import type { Abilities } from '../../types/character'
 import { CLASS_ACTIONS, SUBCLASS_ACTIONS, DND721_ACTIONS } from '@/lib/actions/registry'
 import { applyTabPrefs } from '@/components/table/hud/tabPrefs'
@@ -485,9 +487,44 @@ export function PlayerSidebar({
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const handler = (ev: any) => {
+    const handler = async (ev: any) => {
       const t = ev?.detail?.trigger
       if (!t) return
+      const myWallet = addressLower
+      const revealedTo: string[] = Array.isArray(t.revealed_to)
+        ? t.revealed_to.map((x: string) => String(x).toLowerCase())
+        : []
+
+      // Already visible (not hidden) or already spotted by me → safe, no fire.
+      if (!t.is_hidden || (myWallet && revealedTo.includes(myWallet))) return
+
+      // Passive Perception auto-check: if we'd spot it, reveal silently (no fire).
+      if (sheet) {
+        try {
+          const abilities = (sheet.abilities as any) ?? {}
+          const pp = deriveStats(sheet as any, abilities).passivePerception
+          if (pp >= (t.dc ?? 0)) {
+            onRoll?.({
+              label: `Passive Perception (${t.name})`,
+              formula: `PP ${pp}`,
+              result: pp,
+              outcome: `👁 Spotted vs DC ${t.dc}`,
+            })
+            if (myWallet && sessionId) {
+              try {
+                await fetch('/api/triggers/reveal', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ sessionId, triggerId: t.id, wallet: myWallet }),
+                })
+              } catch { /* silent */ }
+            }
+            return
+          }
+        } catch { /* fall through to fire */ }
+      }
+
+      // Failed to notice → fire the trap (save flow).
       setTriggerPrompt({
         name:             t.name,
         saveType:         t.save_type,
@@ -501,7 +538,36 @@ export function PlayerSidebar({
     }
     window.addEventListener('dnd721-trigger-tripped', handler)
     return () => window.removeEventListener('dnd721-trigger-tripped', handler)
-  }, [])
+  }, [addressLower, sessionId, sheet, onRoll])
+
+  // Active "Search for Traps" — roll Perception and reveal nearby hidden traps.
+  const [searchingTraps, setSearchingTraps] = useState(false)
+  async function searchForTraps() {
+    if (!sheet || !sessionId || !addressLower) return
+    setSearchingTraps(true)
+    try {
+      const abilities = (sheet.abilities as any) ?? {}
+      const pb = proficiencyBonus(sheet.level)
+      const perc = skillDisplay('perception', sheet as any, abilities, pb)
+      const d20 = Math.floor(Math.random() * 20) + 1
+      const roll = d20 + perc.total
+      const res = await fetch('/api/triggers/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, wallet: addressLower, roll }),
+      })
+      const json = await res.json().catch(() => ({}))
+      const revealed: string[] = json?.revealed ?? []
+      onRoll?.({
+        label: 'Search for Traps (Perception)',
+        formula: `1d20${fmtMod(perc.total)}`,
+        result: roll,
+        outcome: revealed.length > 0 ? `🔍 Spotted: ${revealed.join(', ')}` : 'Nothing found nearby',
+      })
+    } catch { /* silent */ } finally {
+      setSearchingTraps(false)
+    }
+  }
 
   async function rollSave() {
     if (!triggerPrompt || !sheet) return
@@ -1846,6 +1912,16 @@ export function PlayerSidebar({
                     <div className="py-2 text-center text-[11px] text-slate-500">Click an enemy token on the map to target it</div>
                   )}
                 </div>
+
+                {/* Search for traps */}
+                <button
+                  type="button"
+                  onClick={searchForTraps}
+                  disabled={!sheet || !sessionId || searchingTraps}
+                  className="w-full rounded-lg border border-amber-800/50 bg-amber-900/15 px-2 py-1.5 text-[11px] font-semibold text-amber-300 hover:bg-amber-900/30 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {searchingTraps ? 'Searching…' : '🔍 Search for Traps'}
+                </button>
 
                 {/* Roll Mode toggle */}
                 <div className="rounded-lg border border-yellow-900/30 bg-slate-950/60 p-2">

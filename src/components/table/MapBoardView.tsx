@@ -40,6 +40,8 @@ type MapBoardViewProps = {
   isGm?: boolean
   /** Player wallet addresses — used by GM Reveal All to upsert tiles for all players */
   sessionPlayerWallets?: string[]
+  /** Session id — needed to fetch triggers revealed to this player */
+  sessionId?: string | null
 }
 
 type Point = { x: number; y: number }
@@ -85,6 +87,7 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   sessionStatus,
   isGm = false,
   sessionPlayerWallets = [],
+  sessionId = null,
 }) => {
   // Players can only move tokens when session is active; default permissive when no status given
   const canInteract = !sessionStatus || SESSION_GATES.canInteractWithMap(sessionStatus)
@@ -97,6 +100,8 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
 
   const [img, setImg] = useState<HTMLImageElement | null>(null)
   const [tokens, setTokens] = useState<Token[]>([])
+  // Traps visible to this player (not hidden, or revealed to their wallet via Perception)
+  const [playerTriggers, setPlayerTriggers] = useState<any[]>([])
   const [reveals, setReveals] = useState<FogReveal[]>([])
   const [revealSet, setRevealSet] = useState<Set<string>>(new Set())
   // Audit Wave 4C: debounced fog-reveal upsert. revealAround fires every
@@ -429,6 +434,37 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       supabase.removeChannel(channel)
     }
   }, [encounterId, mapId])
+
+  // Load triggers visible to this player (non-hidden or revealed to their wallet)
+  // and keep them fresh via realtime so spotted traps appear immediately.
+  useEffect(() => {
+    if (!sessionId) { setPlayerTriggers([]); return }
+    let mounted = true
+
+    const loadTriggers = async () => {
+      try {
+        const params = new URLSearchParams({ sessionId })
+        if (mapId) params.set('mapId', mapId)
+        if (ownerLower) params.set('wallet', ownerLower)
+        const res = await fetch(`/api/triggers?${params}`)
+        if (!res.ok) return
+        const json = await res.json()
+        if (mounted) setPlayerTriggers(json.triggers ?? [])
+      } catch { /* silent */ }
+    }
+    void loadTriggers()
+
+    const channel = supabase
+      .channel(`triggers-view-${encounterId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'map_triggers', filter: `session_id=eq.${sessionId}` },
+        () => { void loadTriggers() }
+      )
+      .subscribe()
+
+    return () => { mounted = false; supabase.removeChannel(channel) }
+  }, [sessionId, mapId, ownerLower, encounterId])
 
   // Load fog reveals + realtime (per viewer, per map)
   useEffect(() => {
@@ -791,7 +827,43 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
         ctx.fillText(t.label || 'T', t.x, t.y)
       }
     })
-  }, [tokens, canvasSize, gridSize, ownerLower, revealSet, activeInitiativeName, activeWalletLower, tokenImgVersion, tapSelectTokenId, targetTokenId])
+
+    // Draw traps this player can see (spotted via Perception, or GM-revealed).
+    // Only show on tiles the player has uncovered (fog-gated like tokens).
+    playerTriggers.forEach((trig: any) => {
+      const tx = Number(trig.tile_x ?? 0)
+      const ty = Number(trig.tile_y ?? 0)
+      if (!revealSet.has(keyTile(tx, ty))) return
+      const cx = tx * gridSize + gridSize / 2
+      const cy = ty * gridSize + gridSize / 2
+      const rad = Number(trig.radius ?? 0)
+      if (rad > 0) {
+        ctx.save()
+        ctx.beginPath()
+        ctx.strokeStyle = 'rgba(239,68,68,0.5)'
+        ctx.fillStyle = 'rgba(239,68,68,0.08)'
+        ctx.lineWidth = Math.max(1.5, gridSize * 0.04)
+        ctx.setLineDash([gridSize * 0.18, gridSize * 0.12])
+        ctx.arc(cx, cy, rad * gridSize, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.stroke()
+        ctx.restore()
+      }
+      // Trap marker (⚠) at the trap tile
+      const iconR = Math.max(6, gridSize * 0.16)
+      ctx.save()
+      ctx.beginPath()
+      ctx.fillStyle = 'rgba(239,68,68,0.92)'
+      ctx.arc(cx, cy, iconR, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.font = `bold ${Math.max(9, Math.floor(gridSize * 0.2))}px system-ui,sans-serif`
+      ctx.fillStyle = '#fff'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText('!', cx, cy + 0.5)
+      ctx.restore()
+    })
+  }, [tokens, canvasSize, gridSize, ownerLower, revealSet, activeInitiativeName, activeWalletLower, tokenImgVersion, tapSelectTokenId, targetTokenId, playerTriggers])
 
   // Draw fog overlay (PERSISTENT reveals only)
   useEffect(() => {

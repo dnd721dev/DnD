@@ -20,6 +20,7 @@ type Trigger = {
   condition_applied: string | null
   is_active: boolean
   is_hidden: boolean
+  radius: number | null
   created_at: string
 }
 
@@ -33,6 +34,7 @@ type TriggerForm = {
   damageType: string
   conditionApplied: string
   description: string
+  radius: number
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -58,7 +60,7 @@ const CONDITIONS = [
 
 const BLANK_FORM: TriggerForm = {
   name: '', triggerType: 'trap', saveType: 'DEX', dc: 15, saveDc: 15,
-  damageDice: '', damageType: 'piercing', conditionApplied: 'None', description: '',
+  damageDice: '', damageType: 'piercing', conditionApplied: 'None', description: '', radius: 0,
 }
 
 /** Extract a useful error message from a non-ok response, tolerating non-JSON
@@ -154,6 +156,7 @@ export function TriggersPanel({
         damageType:       trigger.damage_type       ?? 'piercing',
         conditionApplied: trigger.condition_applied ?? 'None',
         description:      trigger.description       ?? '',
+        radius:           trigger.radius            ?? 0,
       })
       setPendingTile({ tileX: trigger.tile_x, tileY: trigger.tile_y })
       setWaitingForTile(false)
@@ -167,6 +170,18 @@ export function TriggersPanel({
       window.removeEventListener('dnd721-trigger-edit',          onTriggerEdit)
     }
   }, [])
+
+  // Broadcast a live radius ring to the map while the modal is open.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (modalOpen && pendingTile) {
+      window.dispatchEvent(new CustomEvent('dnd721-trigger-radius-preview', {
+        detail: { tileX: pendingTile.tileX, tileY: pendingTile.tileY, radius: form.radius },
+      }))
+    } else {
+      window.dispatchEvent(new CustomEvent('dnd721-trigger-radius-preview', { detail: null }))
+    }
+  }, [modalOpen, pendingTile, form.radius])
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
@@ -218,6 +233,7 @@ export function TriggersPanel({
             damageType:       form.damageType       !== 'None' ? form.damageType       : undefined,
             conditionApplied: form.conditionApplied !== 'None' ? form.conditionApplied : undefined,
             description:      form.description      || undefined,
+            radius:           form.radius,
           }),
         })
         if (!res.ok) throw new Error(await readError(res, 'Failed to update'))
@@ -242,6 +258,7 @@ export function TriggersPanel({
             damageType:       form.damageType       !== 'None' ? form.damageType       : undefined,
             conditionApplied: form.conditionApplied !== 'None' ? form.conditionApplied : undefined,
             description:      form.description      || undefined,
+            radius:           form.radius,
           }),
         })
         if (!res.ok) throw new Error(await readError(res, 'Failed to create'))
@@ -359,6 +376,25 @@ export function TriggersPanel({
                     className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-100 focus:border-orange-500 focus:outline-none"
                   />
                 </div>
+              </div>
+
+              {/* Trigger radius */}
+              <div>
+                <label className="flex items-center justify-between text-[10px] text-slate-400 mb-0.5">
+                  <span>Trigger Radius</span>
+                  <span className="text-orange-300 font-semibold">
+                    {form.radius === 0 ? 'Exact tile' : `${form.radius} tile${form.radius > 1 ? 's' : ''}`}
+                  </span>
+                </label>
+                <input
+                  type="range" min={0} max={10} step={1}
+                  value={form.radius}
+                  onChange={(e) => setForm(f => ({ ...f, radius: parseInt(e.target.value) || 0 }))}
+                  className="w-full accent-orange-500"
+                />
+                <p className="text-[9px] text-slate-500 mt-0.5">
+                  Any token entering this area trips the trap. The ring previews on the map.
+                </p>
               </div>
 
               {/* Damage row */}
@@ -523,6 +559,7 @@ export function TriggersPanel({
                         damageType:       t.damage_type       ?? 'piercing',
                         conditionApplied: t.condition_applied ?? 'None',
                         description:      t.description       ?? '',
+                        radius:           t.radius            ?? 0,
                       })
                       setPendingTile({ tileX: t.tile_x, tileY: t.tile_y })
                       setModalOpen(true)

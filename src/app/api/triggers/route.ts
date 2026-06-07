@@ -18,6 +18,7 @@ const CreateSchema = z.object({
   damageDice:       z.string().max(20).optional(),
   damageType:       z.string().max(30).optional(),
   conditionApplied: z.string().max(30).optional(),
+  radius:           z.number().int().min(0).max(20).default(0),
 })
 
 const PatchSchema = z.object({
@@ -37,6 +38,7 @@ const PatchSchema = z.object({
   damageType:       z.string().max(30).optional(),
   conditionApplied: z.string().max(30).optional(),
   description:      z.string().max(500).optional(),
+  radius:           z.number().int().min(0).max(20).optional(),
 })
 
 async function verifyGm(db: ReturnType<typeof supabaseAdmin>, sessionId: string, wallet: string) {
@@ -52,6 +54,8 @@ export async function GET(req: NextRequest) {
   const tileX = searchParams.get('tileX')
   const tileY = searchParams.get('tileY')
   const gmWallet = searchParams.get('gmWallet')?.toLowerCase() ?? null
+  // Player wallet — used for list view to also include traps revealed to this player.
+  const wallet = searchParams.get('wallet')?.toLowerCase() ?? null
 
   if (!sessionId) return NextResponse.json({ error: 'sessionId required' }, { status: 400 })
 
@@ -73,22 +77,32 @@ export async function GET(req: NextRequest) {
     .eq('is_active', true)
     .order('created_at', { ascending: true })
 
-  if (!isGm && !isTileDetection) {
-    // List view: players only see non-hidden triggers (revealed traps)
-    query = query.eq('is_hidden', false)
-  }
-
-  // Tile-specific lookup (for trigger detection on movement)
-  if (isTileDetection) {
-    query = query.eq('tile_x', parseInt(tileX!)).eq('tile_y', parseInt(tileY!))
-    if (mapId) query = query.eq('map_id', mapId)
-  } else if (mapId) {
-    query = query.eq('map_id', mapId)
-  }
+  // Tile-specific lookup is radius-aware now, so we can't filter tile in SQL.
+  if (!isTileDetection && mapId) query = query.eq('map_id', mapId)
+  if (isTileDetection && mapId) query = query.eq('map_id', mapId)
 
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ triggers: data ?? [] })
+
+  let triggers = data ?? []
+
+  if (isTileDetection) {
+    // Radius-aware detection: a trap fires when the moving token's tile is within
+    // `radius` tiles of the trap tile (radius 0 → exact tile only).
+    const tx = parseInt(tileX!)
+    const ty = parseInt(tileY!)
+    triggers = triggers.filter((t: any) => {
+      const r = Number(t.radius ?? 0)
+      return Math.hypot((t.tile_x ?? 0) - tx, (t.tile_y ?? 0) - ty) <= r + 1e-9
+    })
+  } else if (!isGm) {
+    // List view: players see non-hidden traps OR traps revealed to their wallet.
+    triggers = triggers.filter((t: any) =>
+      !t.is_hidden || (wallet && Array.isArray(t.revealed_to) && t.revealed_to.map((w: string) => w.toLowerCase()).includes(wallet))
+    )
+  }
+
+  return NextResponse.json({ triggers })
 }
 
 /** POST /api/triggers — GM creates a trigger */
@@ -100,7 +114,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
 
   const { sessionId, gmWallet, mapId, tileX, tileY, name, saveType, dc, saveDc, description,
-          triggerType, damageDice, damageType, conditionApplied } = parsed.data
+          triggerType, damageDice, damageType, conditionApplied, radius } = parsed.data
   const db = supabaseAdmin()
 
   if (!(await verifyGm(db, sessionId, gmWallet))) {
@@ -123,6 +137,7 @@ export async function POST(req: NextRequest) {
       damage_dice:       damageDice         ?? null,
       damage_type:       damageType         ?? null,
       condition_applied: conditionApplied   ?? null,
+      radius:            radius             ?? 0,
     })
     .select()
     .maybeSingle()
@@ -138,7 +153,7 @@ export async function PATCH(req: NextRequest) {
 
   const {
     id, gmWallet, sessionId, isActive, isHidden,
-    name, saveType, dc, saveDc, triggerType, damageDice, damageType, conditionApplied, description,
+    name, saveType, dc, saveDc, triggerType, damageDice, damageType, conditionApplied, description, radius,
   } = parsed.data
   const db = supabaseAdmin()
 
@@ -158,6 +173,7 @@ export async function PATCH(req: NextRequest) {
   if (damageType       !== undefined) update.damage_type       = damageType
   if (conditionApplied !== undefined) update.condition_applied = conditionApplied
   if (description      !== undefined) update.description       = description
+  if (radius           !== undefined) update.radius            = radius
 
   const { data, error } = await db
     .from('map_triggers')

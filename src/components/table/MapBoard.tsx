@@ -30,6 +30,7 @@ type TriggerIcon = {
   name: string;
   trigger_type?: string | null;
   is_active: boolean;
+  radius?: number | null;
 };
 
 type MapBoardProps = {
@@ -165,6 +166,8 @@ const MapBoard: React.FC<MapBoardProps> = ({
   const [triggerMode, setTriggerMode] = useState(false);
   const [hoveredTile, setHoveredTile] = useState<{ x: number; y: number } | null>(null);
   const [mapTriggers, setMapTriggers] = useState<TriggerIcon[]>([]);
+  // Live radius ring preview while the GM edits a trigger's radius in the panel.
+  const [radiusPreview, setRadiusPreview] = useState<{ tileX: number; tileY: number; radius: number } | null>(null);
 
   const activeHudToken =
     hudTokenId ? tokens.find((t) => t.id === hudTokenId) ?? null : null;
@@ -278,6 +281,17 @@ const MapBoard: React.FC<MapBoardProps> = ({
     };
     window.addEventListener('dnd721-triggers-updated', handler);
     return () => window.removeEventListener('dnd721-triggers-updated', handler);
+  }, []);
+
+  /** Live radius preview from the TriggersPanel modal slider */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent).detail as { tileX: number; tileY: number; radius: number } | null;
+      setRadiusPreview(detail ?? null);
+    };
+    window.addEventListener('dnd721-trigger-radius-preview', handler);
+    return () => window.removeEventListener('dnd721-trigger-radius-preview', handler);
   }, []);
 
   /** Sync condition rings from InitiativeTracker */
@@ -656,6 +670,22 @@ const MapBoard: React.FC<MapBoardProps> = ({
     });
     // Draw trigger icons in the top-left corner of each trigger tile (GM only)
     mapTriggers.forEach((trigger) => {
+      // Radius ring — area within which a token trips the trap.
+      const rad = Number(trigger.radius ?? 0);
+      if (rad > 0) {
+        const cx = trigger.tile_x * gridSize + gridSize / 2;
+        const cy = trigger.tile_y * gridSize + gridSize / 2;
+        ctx.save();
+        ctx.beginPath();
+        ctx.strokeStyle = trigger.is_active ? 'rgba(239,68,68,0.55)' : 'rgba(100,116,139,0.4)';
+        ctx.fillStyle = trigger.is_active ? 'rgba(239,68,68,0.08)' : 'rgba(100,116,139,0.06)';
+        ctx.lineWidth = Math.max(1.5, gridSize * 0.04);
+        ctx.setLineDash([gridSize * 0.18, gridSize * 0.12]);
+        ctx.arc(cx, cy, rad * gridSize, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
       const iconX = trigger.tile_x * gridSize + gridSize * 0.18;
       const iconY = trigger.tile_y * gridSize + gridSize * 0.18;
       const iconR = Math.max(5, gridSize * 0.14);
@@ -671,7 +701,23 @@ const MapBoard: React.FC<MapBoardProps> = ({
       ctx.fillText('!', iconX, iconY);
       ctx.restore();
     });
-  }, [tokens, canvasSize, gridSize, highlightTokenId, activeTokenId, activeWallet, tokenConditions, tokenResistances, tokenImmunities, mapTriggers, tokenImgVersion, targetTokenId]);
+
+    // Live radius preview while editing in the TriggersPanel modal.
+    if (radiusPreview && radiusPreview.radius > 0) {
+      const cx = radiusPreview.tileX * gridSize + gridSize / 2;
+      const cy = radiusPreview.tileY * gridSize + gridSize / 2;
+      ctx.save();
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(251,146,60,0.9)'; // orange-400
+      ctx.fillStyle = 'rgba(251,146,60,0.12)';
+      ctx.lineWidth = Math.max(2, gridSize * 0.05);
+      ctx.setLineDash([gridSize * 0.2, gridSize * 0.12]);
+      ctx.arc(cx, cy, radiusPreview.radius * gridSize, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+  }, [tokens, canvasSize, gridSize, highlightTokenId, activeTokenId, activeWallet, tokenConditions, tokenResistances, tokenImmunities, mapTriggers, tokenImgVersion, targetTokenId, radiusPreview]);
 
   /** Draw fog overlay (GM view: dark = unrevealed, slight green tint = revealed) */
   useEffect(() => {
