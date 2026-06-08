@@ -257,15 +257,27 @@ export default function TableClient({ sessionId }: TableClientProps) {
   }, [walletLower])
 
   // ✅ Multi-map management (GM only)
-  const { maps, createImageMap, createTileMap, updateTileMap, deleteMap, setCurrentMap } = useMapManager(session?.id ?? null)
+  const { maps, createImageMap, createTileMap, updateTileMap, deleteMap, setCurrentMap, loadAllMaps, cloneMapToSession } = useMapManager(session?.id ?? null)
 
   // Map UI state
   const [showNewMapModal, setShowNewMapModal] = useState(false)
   const [showMapBuilder, setShowMapBuilder] = useState(false)
   const [editingMapId, setEditingMapId] = useState<string | null>(null)
   const [newMapName, setNewMapName] = useState('')
-  const [newMapType, setNewMapType] = useState<'image' | 'tile'>('image')
+  const [newMapType, setNewMapType] = useState<'image' | 'tile' | 'library'>('image')
   const newMapImageRef = useRef<HTMLInputElement | null>(null)
+  // Stage-then-confirm: file is picked, previewed, then uploaded on Confirm.
+  const [stagedFile, setStagedFile] = useState<File | null>(null)
+  const [stagedFileUrl, setStagedFileUrl] = useState<string | null>(null)
+  const [newMapPrivate, setNewMapPrivate] = useState(false)
+  const [newMapError, setNewMapError] = useState<string | null>(null)
+  const [newMapBusy, setNewMapBusy] = useState(false)
+  // Library state (loaded lazily when From Library tab is opened)
+  const [libraryMaps, setLibraryMaps] = useState<import('@/components/table/tableclient/hooks/useMapManager').SessionMap[]>([])
+  const [libraryLoading, setLibraryLoading] = useState(false)
+  const [librarySearch, setLibrarySearch] = useState('')
+  const [libraryTab, setLibraryTab] = useState<'public' | 'mine'>('public')
+  const [librarySelectedId, setLibrarySelectedId] = useState<string | null>(null)
 
   const campaignMeta = session?.campaigns?.[0]
   const roomName = campaignMeta?.livekit_room_name || `session-${session?.id ?? sessionId}`
@@ -727,39 +739,94 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
   // ---------- Map management handlers (GM only) ----------
 
-  async function handleNewMapImageUpload(e: ChangeEvent<HTMLInputElement>) {
-    if (!e.target.files || !session) return
-    const file = e.target.files[0]
-    if (!file || !newMapName.trim()) { alert('Enter a map name first.'); return }
-
-    const fileExt = file.name.split('.').pop() || 'png'
-    const tempId = `${session.id}-${Date.now()}`
-    const filePath = `${tempId}.${fileExt}`
-
-    const { error: uploadError } = await supabase.storage.from('maps').upload(filePath, file, { upsert: true })
-    if (uploadError) { console.error(uploadError); alert('Failed to upload map image.'); return }
-
-    const { data } = supabase.storage.from('maps').getPublicUrl(filePath)
-    const publicUrl = (data as any)?.publicUrl
-    if (!publicUrl) { alert('Upload succeeded but no public URL returned.'); return }
-
-    const newMap = await createImageMap(newMapName.trim(), publicUrl)
-    if (!newMap) { alert('Failed to save map record.'); return }
-
-    // Auto-select the new map
-    await setCurrentMap(session.id, newMap.id)
-    setSession((prev) => prev ? { ...prev, current_map_id: newMap.id } : prev)
-
-    setShowNewMapModal(false)
-    setNewMapName('')
+  /** Stage a file when the GM picks one — defer upload until Confirm. */
+  function handleNewMapImageUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null
+    setNewMapError(null)
+    if (stagedFileUrl) URL.revokeObjectURL(stagedFileUrl)
+    if (!file) { setStagedFile(null); setStagedFileUrl(null); return }
+    setStagedFile(file)
+    setStagedFileUrl(URL.createObjectURL(file))
+    // Auto-fill the name from the filename if the GM hasn't typed one yet.
+    if (!newMapName.trim()) {
+      const base = file.name.replace(/\.[^.]+$/, '')
+      setNewMapName(base.slice(0, 80))
+    }
   }
 
-  async function handleOpenTileBuilder() {
-    // Tile map: open builder, create map on save
-    if (!newMapName.trim()) { alert('Enter a map name first.'); return }
+  function resetNewMapModal() {
+    if (stagedFileUrl) URL.revokeObjectURL(stagedFileUrl)
     setShowNewMapModal(false)
-    setEditingMapId(null)
-    setShowMapBuilder(true)
+    setNewMapName('')
+    setNewMapType('image')
+    setStagedFile(null)
+    setStagedFileUrl(null)
+    setNewMapPrivate(false)
+    setNewMapError(null)
+    setNewMapBusy(false)
+    setLibrarySelectedId(null)
+    setLibrarySearch('')
+    setLibraryTab('public')
+  }
+
+  /** Confirm button — runs the right create path based on `newMapType`. */
+  async function handleConfirmCreate() {
+    if (!session) return
+    setNewMapError(null)
+    setNewMapBusy(true)
+    try {
+      if (newMapType === 'image') {
+        if (!stagedFile) { setNewMapError('Choose a file first.'); return }
+        const fallbackBase = stagedFile.name.replace(/\.[^.]+$/, '').slice(0, 80) || 'Map'
+        const finalName = newMapName.trim() || fallbackBase
+        const fileExt = stagedFile.name.split('.').pop() || 'png'
+        const tempId = `${session.id}-${Date.now()}`
+        const filePath = `${tempId}.${fileExt}`
+        const { error: uploadError } = await supabase.storage.from('maps').upload(filePath, stagedFile, { upsert: true })
+        if (uploadError) { setNewMapError(`Upload failed: ${uploadError.message}`); return }
+        const { data } = supabase.storage.from('maps').getPublicUrl(filePath)
+        const publicUrl = (data as any)?.publicUrl
+        if (!publicUrl) { setNewMapError('Upload succeeded but no public URL returned.'); return }
+        const newMap = await createImageMap(finalName, publicUrl, {
+          visibility:  newMapPrivate ? 'private' : 'public',
+          ownerWallet: walletLower,
+        })
+        if (!newMap) { setNewMapError('Failed to save map record (RLS or DB error).'); return }
+        await setCurrentMap(session.id, newMap.id)
+        setSession((prev) => prev ? { ...prev, current_map_id: newMap.id } : prev)
+        resetNewMapModal()
+      } else if (newMapType === 'tile') {
+        // Tile Builder: hand off to the builder; name + privacy ride on shared state.
+        setShowNewMapModal(false)
+        setEditingMapId(null)
+        setShowMapBuilder(true)
+      } else if (newMapType === 'library') {
+        if (!librarySelectedId) { setNewMapError('Pick a map from the library first.'); return }
+        const src = libraryMaps.find((m) => m.id === librarySelectedId)
+        if (!src) { setNewMapError('Selected map is no longer available.'); return }
+        const cloned = await cloneMapToSession(src)
+        if (!cloned) { setNewMapError('Failed to clone the map into this session.'); return }
+        await setCurrentMap(session.id, cloned.id)
+        setSession((prev) => prev ? { ...prev, current_map_id: cloned.id } : prev)
+        resetNewMapModal()
+      }
+    } finally {
+      setNewMapBusy(false)
+    }
+  }
+
+  /** Lazy-load the platform-wide library when the GM opens that tab. */
+  async function ensureLibraryLoaded() {
+    if (libraryMaps.length > 0 || libraryLoading) return
+    setLibraryLoading(true)
+    try {
+      const all = await loadAllMaps()
+      // Hide maps already attached to this session so the GM doesn't see no-op duplicates.
+      const usedIds = new Set(maps.map((m) => m.id))
+      setLibraryMaps(all.filter((m) => !usedIds.has(m.id)))
+    } finally {
+      setLibraryLoading(false)
+    }
   }
 
   async function handleSaveTileMap(tileData: import('@/lib/tilemap').TileData) {
@@ -771,7 +838,10 @@ export default function TableClient({ sessionId }: TableClientProps) {
     } else {
       // Creating new tile map — prefer name typed in the creator, fall back to modal name
       const name = tileData.name?.trim() || newMapName.trim() || 'Tile Map'
-      const newMap = await createTileMap(name, tileData)
+      const newMap = await createTileMap(name, tileData, {
+        visibility:  newMapPrivate ? 'private' : 'public',
+        ownerWallet: walletLower,
+      })
       if (!newMap) { alert('Failed to save tile map.'); return }
 
       // Auto-select the new map
@@ -782,6 +852,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
     setShowMapBuilder(false)
     setEditingMapId(null)
     setNewMapName('')
+    setNewMapPrivate(false)
   }
 
   function handleEditCurrentTileMap() {
@@ -1152,68 +1223,186 @@ export default function TableClient({ sessionId }: TableClientProps) {
         )}
 
         {/* New Map modal */}
-        {showNewMapModal && (
-          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
-            <div className="w-80 rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
-              <h3 className="mb-4 text-sm font-semibold text-slate-200">New Map</h3>
+        {showNewMapModal && (() => {
+          const filteredLibrary = libraryMaps.filter((m) => {
+            if (libraryTab === 'mine') return m.visibility === 'private' && (m.owner_wallet?.toLowerCase() === walletLower)
+            if (libraryTab === 'public') return m.visibility === 'public'
+            return true
+          }).filter((m) => !librarySearch.trim() || m.name.toLowerCase().includes(librarySearch.trim().toLowerCase()))
 
-              <input
-                placeholder="Map name"
-                value={newMapName}
-                onChange={(e) => setNewMapName(e.target.value)}
-                className="mb-3 w-full rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none"
-              />
+          return (
+            <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60">
+              <div className="w-[28rem] max-w-[95vw] rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
+                <h3 className="mb-4 text-sm font-semibold text-slate-200">New Map</h3>
 
-              <div className="mb-4 flex gap-4 text-xs text-slate-300">
-                <label className="flex cursor-pointer items-center gap-1.5">
-                  <input
-                    type="radio"
-                    checked={newMapType === 'image'}
-                    onChange={() => setNewMapType('image')}
-                  />
-                  Image Upload
-                </label>
-                <label className="flex cursor-pointer items-center gap-1.5">
-                  <input
-                    type="radio"
-                    checked={newMapType === 'tile'}
-                    onChange={() => setNewMapType('tile')}
-                  />
-                  Tile Builder
-                </label>
-              </div>
-
-              {newMapType === 'image' && (
-                <div className="mb-4">
-                  <input
-                    ref={newMapImageRef}
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    onChange={handleNewMapImageUpload}
-                    className="text-xs text-slate-300"
-                  />
+                {/* Source-type radios */}
+                <div className="mb-4 grid grid-cols-3 gap-2 text-xs text-slate-300">
+                  {([
+                    { id: 'image',   label: '📤 Upload'   },
+                    { id: 'tile',    label: '🟫 Builder' },
+                    { id: 'library', label: '📚 Library' },
+                  ] as const).map((o) => (
+                    <button
+                      key={o.id}
+                      type="button"
+                      onClick={() => {
+                        setNewMapType(o.id)
+                        setNewMapError(null)
+                        if (o.id === 'library') void ensureLibraryLoaded()
+                      }}
+                      className={`rounded-md border px-2 py-1.5 text-[11px] font-semibold transition ${
+                        newMapType === o.id
+                          ? 'border-emerald-600 bg-emerald-900/40 text-emerald-200'
+                          : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-500'
+                      }`}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
                 </div>
-              )}
 
-              <div className="flex justify-end gap-2">
-                <button
-                  onClick={() => { setShowNewMapModal(false); setNewMapName('') }}
-                  className="rounded px-3 py-1.5 text-xs bg-slate-800 text-slate-300 hover:bg-slate-700"
-                >
-                  Cancel
-                </button>
-                {newMapType === 'tile' && (
-                  <button
-                    onClick={handleOpenTileBuilder}
-                    className="rounded px-3 py-1.5 text-xs bg-emerald-700 text-white hover:bg-emerald-600 font-semibold"
-                  >
-                    Open Builder
-                  </button>
+                {/* Name field — relevant for Upload and Builder; library uses the source's name */}
+                {newMapType !== 'library' && (
+                  <input
+                    placeholder="Map name (optional — defaults from file)"
+                    value={newMapName}
+                    onChange={(e) => setNewMapName(e.target.value)}
+                    className="mb-3 w-full rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none"
+                  />
                 )}
+
+                {/* Privacy toggle — only for new uploads/builders, not library picks */}
+                {newMapType !== 'library' && (
+                  <label className="mb-3 flex cursor-pointer items-start gap-2 rounded border border-slate-800 bg-slate-950/40 px-2 py-1.5 text-[11px] text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={newMapPrivate}
+                      onChange={(e) => setNewMapPrivate(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      🔒 <span className="font-semibold">Private</span> — only you see this map in the library
+                      <span className="ml-1 text-slate-500">(future: mint as NFT)</span>
+                    </span>
+                  </label>
+                )}
+
+                {/* Image Upload — file picker + preview */}
+                {newMapType === 'image' && (
+                  <div className="mb-4 space-y-2">
+                    <input
+                      ref={newMapImageRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={handleNewMapImageUpload}
+                      className="text-xs text-slate-300"
+                    />
+                    {stagedFileUrl && (
+                      <div className="overflow-hidden rounded-md border border-slate-700">
+                        <img src={stagedFileUrl} alt="Preview" className="max-h-44 w-full object-contain bg-slate-950" />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Tile Builder — informational; Confirm opens the builder */}
+                {newMapType === 'tile' && (
+                  <p className="mb-4 rounded border border-slate-800 bg-slate-950/40 px-2 py-2 text-[11px] text-slate-400">
+                    Click <span className="text-emerald-300">Open Builder</span> to design a tile-based map.
+                    You can rename it inside the builder; if you leave it blank, it saves as <span className="text-slate-300">"Tile Map"</span>.
+                  </p>
+                )}
+
+                {/* Library — tabs + search + grid */}
+                {newMapType === 'library' && (
+                  <div className="mb-4 space-y-2">
+                    <div className="flex items-center gap-2">
+                      {(['public', 'mine'] as const).map((tab) => (
+                        <button
+                          key={tab}
+                          type="button"
+                          onClick={() => setLibraryTab(tab)}
+                          className={`rounded-md border px-2 py-1 text-[10px] font-semibold transition ${
+                            libraryTab === tab
+                              ? 'border-emerald-600 bg-emerald-900/40 text-emerald-200'
+                              : 'border-slate-700 bg-slate-800 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          {tab === 'public' ? 'All Public' : '🔒 My Private'}
+                        </button>
+                      ))}
+                      <input
+                        value={librarySearch}
+                        onChange={(e) => setLibrarySearch(e.target.value)}
+                        placeholder="Search by name…"
+                        className="ml-auto w-40 rounded border border-slate-700 bg-slate-800 px-2 py-0.5 text-[11px] text-slate-100 placeholder:text-slate-500 focus:outline-none"
+                      />
+                    </div>
+                    <div className="grid max-h-72 grid-cols-2 gap-2 overflow-y-auto rounded border border-slate-800 bg-slate-950/40 p-2">
+                      {libraryLoading && <div className="col-span-2 py-4 text-center text-[11px] text-slate-500">Loading library…</div>}
+                      {!libraryLoading && filteredLibrary.length === 0 && (
+                        <div className="col-span-2 py-4 text-center text-[11px] text-slate-500">No maps yet.</div>
+                      )}
+                      {filteredLibrary.map((m) => {
+                        const selected = librarySelectedId === m.id
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => setLibrarySelectedId(m.id)}
+                            className={`flex flex-col overflow-hidden rounded-md border text-left transition ${
+                              selected
+                                ? 'border-emerald-500 bg-emerald-900/30'
+                                : 'border-slate-700 bg-slate-900 hover:border-slate-500'
+                            }`}
+                          >
+                            <div className="flex h-20 items-center justify-center overflow-hidden bg-slate-950">
+                              {m.image_url ? (
+                                <img src={m.image_url} alt={m.name} className="h-full w-full object-cover" />
+                              ) : (
+                                <span className="text-2xl">🟫</span>
+                              )}
+                            </div>
+                            <div className="flex items-center justify-between gap-1 px-1.5 py-1 text-[10px]">
+                              <span className="truncate text-slate-200">{m.name}</span>
+                              {m.visibility === 'private' && <span title="Private">🔒</span>}
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {newMapError && (
+                  <div className="mb-3 rounded border border-red-700/50 bg-red-900/30 px-2 py-1.5 text-[11px] text-red-300">
+                    {newMapError}
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={resetNewMapModal}
+                    className="rounded px-3 py-1.5 text-xs bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleConfirmCreate}
+                    disabled={newMapBusy || (newMapType === 'library' && !librarySelectedId)}
+                    className="rounded px-3 py-1.5 text-xs bg-emerald-700 text-white hover:bg-emerald-600 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {newMapBusy
+                      ? 'Working…'
+                      : newMapType === 'image'    ? 'Confirm Upload'
+                      : newMapType === 'tile'     ? 'Open Builder'
+                      :                             'Use This Map'}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         <div className="relative flex-1 min-h-0 min-w-0">
           <div className="absolute inset-0 flex flex-col overflow-hidden">
@@ -1248,7 +1437,19 @@ export default function TableClient({ sessionId }: TableClientProps) {
               </select>
 
               <button
-                onClick={() => { setNewMapName(''); setNewMapType('image'); setShowNewMapModal(true) }}
+                onClick={() => {
+                  setNewMapName('')
+                  setNewMapType('image')
+                  setStagedFile(null)
+                  if (stagedFileUrl) URL.revokeObjectURL(stagedFileUrl)
+                  setStagedFileUrl(null)
+                  setNewMapPrivate(false)
+                  setNewMapError(null)
+                  setLibrarySelectedId(null)
+                  setLibrarySearch('')
+                  setLibraryTab('public')
+                  setShowNewMapModal(true)
+                }}
                 className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
               >
                 + New
