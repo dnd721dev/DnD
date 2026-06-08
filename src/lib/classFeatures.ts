@@ -419,8 +419,8 @@ export const CLASS_FEATURES: ClassFeatureDetail[] = [
     uses: {
       count: (lvl) => (lvl >= 17 ? 3 : lvl >= 13 ? 3 : lvl >= 10 ? 2 : 1),
       recharge: 'short_rest',
+      die: '1d10',
     },
-    die: '1d10',
     shortDescription: 'Bonus action: regain 1d10 + fighter level HP. Uses recharge on a short/long rest.',
     fullDescription:
       'You have a limited well of stamina that you can draw on to protect yourself from harm. On your turn, you can use a bonus action to regain hit points equal to 1d10 + your fighter level. Once you use this feature, you must finish a short or long rest before you can use it again.',
@@ -723,7 +723,6 @@ export const CLASS_FEATURES: ClassFeatureDetail[] = [
     classKey: 'rogue',
     levelGained: 1,
     type: 'free',
-    die: 'd6',
     shortDescription: 'Once per turn, deal +Nd6 damage when you have advantage OR an ally is within 5 ft of the target and you don\'t have disadvantage.',
     fullDescription:
       'Beginning at 1st level, you know how to strike subtly and exploit a foe\'s distraction. Once per turn, you can deal an extra Xd6 damage to one creature you hit with an attack if you have advantage on the attack roll. The attack must use a finesse or a ranged weapon. You don\'t need advantage on the attack roll if another enemy of the target is within 5 feet of it, that enemy isn\'t incapacitated, and you don\'t have disadvantage on the attack roll.',
