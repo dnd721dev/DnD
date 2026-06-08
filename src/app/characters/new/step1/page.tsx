@@ -6,6 +6,8 @@ import { useAccount } from 'wagmi'
 import { loadDraft, saveDraft } from '@/lib/characterDraft'
 import type { CharacterDraft } from '../../../../types/characterDraft'
 import { RACE_LIST, type RaceKey } from '@/lib/races'
+import { getClassFeaturesAtLevel, formatActionType } from '@/lib/classFeatures'
+import type { ClassKey as ClassFeatureClassKey } from '@/lib/subclasses'
 
 type NftItem = {
   contract: string
@@ -472,6 +474,30 @@ export default function NewCharacterStep1Page() {
             <span className="font-semibold text-slate-300">Step 3</span>{' '}
             (abilities &amp; skills).
           </p>
+
+          {/* Class features at L1 — preview from the unified class-feature library */}
+          {draft.classKey && (() => {
+            const features = getClassFeaturesAtLevel(draft.classKey as ClassFeatureClassKey, 1)
+            if (features.length === 0) return null
+            return (
+              <div className="rounded-md border border-emerald-800/40 bg-emerald-950/20 p-2.5">
+                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
+                  Features at Level 1
+                </div>
+                <ul className="space-y-1.5">
+                  {features.map((f) => (
+                    <li key={f.id} className="text-[11px] leading-snug text-slate-200">
+                      <span className="font-semibold text-emerald-200">{f.name}</span>
+                      <span className="ml-1.5 rounded bg-sky-900/40 border border-sky-700/40 px-1 py-0.5 text-[9px] font-semibold uppercase text-sky-200">
+                        {formatActionType(f.type)}
+                      </span>
+                      <div className="mt-0.5 text-[10px] text-slate-400">{f.shortDescription}</div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
+          })()}
         </div>
       )}
 

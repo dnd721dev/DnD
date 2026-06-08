@@ -2,6 +2,7 @@
 
 import { ALL_ACTIONS, canUseAction, type SheetAction } from '@/lib/actions'
 import type { ActionGate } from '@/lib/actions/types'
+import { getFeatureById, formatActionType, formatRecharge } from '@/lib/classFeatures'
 
 type Props = {
   classKey: string
@@ -109,7 +110,11 @@ export function ActionsPanel({
                 })
 
                 const disabled = !status.ok
-                const hint = status.ok ? action.description : status.reason || action.description
+                // Prefer rich class-feature text when an action cross-references it.
+                const feature = action.featureId ? getFeatureById(action.featureId) : null
+                const richDesc = feature?.shortDescription ?? action.description
+                const hint = status.ok ? richDesc : status.reason || richDesc
+                const fullTitle = feature?.fullDescription ?? feature?.shortDescription ?? action.description ?? action.name
 
                 return (
                   <button
@@ -122,14 +127,36 @@ export function ActionsPanel({
                         ? 'cursor-not-allowed border-slate-800 bg-slate-900/30 text-slate-500'
                         : 'border-slate-700 bg-slate-900 text-slate-200 hover:border-sky-500'
                     }`}
-                    title={disabled ? (status.reason ?? 'Unavailable') : action.description ?? action.name}
+                    title={disabled ? (status.reason ?? 'Unavailable') : fullTitle}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="font-semibold">{action.name}</div>
                       <div className="text-[10px] text-slate-400">{action.category}</div>
                     </div>
 
+                    {/* Badge row — action type / recharge — from the linked feature. */}
+                    {feature && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        <span className="rounded bg-sky-900/40 border border-sky-700/40 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-sky-200">
+                          ⏱ {formatActionType(feature.type)}
+                        </span>
+                        {feature.uses && (
+                          <span className="rounded bg-violet-900/40 border border-violet-700/40 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-violet-200">
+                            🔁 {formatRecharge(feature.uses.recharge)}
+                          </span>
+                        )}
+                        {feature.source === 'phb-2024' && (
+                          <span className="rounded bg-emerald-900/40 border border-emerald-700/40 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200" title="2024 PHB ruleset">
+                            2024
+                          </span>
+                        )}
+                      </div>
+                    )}
+
                     {hint && <div className="mt-1 text-[11px] text-slate-400">{hint}</div>}
+                    {feature?.scalingNotes && !disabled && (
+                      <div className="mt-1 text-[10px] italic text-slate-500">{feature.scalingNotes}</div>
+                    )}
                   </button>
                 )
               })}

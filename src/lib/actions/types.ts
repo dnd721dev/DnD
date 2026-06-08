@@ -34,4 +34,11 @@ export type SheetAction = {
 
   // optional: if present, clicking also performs these
   effects?: ActionEffect[]
+
+  /**
+   * Optional cross-reference into `CLASS_FEATURES` (see src/lib/classFeatures.ts).
+   * If set, UI consumers can pull `shortDescription` / `fullDescription` /
+   * `scalingNotes` from that entry instead of relying on `description`.
+   */
+  featureId?: string
 }

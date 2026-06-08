@@ -2,6 +2,34 @@
 
 import { useState } from 'react'
 import type { DerivedResource, RechargeType } from '@/lib/applySubclassEffects'
+import { getFeatureById } from '@/lib/classFeatures'
+
+/**
+ * Map a resource key (as used in CLASS_RESOURCES / DerivedResource) to the
+ * canonical feature id in CLASS_FEATURES so we can render a hover tooltip
+ * with rich rules text. Falls back to no tooltip when no mapping exists.
+ */
+const RESOURCE_TO_FEATURE: Record<string, string> = {
+  'barbarian.rage':                'barbarian.rage',
+  'bard.bardic_inspiration':       'bard.bardic_inspiration',
+  'cleric.channel_divinity':       'cleric.channel_divinity',
+  'druid.wild_shape':              'druid.wild_shape',
+  'fighter.second_wind':           'fighter.second_wind',
+  'fighter.action_surge':          'fighter.action_surge',
+  'fighter.indomitable':           'fighter.indomitable',
+  'monk.ki':                       'monk.ki_points',
+  'monk.discipline_points':        'monk.ki_points',
+  'paladin.lay_on_hands':          'paladin.lay_on_hands',
+  'paladin.divine_sense':          'paladin.divine_sense',
+  'paladin.cleansing_touch':       'paladin.cleansing_touch',
+  'ranger.hunters_mark':           'ranger.favored_enemy',
+  'sorcerer.sorcery_points':       'sorcerer.sorcery_points',
+  'warlock.mystic_arcanum':        'warlock.mystic_arcanum',
+  'wizard.arcane_recovery':        'wizard.arcane_recovery',
+  'artificer.flash_of_genius':     'artificer.flash_of_genius',
+  'artificer.infusions':           'artificer.infuse_item',
+  'cleric.divine_intervention':    'cleric.divine_intervention',
+}
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
@@ -171,15 +199,24 @@ export function ResourcesPanel(props: {
         <div className="space-y-2">
           {resources.map((r) => {
             const current = clamp(values[r.key] ?? r.current ?? r.max, 0, r.max)
+            // Resolve a related class feature for a rich hover tooltip.
+            const feature = RESOURCE_TO_FEATURE[r.key] ? getFeatureById(RESOURCE_TO_FEATURE[r.key]) : null
+            const hoverText = feature?.fullDescription ?? feature?.shortDescription ?? r.note ?? r.name
 
             return (
               <div
                 key={r.key}
                 className="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-900/40 p-2"
+                title={hoverText}
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <div className="truncate text-sm font-medium text-slate-100">{r.name}</div>
+                    {feature?.source === 'phb-2024' && (
+                      <span className="rounded bg-emerald-900/40 border border-emerald-700/40 px-1 py-0.5 text-[9px] font-semibold text-emerald-200" title="2024 PHB ruleset">
+                        2024
+                      </span>
+                    )}
                     {r.die ? (
                       <span className="rounded-md border border-slate-800 bg-slate-950 px-2 py-0.5 text-[10px] text-slate-300">
                         {r.die}
@@ -190,6 +227,9 @@ export function ResourcesPanel(props: {
                     </span>
                   </div>
                   {r.note ? <div className="mt-0.5 text-xs text-slate-400">{r.note}</div> : null}
+                  {!r.note && feature?.shortDescription ? (
+                    <div className="mt-0.5 text-xs text-slate-400">{feature.shortDescription}</div>
+                  ) : null}
                 </div>
 
                 <div className="flex shrink-0 items-center gap-2">

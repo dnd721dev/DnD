@@ -3,6 +3,8 @@ import type { CharacterSheetData } from './types'
 import { RACES } from '@/lib/races'
 import { BACKGROUNDS } from '@/lib/backgrounds'
 import { FEATURES } from '@/lib/features'
+import { getAllFeaturesUpToLevel, formatActionType, type ClassFeatureDetail } from '@/lib/classFeatures'
+import type { ClassKey, SubclassKey } from '@/lib/subclasses'
 
 function normKey(v: any) {
   return String(v ?? '')
@@ -26,17 +28,32 @@ export function TraitsFeaturesPanel({ c }: { c: CharacterSheetData }) {
     (c.racial_traits ?? []).filter(Boolean).map(String) as string[]
   const backgroundFeatureFallback = c.background_feature ? String(c.background_feature) : null
 
-  const classFeatures = Object.values(FEATURES).filter((f: any) => {
+  const legacyClassFeatures = Object.values(FEATURES).filter((f: any) => {
     if (f.sourceType !== 'class') return false
     if (!f.class) return false
     return String(f.class).toLowerCase() === classKey && Number(f.level) <= level
   })
 
-  const subclassFeatures = Object.values(FEATURES).filter((f: any) => {
+  const legacySubclassFeatures = Object.values(FEATURES).filter((f: any) => {
     if (f.sourceType !== 'subclass') return false
     if (!f.subclass) return false
     return String(f.subclass).toLowerCase() === subclassKey && Number(f.level) <= level
   })
+
+  // Pull the richly-detailed entries from the new unified library, and de-dupe
+  // them against the legacy FEATURES entries by name so we don't show a feature
+  // twice. The new entries are preferred — they carry shortDescription,
+  // fullDescription, action-type, source edition, etc.
+  const detailedFeatures: ClassFeatureDetail[] = getAllFeaturesUpToLevel(
+    classKey as ClassKey,
+    (subclassKey || null) as SubclassKey | null,
+    level,
+  )
+  const detailedNames = new Set(detailedFeatures.map((f) => f.name.toLowerCase()))
+  const classFeatures = legacyClassFeatures.filter((f: any) => !detailedNames.has(String(f.name).toLowerCase()))
+  const subclassFeatures = legacySubclassFeatures.filter((f: any) => !detailedNames.has(String(f.name).toLowerCase()))
+  const detailedClass = detailedFeatures.filter((f) => !f.subclassKey)
+  const detailedSubclass = detailedFeatures.filter((f) => Boolean(f.subclassKey))
 
   // Languages: auto from race lib + any stored on sheet
   const autoLanguages: string[] = raceFromLib?.languages ?? []
@@ -58,6 +75,8 @@ export function TraitsFeaturesPanel({ c }: { c: CharacterSheetData }) {
     Boolean(backgroundFeatureFallback) ||
     classFeatures.length > 0 ||
     subclassFeatures.length > 0 ||
+    detailedClass.length > 0 ||
+    detailedSubclass.length > 0 ||
     allLanguages.length > 0 ||
     allToolProfs.length > 0 ||
     feats.length > 0
@@ -122,11 +141,89 @@ export function TraitsFeaturesPanel({ c }: { c: CharacterSheetData }) {
           </div>
         ) : null}
 
-        {/* CLASS FEATURES (from lib) */}
-        {classFeatures.length > 0 && (
+        {/* CLASS FEATURES — DETAILED (2024 PHB rules text) */}
+        {detailedClass.length > 0 && (
           <div>
             <div className="text-[10px] font-semibold uppercase text-slate-400">
               Class Features ({c.main_job ?? 'Class'}) • Level {level}
+            </div>
+            <ul className="mt-1 space-y-1">
+              {detailedClass
+                .sort((a, b) => a.levelGained - b.levelGained)
+                .map((f) => (
+                  <li
+                    key={f.id}
+                    className="rounded-lg bg-slate-900/60 px-2 py-1.5"
+                    title={f.fullDescription ?? f.shortDescription}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <div className="text-[11px] font-semibold text-slate-100">{f.name}</div>
+                        <span className="rounded bg-sky-900/40 border border-sky-700/40 px-1 py-0.5 text-[9px] font-semibold uppercase text-sky-200">
+                          {formatActionType(f.type)}
+                        </span>
+                        {f.source === 'phb-2024' && (
+                          <span className="rounded bg-emerald-900/40 border border-emerald-700/40 px-1 py-0.5 text-[9px] font-semibold text-emerald-200">
+                            2024
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate-500">Lv {f.levelGained}</div>
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-slate-300">{f.shortDescription}</div>
+                    {f.scalingNotes && (
+                      <div className="mt-0.5 text-[10px] italic text-slate-500">{f.scalingNotes}</div>
+                    )}
+                  </li>
+                ))}
+            </ul>
+          </div>
+        )}
+
+        {/* SUBCLASS FEATURES — DETAILED (2024 PHB rules text) */}
+        {detailedSubclass.length > 0 && (
+          <div>
+            <div className="text-[10px] font-semibold uppercase text-slate-400">
+              Subclass Features ({c.subclass ?? 'Subclass'}) • Level {level}
+            </div>
+            <ul className="mt-1 space-y-1">
+              {detailedSubclass
+                .sort((a, b) => a.levelGained - b.levelGained)
+                .map((f) => (
+                  <li
+                    key={f.id}
+                    className="rounded-lg bg-slate-900/60 px-2 py-1.5"
+                    title={f.fullDescription ?? f.shortDescription}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <div className="text-[11px] font-semibold text-slate-100">{f.name}</div>
+                        <span className="rounded bg-sky-900/40 border border-sky-700/40 px-1 py-0.5 text-[9px] font-semibold uppercase text-sky-200">
+                          {formatActionType(f.type)}
+                        </span>
+                        {f.source === 'phb-2024' && (
+                          <span className="rounded bg-emerald-900/40 border border-emerald-700/40 px-1 py-0.5 text-[9px] font-semibold text-emerald-200">
+                            2024
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate-500">Lv {f.levelGained}</div>
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-slate-300">{f.shortDescription}</div>
+                    {f.scalingNotes && (
+                      <div className="mt-0.5 text-[10px] italic text-slate-500">{f.scalingNotes}</div>
+                    )}
+                  </li>
+                ))}
+            </ul>
+          </div>
+        )}
+
+        {/* CLASS FEATURES (from legacy lib — only entries not in the detailed lib) */}
+        {classFeatures.length > 0 && (
+          <div>
+            <div className="text-[10px] font-semibold uppercase text-slate-400">
+              Additional Class Features ({c.main_job ?? 'Class'}) • Level {level}
             </div>
             <ul className="mt-1 space-y-1">
               {classFeatures
@@ -147,11 +244,11 @@ export function TraitsFeaturesPanel({ c }: { c: CharacterSheetData }) {
           </div>
         )}
 
-        {/* SUBCLASS FEATURES (from lib) */}
+        {/* SUBCLASS FEATURES (legacy lib — only entries not in detailed lib) */}
         {subclassFeatures.length > 0 && (
           <div>
             <div className="text-[10px] font-semibold uppercase text-slate-400">
-              Subclass Features ({c.subclass ?? 'Subclass'}) • Level {level}
+              Additional Subclass Features ({c.subclass ?? 'Subclass'}) • Level {level}
             </div>
             <ul className="mt-1 space-y-1">
               {subclassFeatures

@@ -20,6 +20,8 @@ import { TraitsFeaturesPanel } from '@/components/character-sheet/TraitsFeatures
 import { SpellsPanel } from '@/components/character-sheet/SpellsPanel'
 import { PersonalityNotesPanel } from '@/components/character-sheet/PersonalityNotesPanel'
 import { ResourcesPanel } from '@/components/character-sheet/ResourcesPanel'
+import { getClassFeaturesAtLevel, getSubclassFeaturesAtLevel, formatActionType } from '@/lib/classFeatures'
+import type { ClassKey, SubclassKey } from '@/lib/subclasses'
 import { CombatStatsPanel } from '@/components/character-sheet/CombatStatsPanel'
 import { EquipmentPanel } from '@/components/character-sheet/EquipmentPanel'
 import { ActionsPanel } from '@/components/character-sheet/ActionsPanel'
@@ -552,12 +554,39 @@ export default function CharacterSheetPage() {
       />
 
       {/* Level-up banner */}
-      {isCaya && earnedLevel !== null && earnedLevel > currentLevel && (
-        <div className="rounded-lg border border-amber-500 bg-amber-950/40 px-4 py-3 text-sm text-amber-200">
-          <span className="font-bold text-amber-300">Level Up!</span> You&apos;ve earned enough XP to reach level {earnedLevel}.
-          Update your character sheet to reflect your new abilities, spells, and features.
-        </div>
-      )}
+      {isCaya && earnedLevel !== null && earnedLevel > currentLevel && (() => {
+        const classKey = normKey(c.main_job) as ClassKey
+        const subclassKey = (c.subclass ? normKey(c.subclass) : null) as SubclassKey | null
+        const newClassFeatures = getClassFeaturesAtLevel(classKey, earnedLevel)
+        const newSubFeatures = subclassKey ? getSubclassFeaturesAtLevel(subclassKey, earnedLevel) : []
+        const newFeatures = [...newClassFeatures, ...newSubFeatures]
+        return (
+          <div className="rounded-lg border border-amber-500 bg-amber-950/40 px-4 py-3 text-sm text-amber-200 space-y-2">
+            <div>
+              <span className="font-bold text-amber-300">Level Up!</span> You&apos;ve earned enough XP to reach level {earnedLevel}.
+              Update your character sheet to reflect your new abilities, spells, and features.
+            </div>
+            {newFeatures.length > 0 && (
+              <div className="rounded border border-amber-700/40 bg-amber-950/30 p-2">
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+                  Features You Gain at Level {earnedLevel}
+                </div>
+                <ul className="space-y-1.5">
+                  {newFeatures.map((f) => (
+                    <li key={f.id} className="text-[11px] leading-snug text-amber-100">
+                      <span className="font-semibold text-amber-200">{f.name}</span>
+                      <span className="ml-1.5 rounded bg-sky-900/40 border border-sky-700/40 px-1 py-0.5 text-[9px] font-semibold uppercase text-sky-200">
+                        {formatActionType(f.type)}
+                      </span>
+                      <div className="mt-0.5 text-[10px] text-amber-100/80">{f.shortDescription}</div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* XP progress bar (CAYA only) */}
       {isCaya && (

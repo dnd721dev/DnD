@@ -30,7 +30,8 @@ export const CLASS_ACTIONS: SheetAction[] = [
     actionType: 'bonus_action',
     gates: { kind: 'class', classKey: 'barbarian' },
     cost: { type: 'resource', key: 'barbarian.rage', amount: 1 },
-    description: 'Enter a rage (1 Rage use). Lasts 1 minute.',
+    description: 'Enter a rage (1 Rage use). Lasts 10 minutes (2024 PHB).',
+    featureId: 'barbarian.rage',
   },
 
   // ── Bard ─────────────────────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ export const CLASS_ACTIONS: SheetAction[] = [
     gates: { kind: 'class', classKey: 'bard' },
     cost: { type: 'resource', key: 'bard.bardic_inspiration', amount: 1 },
     description: 'Inspire an ally (spend 1 Bardic Inspiration die).',
+    featureId: 'bard.bardic_inspiration',
   },
 
   // ── Cleric ───────────────────────────────────────────────────────────────────
@@ -49,6 +51,7 @@ export const CLASS_ACTIONS: SheetAction[] = [
     gates: { kind: 'class', classKey: 'cleric' },
     cost: { type: 'resource', key: 'cleric.channel_divinity', amount: 1 },
     description: 'Use Channel Divinity (spend 1 use).',
+    featureId: 'cleric.channel_divinity',
   },
 
   // ── Druid ────────────────────────────────────────────────────────────────────
@@ -58,6 +61,7 @@ export const CLASS_ACTIONS: SheetAction[] = [
     gates: { kind: 'class', classKey: 'druid' },
     cost: { type: 'resource', key: 'druid.wild_shape', amount: 1 },
     description: 'Transform into a beast as a Bonus Action (2024 PHB).',
+    featureId: 'druid.wild_shape',
   },
 
   // ── Fighter ──────────────────────────────────────────────────────────────────
@@ -67,6 +71,7 @@ export const CLASS_ACTIONS: SheetAction[] = [
     gates: { kind: 'class', classKey: 'fighter' },
     cost: { type: 'resource', key: 'fighter.second_wind', amount: 1 },
     description: 'Regain 1d10 + Fighter level HP (once per short rest).',
+    featureId: 'fighter.second_wind',
   },
   {
     id: 'fighter-action-surge', name: 'Action Surge', category: 'Class',
@@ -74,6 +79,7 @@ export const CLASS_ACTIONS: SheetAction[] = [
     gates: { kind: 'class', classKey: 'fighter' },
     cost: { type: 'resource', key: 'fighter.action_surge', amount: 1 },
     description: 'Take one additional Action this turn (once per short rest). Costs no action slot.',
+    featureId: 'fighter.action_surge',
   },
 
   // ── Monk ─────────────────────────────────────────────────────────────────────
@@ -82,7 +88,8 @@ export const CLASS_ACTIONS: SheetAction[] = [
     actionType: 'bonus_action',
     gates: { kind: 'class', classKey: 'monk' },
     cost: { type: 'resource', key: 'monk.ki', amount: 1 },
-    description: 'Make two unarmed strikes as a Bonus Action (1 Ki).',
+    description: 'Make two unarmed strikes as a Bonus Action (1 Discipline Point).',
+    featureId: 'monk.martial_arts',
   },
   {
     id: 'monk-patient-defense', name: 'Patient Defense', category: 'Class',
@@ -106,6 +113,7 @@ export const CLASS_ACTIONS: SheetAction[] = [
     gates: { kind: 'class', classKey: 'paladin' },
     cost: { type: 'resource', key: 'paladin.lay_on_hands', amount: 5 },
     description: 'Restore HP from your healing pool (5 pts) as a Bonus Action (2024 PHB).',
+    featureId: 'paladin.lay_on_hands',
   },
   {
     id: 'paladin-divine-smite', name: 'Divine Smite', category: 'Class',
@@ -113,6 +121,7 @@ export const CLASS_ACTIONS: SheetAction[] = [
     gates: { kind: 'class', classKey: 'paladin' },
     cost: { type: 'none' },
     description: 'After hitting, expend a spell slot to deal radiant damage (Reaction, 2024 PHB).',
+    featureId: 'paladin.divine_smite',
   },
 
   // ── Ranger ───────────────────────────────────────────────────────────────────
@@ -122,6 +131,7 @@ export const CLASS_ACTIONS: SheetAction[] = [
     gates: { kind: 'class', classKey: 'ranger' },
     cost: { type: 'none' },
     description: "Mark a creature; deal +1d6 on hits against it.",
+    featureId: 'ranger.favored_enemy',
   },
 
   // ── Rogue ────────────────────────────────────────────────────────────────────
@@ -132,6 +142,7 @@ export const CLASS_ACTIONS: SheetAction[] = [
     cost: { type: 'perTurnFlag', flag: 'sneak_used_turn' },
     effects: [{ type: 'setFlag', flag: 'sneak_used_turn', value: true }],
     description: 'Add Sneak Attack dice to one attack per turn (free — part of the attack roll).',
+    featureId: 'rogue.sneak_attack',
   },
   {
     id: 'rogue-cunning-action', name: 'Cunning Action', category: 'Class',
@@ -139,6 +150,7 @@ export const CLASS_ACTIONS: SheetAction[] = [
     gates: { kind: 'class', classKey: 'rogue' },
     cost: { type: 'none' },
     description: 'Dash, Disengage, or Hide as a Bonus Action.',
+    featureId: 'rogue.cunning_action',
   },
   {
     id: 'rogue-steady-aim', name: 'Steady Aim', category: 'Class',
@@ -156,6 +168,7 @@ export const CLASS_ACTIONS: SheetAction[] = [
     gates: { kind: 'class', classKey: 'sorcerer' },
     cost: { type: 'resource', key: 'sorcerer.sorcery_points', amount: 1 },
     description: 'Use Font of Magic — convert points to/from spell slots or apply Metamagic.',
+    featureId: 'sorcerer.font_of_magic',
   },
 
   // ── Warlock ──────────────────────────────────────────────────────────────────
@@ -165,6 +178,7 @@ export const CLASS_ACTIONS: SheetAction[] = [
     gates: { kind: 'class', classKey: 'warlock' },
     cost: { type: 'none' },
     description: 'Invoke a chosen Eldritch Invocation effect (timing varies by invocation).',
+    featureId: 'warlock.eldritch_invocations',
   },
 
   // ── Wizard ───────────────────────────────────────────────────────────────────
@@ -174,6 +188,7 @@ export const CLASS_ACTIONS: SheetAction[] = [
     gates: { kind: 'class', classKey: 'wizard' },
     cost: { type: 'resource', key: 'wizard.arcane_recovery', amount: 1 },
     description: 'Recover spell slots on a short rest (once per long rest). No action cost.',
+    featureId: 'wizard.arcane_recovery',
   },
 ]
 
