@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { CharacterSheetData, SpellSlotsSummary } from './types'
-import { SRD_SPELLS, type SrdSpell } from '@/lib/srdspells'
+import { SRD_SPELLS, type SrdSpell, isConcentration, isRitual, getCantripDice, formatAreaOfEffect, formatDamageType, getDescription } from '@/lib/srdspells'
 import { formatMod } from './utils'
 import { supabase } from '@/lib/supabase'
 import { getPreparedSpellCount } from '@/lib/classes'
@@ -119,19 +119,56 @@ function SpellDetailModal({
           </div>
         )}
 
+        {/* Badge row — concentration / ritual / AoE / damage type */}
+        {(isConcentration(spell) || isRitual(spell) || spell.areaOfEffect || spell.damageType || spell.targets) && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {isConcentration(spell) && (
+              <span className="rounded bg-cyan-900/40 border border-cyan-700/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-200">⊙ Concentration</span>
+            )}
+            {isRitual(spell) && (
+              <span className="rounded bg-violet-900/40 border border-violet-700/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-200">✦ Ritual</span>
+            )}
+            {spell.areaOfEffect && (
+              <span className="rounded bg-slate-800 border border-slate-600 px-2 py-0.5 text-[10px] text-slate-200">📐 {formatAreaOfEffect(spell)}</span>
+            )}
+            {spell.damageType && (
+              <span className="rounded bg-amber-900/40 border border-amber-700/40 px-2 py-0.5 text-[10px] text-amber-200">🔥 {formatDamageType(spell)}</span>
+            )}
+            {spell.targets && (
+              <span className="rounded bg-slate-800 border border-slate-600 px-2 py-0.5 text-[10px] text-slate-300">🎯 {spell.targets}</span>
+            )}
+          </div>
+        )}
+
         {/* Damage */}
         {spell.damage && (
           <div className="mb-2 rounded-lg bg-slate-900/60 p-2">
             <div className="text-[10px] font-semibold uppercase text-slate-400">Damage</div>
             <div className="text-[11px] font-mono text-amber-300">{spell.damage}</div>
+            {/* Cantrip scaling — show the active tier based on character level. */}
+            {spell.level === 0 && spell.cantripScaling && (
+              <div className="mt-1 text-[10px] text-slate-400">
+                Scales: <span className="font-mono text-slate-200">{spell.cantripScaling.l5}</span> @5 ·{' '}
+                <span className="font-mono text-slate-200">{spell.cantripScaling.l11}</span> @11 ·{' '}
+                <span className="font-mono text-slate-200">{spell.cantripScaling.l17}</span> @17
+              </div>
+            )}
           </div>
         )}
 
-        {/* Notes */}
-        {spell.notes && (
+        {/* Description (prefer fullDescription, fall back to notes) */}
+        {(spell.fullDescription || spell.notes) && (
           <div className="mb-2 rounded-lg bg-slate-900/60 p-2">
-            <div className="text-[10px] font-semibold uppercase text-slate-400">Notes</div>
-            <div className="whitespace-pre-wrap text-[11px] text-slate-200">{spell.notes}</div>
+            <div className="text-[10px] font-semibold uppercase text-slate-400">Description</div>
+            <div className="whitespace-pre-wrap text-[11px] leading-relaxed text-slate-200">{getDescription(spell)}</div>
+          </div>
+        )}
+
+        {/* At Higher Levels callout (leveled spells) */}
+        {spell.higherLevels && (
+          <div className="mb-2 rounded-lg bg-indigo-950/40 border border-indigo-800/40 p-2">
+            <div className="text-[10px] font-semibold uppercase text-indigo-300">At Higher Levels</div>
+            <div className="whitespace-pre-wrap text-[11px] text-indigo-100">{spell.higherLevels}</div>
           </div>
         )}
 

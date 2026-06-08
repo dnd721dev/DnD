@@ -60,8 +60,15 @@ export const LEVEL7_SPELLS: SrdSpell[] = [
     duration: 'Instantaneous',
     saveAbility: 'con',
     damage: '7d8+30',
+    damageType: 'necrotic',
     notes: 'Con save for half necrotic damage. Humanoid killed rises as zombie permanently under your control.',
     classes: ['sorcerer', 'warlock', 'wizard'],
+    concentration: false,
+    ritual: false,
+    targets: 'A creature you can see within 60 ft',
+    fullDescription:
+      'You send negative energy coursing through a creature that you can see within range, causing it searing pain. The target must make a Constitution saving throw. It takes 7d8 + 30 necrotic damage on a failed save, or half as much damage on a successful one. A humanoid killed by this spell rises at the start of your next turn as a zombie that is permanently under your command, following your verbal orders to the best of its ability.',
+    source: 'srd-5.2',
   },
   {
     name: 'Fire Storm',
@@ -193,6 +200,12 @@ export const LEVEL7_SPELLS: SrdSpell[] = [
     duration: 'Instantaneous',
     notes: 'Return a creature dead up to 100 years to life with full HP. Can restore a destroyed body.',
     classes: ['bard', 'cleric'],
+    concentration: false,
+    ritual: false,
+    targets: 'A deceased creature you touch',
+    fullDescription:
+      'You touch a dead creature that has been dead for no more than a century, that didn\'t die of old age, and that isn\'t undead. If its soul is free and willing, the target is restored to life with all its hit points. This spell closes all mortal wounds and restores any missing body parts. Coming back from the dead is an ordeal — the target takes a −4 penalty to all attack rolls, saving throws, and ability checks. Every time the target finishes a long rest, the penalty is reduced by 1 until it disappears. Casting this spell to restore life to a creature that has been dead for more than a year ages you by 1d10 years. The 1,000 gp diamond is consumed.',
+    source: 'srd-5.2',
   },
   {
     name: 'Reverse Gravity',
@@ -205,6 +218,13 @@ export const LEVEL7_SPELLS: SrdSpell[] = [
     saveAbility: 'dex',
     notes: 'Reverse gravity in a 50-ft radius, 100-ft tall cylinder. Unsecured objects and creatures fall upward (Dex save to grab something).',
     classes: ['druid', 'sorcerer', 'wizard'],
+    concentration: true,
+    ritual: false,
+    targets: 'A 50-ft radius, 100-ft tall cylinder',
+    fullDescription:
+      'This spell reverses gravity in a 50-foot-radius, 100-foot-high cylinder centered on a point within range. All creatures and objects that aren\'t somehow anchored to the ground in the area fall upward and reach the top of the area when you cast this spell. A creature can make a Dexterity saving throw to grab onto a fixed object it can reach, thus avoiding the fall. If some solid object (such as a ceiling) is encountered in this fall, falling objects and creatures strike it just as they would during a normal downward fall. If an object or creature reaches the top of the area without striking anything, it remains there, oscillating slightly, for the duration. At the end of the duration, affected objects and creatures fall back down.',
+    areaOfEffect: { shape: 'cylinder', sizeFt: 50, heightFt: 100 },
+    source: 'srd-5.2',
   },
   {
     name: 'Sequester',

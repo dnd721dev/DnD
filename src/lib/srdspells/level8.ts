@@ -83,6 +83,14 @@ export const LEVEL8_SPELLS: SrdSpell[] = [
     saveAbility: 'wis',
     notes: 'Wis save or charmed and telepathically controlled (any creature type). Repeats save when damaged.',
     classes: ['bard', 'sorcerer', 'warlock', 'wizard'],
+    concentration: true,
+    ritual: false,
+    targets: 'One creature you can see within range',
+    fullDescription:
+      'You attempt to beguile a creature that you can see within range. It must succeed on a Wisdom saving throw or be charmed by you for the duration. If you or creatures friendly to you are fighting it, it has advantage on the saving throw. While the creature is charmed, you have a telepathic link with it as long as the two of you are on the same plane of existence. You can use this telepathic link to issue commands to the creature while you are conscious (no action required), which it does its best to obey. You can specify a simple and general course of action, such as "Attack that creature," "Run over there," or "Fetch that object." Each time the target takes damage, it makes a new Wisdom saving throw against the spell. If the saving throw succeeds, the spell ends.',
+    higherLevels: 'When you cast this spell using a 9th-level spell slot, the duration is concentration, up to 8 hours.',
+    mechanicalEffects: ['charmed'],
+    source: 'srd-5.2',
   },
   {
     name: 'Earthquake',
@@ -215,8 +223,17 @@ export const LEVEL8_SPELLS: SrdSpell[] = [
     duration: 'Instantaneous',
     saveAbility: 'con',
     damage: '12d6',
+    damageType: 'radiant',
     notes: 'Brilliant light in 60-ft radius. Con save for radiant damage (half on success) and blinded for 1 minute (save each turn to end).',
     classes: ['cleric', 'druid', 'sorcerer', 'wizard'],
+    concentration: false,
+    ritual: false,
+    targets: 'Each creature in a 60-ft radius sphere',
+    fullDescription:
+      'Brilliant sunlight flashes in a 60-foot radius centered on a point you choose within range. Each creature in that light must make a Constitution saving throw. On a failed save, a creature takes 12d6 radiant damage and is blinded for 1 minute. On a successful save, it takes half as much damage and isn\'t blinded by this spell. Undead and oozes have disadvantage on this saving throw. A creature blinded by this spell makes another Constitution save at the end of each of its turns. On a successful save, it is no longer blinded. This spell dispels any darkness in its area that was created by a spell.',
+    areaOfEffect: { shape: 'sphere', sizeFt: 60 },
+    mechanicalEffects: ['blinded'],
+    source: 'srd-5.2',
   },
   {
     name: 'Telepathy',

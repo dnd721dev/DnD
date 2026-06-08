@@ -13,6 +13,7 @@ import { LEVEL6_SPELLS } from './level6'
 import { LEVEL7_SPELLS } from './level7'
 import { LEVEL8_SPELLS } from './level8'
 import { LEVEL9_SPELLS } from './level9'
+import { CLASS_GAP_SPELLS } from './class_gap'
 
 // Combine all spells into one big list the browser uses
 export const SRD_SPELLS: SrdSpell[] = [
@@ -26,7 +27,10 @@ export const SRD_SPELLS: SrdSpell[] = [
   ...LEVEL7_SPELLS,
   ...LEVEL8_SPELLS,
   ...LEVEL9_SPELLS,
+  ...CLASS_GAP_SPELLS,
 ]
 
 // Re-export types so you can import them from '@/lib/srdspells'
 export * from './types'
+// Re-export helpers (isConcentration, isRitual, getCantripDice, formatAreaOfEffect, …)
+export * from './helpers'

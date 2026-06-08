@@ -74,8 +74,8 @@ function SpellCard({ spell }: { spell: SrdSpell }) {
         )}
       </div>
 
-      {spell.notes && (
-        <p className="text-slate-400 text-[11px] leading-relaxed">{spell.notes}</p>
+      {(spell.fullDescription || spell.notes) && (
+        <p className="text-slate-400 text-[11px] leading-relaxed">{spell.fullDescription ?? spell.notes}</p>
       )}
     </div>
   )

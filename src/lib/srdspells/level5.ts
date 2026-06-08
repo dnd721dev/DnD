@@ -115,8 +115,18 @@ export const LEVEL5_SPELLS: SrdSpell[] = [
     duration: 'Instantaneous',
     saveAbility: 'con',
     damage: '8d8',
+    damageType: 'cold',
     notes: 'Con save for half cold damage.',
+    upcastDamage: '1d8',
     classes: ['sorcerer', 'wizard'],
+    concentration: false,
+    ritual: false,
+    targets: 'Each creature in a 60-ft cone',
+    fullDescription:
+      'A blast of cold air erupts from your hands. Each creature in a 60-foot cone must make a Constitution saving throw. A creature takes 8d8 cold damage on a failed save, or half as much damage on a successful one. A creature killed by this spell becomes a frozen statue until it thaws.',
+    higherLevels: 'When you cast this spell using a spell slot of 6th level or higher, the damage increases by 1d8 for each slot level above 5th.',
+    areaOfEffect: { shape: 'cone', sizeFt: 60 },
+    source: 'srd-5.2',
   },
   {
     name: 'Conjure Elemental',
@@ -272,6 +282,14 @@ export const LEVEL5_SPELLS: SrdSpell[] = [
     saveAbility: 'wis',
     notes: 'Wis save or paralyzed (any creature type). Repeats save each turn.',
     classes: ['bard', 'sorcerer', 'warlock', 'wizard'],
+    concentration: true,
+    ritual: false,
+    targets: 'One creature you can see within range',
+    fullDescription:
+      'Choose a creature that you can see within range. The target must succeed on a Wisdom saving throw or be paralyzed for the duration. At the end of each of its turns, the target can make another Wisdom save. On a success, the spell ends on the target.',
+    higherLevels: 'When you cast this spell using a spell slot of 6th level or higher, you can target one additional creature for each slot level above 5th. The creatures must be within 30 ft of each other.',
+    mechanicalEffects: ['paralyzed'],
+    source: 'srd-5.2',
   },
   {
     name: 'Insect Plague',
@@ -307,7 +325,15 @@ export const LEVEL5_SPELLS: SrdSpell[] = [
     duration: 'Instantaneous',
     damage: '3d8+3',
     notes: 'Up to 6 creatures each regain 3d8 + spellcasting modifier HP.',
+    upcastDamage: '1d8',
     classes: ['bard', 'cleric', 'druid'],
+    concentration: false,
+    ritual: false,
+    targets: 'Up to six creatures within 60 ft',
+    fullDescription:
+      'A wave of healing energy washes out from a point of your choice within range. Choose up to six creatures in a 30-foot-radius sphere centered on that point. Each target regains hit points equal to 3d8 + your spellcasting ability modifier. This spell has no effect on undead or constructs.',
+    higherLevels: 'When you cast this spell using a spell slot of 6th level or higher, the healing increases by 1d8 for each slot level above 5th.',
+    source: 'srd-5.2',
   },
   {
     name: 'Mislead',
@@ -469,6 +495,12 @@ export const LEVEL5_SPELLS: SrdSpell[] = [
     duration: 'Up to 10 minutes (concentration)',
     notes: 'Invisible immune-to-damage wall of force (up to 10 panels 10 × 10 ft). Nothing passes through.',
     classes: ['wizard'],
+    concentration: true,
+    ritual: false,
+    targets: 'An invisible barrier',
+    fullDescription:
+      'An invisible wall of force springs into existence at a point you choose within range. The wall appears in any orientation you choose, as a horizontal or vertical barrier or at an angle. It can be free floating or resting on a solid surface. You can form it into a hemispherical dome or a sphere with a radius of up to 10 feet, or a flat surface made up of ten 10-foot-by-10-foot panels. Each panel must be contiguous with another panel. In any form, the wall is 1/4 inch thick. It lasts for the duration. If the wall cuts through a creature\'s space when it appears, the creature is pushed to one side of the wall (your choice). Nothing can physically pass through the wall. It is immune to all damage and can\'t be dispelled by Dispel Magic. A Disintegrate spell destroys the wall instantly.',
+    source: 'srd-5.2',
   },
   {
     name: 'Wall of Stone',

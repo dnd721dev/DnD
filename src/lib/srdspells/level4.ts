@@ -47,6 +47,14 @@ export const LEVEL4_SPELLS: SrdSpell[] = [
     saveAbility: 'cha',
     notes: 'Cha save or banished to a harmless demiplane (native plane creatures are permanently banished if concentration is held).',
     classes: ['cleric', 'paladin', 'sorcerer', 'warlock', 'wizard'],
+    concentration: true,
+    ritual: false,
+    targets: 'One creature you can see within range',
+    fullDescription:
+      'You attempt to send one creature that you can see within range to another plane of existence. The target must succeed on a Charisma saving throw or be banished. If the target is native to the plane of existence you\'re on, you banish the target to a harmless demiplane. While there, the target is incapacitated. The target remains there until the spell ends, at which point the target reappears in the space it left or in the nearest unoccupied space if that space is occupied. If the target is native to a different plane of existence than the one you\'re on, the target is banished with a faint popping noise, returning to its home plane. If the spell ends before 1 minute has passed, the target reappears in the space it left or in the nearest unoccupied space. Otherwise, the target doesn\'t return.',
+    higherLevels: 'When you cast this spell using a spell slot of 5th level or higher, you can target one additional creature for each slot level above 4th.',
+    mechanicalEffects: ['incapacitated'],
+    source: 'srd-5.2',
   },
   {
     name: 'Blight',
@@ -328,6 +336,12 @@ export const LEVEL4_SPELLS: SrdSpell[] = [
     saveAbility: 'wis',
     notes: 'Transform creature into a beast of equal or lower CR. Reverts if reduced to 0 HP.',
     classes: ['bard', 'druid', 'sorcerer', 'wizard'],
+    concentration: true,
+    ritual: false,
+    targets: 'One creature you can see within range',
+    fullDescription:
+      'This spell transforms a creature that you can see within range into a new form. An unwilling creature must make a Wisdom saving throw to avoid the effect. The spell has no effect on a shapechanger or a creature with 0 hit points. The transformation lasts for the duration, or until the target drops to 0 hit points or dies. The new form can be any beast whose challenge rating is equal to or less than the target\'s (or the target\'s level, if it doesn\'t have a challenge rating). The target\'s game statistics, including mental ability scores, are replaced by the statistics of the chosen beast. The target retains its alignment and personality. The target assumes the hit points of its new form, and when it reverts, the creature returns to the number of hit points it had before it transformed. If it reverts as a result of dropping to 0 hit points, any excess damage carries over.',
+    source: 'srd-5.2',
   },
   {
     name: 'Stone Shape',
@@ -362,6 +376,16 @@ export const LEVEL4_SPELLS: SrdSpell[] = [
     saveAbility: 'dex',
     damage: '5d8',
     notes: 'Create a wall of fire (60 × 20 × 1 ft or ring 20 ft diameter). Dex save for fire damage on the specified side.',
+    damageType: 'fire',
+    upcastDamage: '1d8',
     classes: ['druid', 'sorcerer', 'wizard'],
+    concentration: true,
+    ritual: false,
+    targets: 'Creatures within 10 ft of the wall',
+    fullDescription:
+      'You create a wall of fire on a solid surface within range. You can make the wall up to 60 feet long, 20 feet high, and 1 foot thick, or a ringed wall up to 20 feet in diameter, 20 feet high, and 1 foot thick. The wall is opaque and lasts for the duration. When the wall appears, each creature within its area must make a Dexterity saving throw. On a failed save, a creature takes 5d8 fire damage, or half as much damage on a successful save. One side of the wall, selected by you when you cast this spell, deals 5d8 fire damage to each creature that ends its turn within 10 feet of that side or inside the wall. A creature takes the same damage when it enters the wall for the first time on a turn or ends its turn there. The other side of the wall deals no damage.',
+    higherLevels: 'When you cast this spell using a spell slot of 5th level or higher, the damage increases by 1d8 for each slot level above 4th.',
+    areaOfEffect: { shape: 'line', sizeFt: 60, widthFt: 1, heightFt: 20 },
+    source: 'srd-5.2',
   },
 ]

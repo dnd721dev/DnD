@@ -37,8 +37,16 @@ export const LEVEL6_SPELLS: SrdSpell[] = [
     duration: 'Instantaneous',
     saveAbility: 'dex',
     damage: '10d8',
+    damageType: 'lightning',
     notes: 'Dex save for lightning damage to primary target; bolt arcs to up to 3 secondary targets (same save).',
     classes: ['sorcerer', 'wizard'],
+    concentration: false,
+    ritual: false,
+    targets: 'One primary creature + up to three secondaries within 30 ft of it',
+    fullDescription:
+      'You unleash a stroke of lightning that arcs toward a target of your choice that you can see within range. Three bolts then leap from that target to as many as three other targets, each of which must be within 30 feet of the first target. A target can be a creature or an object and can be targeted by only one of the bolts. A target must make a Dexterity saving throw. The target takes 10d8 lightning damage on a failed save, or half as much damage on a successful one.',
+    higherLevels: 'When you cast this spell using a spell slot of 7th level or higher, one additional bolt leaps from the first target to another target for each slot level above 6th.',
+    source: 'srd-5.2',
   },
   {
     name: 'Circle of Death',
@@ -96,8 +104,17 @@ export const LEVEL6_SPELLS: SrdSpell[] = [
     duration: 'Instantaneous',
     saveAbility: 'dex',
     damage: '10d6+40',
+    damageType: 'force',
     notes: 'Dex save or massive force damage. Creature reduced to 0 HP is completely destroyed.',
+    upcastDamage: '3d6',
     classes: ['sorcerer', 'wizard'],
+    concentration: false,
+    ritual: false,
+    targets: 'One creature, object, or force barrier you can see',
+    fullDescription:
+      'A thin green ray springs from your pointing finger to a target that you can see within range. The target can be a creature, an object, or a creation of magical force, such as the wall created by Wall of Force. A creature targeted by this spell must make a Dexterity saving throw. On a failed save, the target takes 10d6 + 40 force damage. If this damage reduces the target to 0 hit points, it is disintegrated. A disintegrated creature and everything it is wearing and carrying, except magic items, are reduced to a pile of fine gray dust. The creature can be restored to life only by means of a True Resurrection or Wish spell.',
+    higherLevels: 'When you cast this spell using a spell slot of 7th level or higher, the damage increases by 3d6 for each slot level above 6th.',
+    source: 'srd-5.2',
   },
   {
     name: "Drawmij's Instant Summons",
@@ -217,6 +234,13 @@ export const LEVEL6_SPELLS: SrdSpell[] = [
     damage: '70',
     notes: 'Restore 70 HP and end blindness, deafness, and diseases.',
     classes: ['cleric', 'druid'],
+    concentration: false,
+    ritual: false,
+    targets: 'A creature you can see within 60 ft',
+    fullDescription:
+      'Choose a creature that you can see within range. A surge of positive energy washes through the creature, causing it to regain 70 hit points. This spell also ends blindness, deafness, and any diseases affecting the target. This spell has no effect on constructs or undead.',
+    higherLevels: 'When you cast this spell using a spell slot of 7th level or higher, the amount of healing increases by 10 for each slot level above 6th.',
+    source: 'srd-5.2',
   },
   {
     name: "Heroes' Feast",

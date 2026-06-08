@@ -81,8 +81,16 @@ export const LEVEL9_SPELLS: SrdSpell[] = [
     duration: 'Instantaneous',
     saveAbility: 'dex',
     damage: '40d6',
+    damageType: 'fire',
     notes: 'Four meteors each deal 20d6 fire + 20d6 bludgeoning in 40-ft radius (Dex save for half). Can target the same or different points.',
     classes: ['sorcerer', 'wizard'],
+    concentration: false,
+    ritual: false,
+    targets: 'Each creature in four 40-ft radius spheres',
+    fullDescription:
+      'Blazing orbs of fire plummet to the ground at four different points you can see within range. Each creature in a 40-foot-radius sphere centered on each point you choose must make a Dexterity saving throw. The sphere spreads around corners. A creature takes 20d6 fire damage and 20d6 bludgeoning damage on a failed save, or half as much damage on a successful one. A creature in the area of more than one fiery burst is affected only once. The spell damages objects in the area and ignites flammable objects that aren\'t being worn or carried.',
+    areaOfEffect: { shape: 'sphere', sizeFt: 40 },
+    source: 'srd-5.2',
   },
   {
     name: 'Power Word Heal',
@@ -153,6 +161,12 @@ export const LEVEL9_SPELLS: SrdSpell[] = [
     duration: 'Instantaneous',
     notes: 'Gain 1d4+1 extra turns. Time resumes if you move >1000 ft away or affect another creature.',
     classes: ['sorcerer', 'wizard'],
+    concentration: false,
+    ritual: false,
+    targets: 'Self',
+    fullDescription:
+      'You briefly stop the flow of time for everyone but yourself. No time passes for other creatures while you take 1d4 + 1 turns in a row, during which you can use actions and move as normal. This spell ends if one of the actions you use during this period, or any effects that you create during this period, affects a creature other than you or an object being worn or carried by someone other than you. In addition, the spell ends if you move to a place more than 1,000 feet from the location where you cast it.',
+    source: 'srd-5.2',
   },
   {
     name: 'True Polymorph',
@@ -200,5 +214,11 @@ export const LEVEL9_SPELLS: SrdSpell[] = [
     duration: 'Instantaneous',
     notes: 'Reshape reality as you desire with risks for going beyond duplicating lower spells. No standard save/damage; DM adjudication.',
     classes: ['sorcerer', 'wizard'],
+    concentration: false,
+    ritual: false,
+    targets: 'Reality itself',
+    fullDescription:
+      'Wish is the mightiest spell a mortal creature can cast. By simply speaking aloud, you can alter the very foundations of reality in accord with your desires. The basic use of this spell is to duplicate any other spell of 8th level or lower. You don\'t need to meet any requirements in that spell, including costly components. The spell simply takes effect. Alternatively, you can create one of the following effects of your choice: create one object of up to 25,000 gp in value; allow up to 20 creatures you can see to regain all hit points and end all effects on them; grant up to 10 creatures resistance to a damage type for 8 hours; grant up to 10 creatures immunity to a single spell or magical effect for 8 hours; undo a single recent event by forcing a reroll of any roll made within the last round. You might be able to achieve more by casting Wish, but doing so carries enormous risk: the stress of casting deals 1d10 necrotic damage per level of any spell you cast this way (no save), you can\'t cast any spell with a casting time of greater than 1 action, your Strength drops to 3 for 2d4 days, and there is a 33% chance you cannot cast Wish ever again.',
+    source: 'srd-5.2',
   },
 ]
