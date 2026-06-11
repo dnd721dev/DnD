@@ -1404,6 +1404,23 @@ export default function TableClient({ sessionId }: TableClientProps) {
           )
         })()}
 
+        {/* GM "Viewing as <player>" pill — only visible when impersonating a player. */}
+        {isGm && gmViewWallet && (() => {
+          const viewed = sessionPlayers.find((p) => p.wallet_address === gmViewWallet)
+          const label = viewed?.display_name?.trim() || `${gmViewWallet.slice(0, 6)}…${gmViewWallet.slice(-4)}`
+          return (
+            <button
+              type="button"
+              onClick={() => setGmViewWallet(null)}
+              className="pointer-events-auto fixed bottom-3 left-3 z-[60] rounded-full border border-amber-700/60 bg-amber-900/70 px-3 py-1 text-[11px] font-semibold text-amber-100 shadow-lg backdrop-blur-md hover:bg-amber-900/90"
+              title="Click to return to GM Free View"
+            >
+              👤 Viewing as <span className="text-amber-300">{label}</span>
+              <span className="ml-2 text-[10px] text-amber-300/70">× clear</span>
+            </button>
+          )
+        })()}
+
         <div className="relative flex-1 min-h-0 min-w-0">
           <div className="absolute inset-0 flex flex-col overflow-hidden">
             {/* GM control bar: View As + Map selector */}

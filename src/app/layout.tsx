@@ -2,6 +2,7 @@ import './globals.css'
 import Providers from './providers'
 import WalletJwtGate from '@/components/auth/WalletJwtGate'
 import Header from '@/components/layout/header' // <-- make sure this path matches your project
+import { ToastHub } from '@/components/ui/ToastHub'
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -11,6 +12,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <WalletJwtGate />
           <Header />
           <main className="px-6 py-6">{children}</main>
+          <ToastHub />
         </Providers>
       </body>
     </html>

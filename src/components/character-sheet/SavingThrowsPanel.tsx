@@ -6,11 +6,19 @@ export function SavingThrowsPanel({
   savingThrowSet,
   profBonus,
   onRollSavingThrow,
+  storedProfsEmpty,
+  onSyncFromClass,
 }: {
   abilities: Abilities
   savingThrowSet: Set<string>
   profBonus: number
   onRollSavingThrow: (abilityKey: keyof Abilities) => void
+  /** When true, the row's saving_throw_profs column was empty and the displayed
+   *  set was derived from CLASS_DATA as a fallback. Surfacing this lets us
+   *  offer the player a one-click "save these back to my row" sync. */
+  storedProfsEmpty?: boolean
+  /** Persist the currently-displayed saving throw set into the character row. */
+  onSyncFromClass?: () => void
 }) {
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
@@ -44,6 +52,19 @@ export function SavingThrowsPanel({
         <div className="mt-2 text-[10px] text-slate-500">
           Proficiency bonus: {formatMod(profBonus)}
         </div>
+        {storedProfsEmpty && savingThrowSet.size > 0 && onSyncFromClass && (
+          <div className="mt-2 flex items-center justify-between rounded-md border border-amber-700/50 bg-amber-950/30 px-2 py-1 text-[10px] text-amber-200">
+            <span>Saves shown were derived from your class.</span>
+            <button
+              type="button"
+              onClick={onSyncFromClass}
+              className="rounded border border-amber-600/60 bg-amber-900/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-100 hover:bg-amber-900/60"
+              title="Save these proficiencies to your character row"
+            >
+              Sync from class
+            </button>
+          </div>
+        )}
       </div>
     </section>
   )

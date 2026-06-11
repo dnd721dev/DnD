@@ -25,6 +25,10 @@ export function CombatStatsPanel({
   onDamage,
   onAdjustHp,
   onSetTempHp,
+  concentratingOn,
+  onEndConcentration,
+  deathSaves,
+  onAdjustDeathSave,
 }: {
   d: DerivedStats
   tempHp: number
@@ -32,6 +36,14 @@ export function CombatStatsPanel({
   onDamage: () => void
   onAdjustHp: (delta: number) => void
   onSetTempHp: (val: number) => void
+  /** Name of the spell the character is concentrating on (null = not concentrating). */
+  concentratingOn?: string | null
+  /** Called when the player clicks the chip to drop concentration. */
+  onEndConcentration?: () => void
+  /** Current death save counts when hpCurrent === 0. */
+  deathSaves?: { s: number; f: number } | null
+  /** Toggle a success / failure pip. kind = 's' | 'f', delta = +1/-1. */
+  onAdjustDeathSave?: (kind: 's' | 'f', delta: 1 | -1) => void
 }) {
   const [hpInput, setHpInput] = useState('')
   const [tempInput, setTempInput] = useState('')
@@ -85,9 +97,17 @@ export function CombatStatsPanel({
           </div>
         </div>
 
-        <div className="rounded-lg bg-slate-900/80 p-2">
+        <div
+          className="rounded-lg bg-slate-900/80 p-2"
+          title={d.initiativeBonusSources?.length ? d.initiativeBonusSources.join(' · ') : undefined}
+        >
           <div className="text-[10px] uppercase text-slate-400">Initiative</div>
           <div className="text-xl font-bold text-slate-50">{formatMod(d.initiative)}</div>
+          {d.initiativeBonusSources && d.initiativeBonusSources.length > 1 && (
+            <div className="mt-0.5 text-[9px] text-slate-500 truncate">
+              {d.initiativeBonusSources.slice(1).join(' · ')}
+            </div>
+          )}
         </div>
 
         {/* HP with bar + temp HP */}
@@ -152,6 +172,91 @@ export function CombatStatsPanel({
             </div>
           </div>
         </div>
+
+        {/* Wave AC5: concentration chip — only when actually concentrating. */}
+        {concentratingOn && (
+          <div className="col-span-2 rounded-lg border border-cyan-700/50 bg-cyan-950/30 px-2 py-1.5 text-[11px] text-cyan-100 flex items-center justify-between gap-2">
+            <span>
+              <span className="mr-1.5 font-semibold uppercase tracking-wide text-cyan-300">⊙ Concentrating</span>
+              on <span className="font-semibold text-cyan-200">{concentratingOn}</span>
+            </span>
+            {onEndConcentration && (
+              <button
+                type="button"
+                onClick={onEndConcentration}
+                className="rounded border border-cyan-700/60 bg-cyan-900/40 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-100 hover:bg-cyan-900/60"
+              >
+                End
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Wave AC5: death save tracker at 0 HP. */}
+        {d.hpCurrent === 0 && deathSaves && onAdjustDeathSave && (
+          <div className="col-span-2 rounded-lg border border-red-700/50 bg-red-950/30 p-2 text-[11px] text-red-100">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="font-semibold uppercase tracking-wide text-red-300">☠ Death Saves</span>
+              <span className="text-[10px] text-red-300/70">{deathSaves.s}/3 successes · {deathSaves.f}/3 failures</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-emerald-300">Success:</span>
+                {[1, 2, 3].map((i) => (
+                  <button
+                    key={`s${i}`}
+                    type="button"
+                    onClick={() => onAdjustDeathSave('s', i <= deathSaves.s ? -1 : 1)}
+                    className={`h-3.5 w-3.5 rounded-full border ${i <= deathSaves.s ? 'border-emerald-500 bg-emerald-500/80' : 'border-emerald-700/50 bg-transparent'}`}
+                    aria-label={`success ${i}`}
+                  />
+                ))}
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-red-300">Failure:</span>
+                {[1, 2, 3].map((i) => (
+                  <button
+                    key={`f${i}`}
+                    type="button"
+                    onClick={() => onAdjustDeathSave('f', i <= deathSaves.f ? -1 : 1)}
+                    className={`h-3.5 w-3.5 rounded-full border ${i <= deathSaves.f ? 'border-red-500 bg-red-500/80' : 'border-red-700/50 bg-transparent'}`}
+                    aria-label={`failure ${i}`}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Wave AC5: resistances/vulnerabilities/immunities (subclass effects populate these). */}
+        {((d.flags?.resistances?.length ?? 0) > 0 || (d.flags?.vulnerabilities?.length ?? 0) > 0 || (d.flags?.immunities?.length ?? 0) > 0) && (
+          <div className="col-span-2 space-y-1 rounded-lg bg-slate-900/80 p-2">
+            {(d.flags?.resistances?.length ?? 0) > 0 && (
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="text-[10px] uppercase text-slate-400">Resist:</span>
+                {d.flags.resistances.map((t: string) => (
+                  <span key={t} className="rounded bg-emerald-900/40 border border-emerald-700/40 px-1.5 py-0.5 text-[10px] text-emerald-200">{t}</span>
+                ))}
+              </div>
+            )}
+            {(d.flags?.vulnerabilities?.length ?? 0) > 0 && (
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="text-[10px] uppercase text-slate-400">Vuln:</span>
+                {d.flags.vulnerabilities.map((t: string) => (
+                  <span key={t} className="rounded bg-rose-900/40 border border-rose-700/40 px-1.5 py-0.5 text-[10px] text-rose-200">{t}</span>
+                ))}
+              </div>
+            )}
+            {(d.flags?.immunities?.length ?? 0) > 0 && (
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="text-[10px] uppercase text-slate-400">Immune:</span>
+                {d.flags.immunities.map((t: string) => (
+                  <span key={t} className="rounded bg-violet-900/40 border border-violet-700/40 px-1.5 py-0.5 text-[10px] text-violet-200">{t}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="rounded-lg bg-slate-900/80 p-2">
           <div className="text-[10px] uppercase text-slate-400">Prof Bonus</div>

@@ -361,6 +361,23 @@ export default function RecordingEditorPage() {
     void fetchRecording()
   }
 
+  // ── FLAC export (in-browser transcode via ffmpeg.wasm) ─────────────────────
+  // Tracks are stored as OGG/opus by LiveKit egress; the platform goal calls
+  // for FLAC multi-track exports, so we transcode client-side on demand.
+  const [flacBusy, setFlacBusy] = useState<Record<string, boolean>>({})
+  async function downloadTrackAsFlac(key: string, url: string, name: string) {
+    setFlacBusy((prev) => ({ ...prev, [key]: true }))
+    try {
+      const { downloadAsFlac } = await import('@/lib/flacTranscode')
+      await downloadAsFlac(url, name)
+    } catch (e: any) {
+      console.error('[recording] FLAC transcode failed', e)
+      alert(`FLAC export failed: ${e?.message ?? 'unknown error'}`)
+    } finally {
+      setFlacBusy((prev) => ({ ...prev, [key]: false }))
+    }
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -424,6 +441,16 @@ export default function RecordingEditorPage() {
             >
               ⬇ Download master
             </a>
+          )}
+          {isReady && recording.file_url && (
+            <button
+              onClick={() => void downloadTrackAsFlac('master', recording.file_url!, 'session-master.flac')}
+              disabled={flacBusy['master']}
+              className="rounded-md bg-indigo-900/60 px-3 py-1.5 text-xs text-indigo-200 hover:bg-indigo-800/70 disabled:opacity-50"
+              title="Convert the master recording to FLAC and download (first use loads the converter, ~30 MB)"
+            >
+              {flacBusy['master'] ? 'Converting…' : '⬇ Master FLAC'}
+            </button>
           )}
           {recording.published ? (
             <div className="flex items-center gap-2">
@@ -865,6 +892,17 @@ export default function RecordingEditorPage() {
                         >
                           ↓ Audio
                         </a>
+                      )}
+                      {/* FLAC export — transcoded in-browser from the OGG track. */}
+                      {track.file_status === 'ready' && track.file_url && (
+                        <button
+                          onClick={() => void downloadTrackAsFlac(track.id, track.file_url!, `${label}.flac`)}
+                          disabled={flacBusy[track.id]}
+                          className="rounded bg-indigo-900/60 px-2 py-0.5 text-xs text-indigo-200 hover:bg-indigo-800/70 disabled:opacity-50"
+                          title="Convert this track to FLAC and download (first use loads the converter, ~30 MB)"
+                        >
+                          {flacBusy[track.id] ? 'Converting…' : '↓ FLAC'}
+                        </button>
                       )}
                       <button
                         onClick={() => void retranscribeTrack(track.id)}

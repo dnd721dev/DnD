@@ -22,6 +22,7 @@ import { PersonalityNotesPanel } from '@/components/character-sheet/PersonalityN
 import { ResourcesPanel } from '@/components/character-sheet/ResourcesPanel'
 import { getClassFeaturesAtLevel, getSubclassFeaturesAtLevel, formatActionType } from '@/lib/classFeatures'
 import type { ClassKey, SubclassKey } from '@/lib/subclasses'
+import { CLASS_DATA } from '@/lib/classes'
 import { CombatStatsPanel } from '@/components/character-sheet/CombatStatsPanel'
 import { EquipmentPanel } from '@/components/character-sheet/EquipmentPanel'
 import { ActionsPanel } from '@/components/character-sheet/ActionsPanel'
@@ -147,6 +148,92 @@ export default function CharacterSheetPage() {
     })()
   }, [id])
 
+  // Realtime: keep this character sheet in sync with damage applied to its
+  // linked token via apply_combat_damage RPC (DMPanel HP buttons, MapBoard
+  // HUD HP edit, attack-roll auto-apply, environmental triggers, etc.).
+  // Mirror current_hp from the token row back into the local sheet state so
+  // the sheet's HP bar updates without a manual refresh.
+  useEffect(() => {
+    if (!id) return
+    const ch = supabase
+      .channel(`character-linked-token-${id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'tokens', filter: `character_id=eq.${id}` },
+        (payload) => {
+          const row: any = (payload as any).new
+          if (!row) return
+          const nextHp = row.current_hp
+          if (typeof nextHp === 'number') {
+            setC((prev) => (prev && prev.hit_points_current !== nextHp ? { ...prev, hit_points_current: nextHp } : prev))
+          }
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [id])
+
+  // Wave AC1: debounced writeback of derived spell save DC / attack bonus into
+  // the stored character columns so other consumers (PlayerSidebar target panel,
+  // table HUDs, API exporters) see the up-to-date numbers without re-opening
+  // the sheet. Only writes when the derived value actually differs from what's
+  // already stored.
+  const spellWritebackTimer = useRef<any>(null)
+  useEffect(() => {
+    if (!c?.id || !d) return
+    if (loading) return
+    const derivedDc  = d.spellSaveDc
+    const derivedAtk = d.spellAttackBonus
+    const storedDc   = (c as any).spell_save_dc
+    const storedAtk  = (c as any).spell_attack_bonus
+    if (derivedDc == null && derivedAtk == null) return
+    if (derivedDc === storedDc && derivedAtk === storedAtk) return
+    if (spellWritebackTimer.current) clearTimeout(spellWritebackTimer.current)
+    spellWritebackTimer.current = setTimeout(async () => {
+      try {
+        await supabase
+          .from('characters')
+          .update({
+            spell_save_dc:      derivedDc,
+            spell_attack_bonus: derivedAtk,
+          })
+          .eq('id', c.id)
+        setC((prev) => prev ? { ...prev, spell_save_dc: derivedDc, spell_attack_bonus: derivedAtk } : prev)
+      } catch (e) {
+        console.error('[char-sheet] spell DC/attack writeback failed', e)
+      }
+    }, 1000)
+    return () => { if (spellWritebackTimer.current) clearTimeout(spellWritebackTimer.current) }
+  }, [c?.id, d?.spellSaveDc, d?.spellAttackBonus, c?.spell_save_dc, c?.spell_attack_bonus, loading])
+
+  // Persist & restore scroll position so reloading the sheet doesn't lose
+  // the player's place (e.g. after editing a spell or scrolling deep into
+  // resources). Keyed by character id in sessionStorage.
+  useEffect(() => {
+    if (!id || typeof window === 'undefined') return
+    const scrollKey = `dnd721:char-scroll:${id}`
+    // Restore on mount (defer one frame so layout has resolved).
+    const saved = window.sessionStorage.getItem(scrollKey)
+    if (saved) {
+      const y = parseInt(saved, 10)
+      if (Number.isFinite(y) && y > 0) {
+        requestAnimationFrame(() => window.scrollTo(0, y))
+      }
+    }
+    // Save on every scroll, but throttle by rAF so we don't thrash storage.
+    let pending = false
+    const onScroll = () => {
+      if (pending) return
+      pending = true
+      requestAnimationFrame(() => {
+        pending = false
+        try { window.sessionStorage.setItem(scrollKey, String(window.scrollY)) } catch { /* quota */ }
+      })
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [id])
+
   const abilities: Abilities = useMemo(
     () =>
       c?.abilities ?? {
@@ -161,9 +248,16 @@ export default function CharacterSheetPage() {
   )
 
   const savingThrowSet = useMemo(() => {
+    // Wave AC3: prefer the stored saving_throw_profs column, but fall back to
+    // CLASS_DATA[main_job].savingThrowProfs when the column is empty. Legacy
+    // rows / partial migrations otherwise show every save as non-proficient.
     const raw = (c?.saving_throw_profs ?? []) as string[]
-    return new Set(raw.map((v) => String(v).toLowerCase()))
-  }, [c?.saving_throw_profs])
+    if (raw.length > 0) return new Set(raw.map((v) => String(v).toLowerCase()))
+    const ck = String((c as any)?.main_job ?? '').trim().toLowerCase() as keyof typeof CLASS_DATA
+    const def = (CLASS_DATA as any)[ck]
+    const fromClass = (def?.savingThrowProfs ?? []) as string[]
+    return new Set(fromClass.map((v: string) => String(v).toLowerCase()))
+  }, [c?.saving_throw_profs, (c as any)?.main_job])
 
   const d = useMemo(() => {
     if (!c) return null
@@ -218,9 +312,21 @@ export default function CharacterSheetPage() {
     rollerName: c?.name ?? 'Adventurer',
   })
 
-  const [activeTab, setActiveTab] = useState<
-    'overview' | 'skills_traits' | 'gear' | 'magic' | 'notes'
-  >('overview')
+  type ActiveTab = 'overview' | 'skills_traits' | 'gear' | 'magic' | 'notes'
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
+    // Wave AC5: restore last-selected tab from sessionStorage so reloads don't
+    // throw the player back to Overview. Keyed by character id.
+    if (typeof window === 'undefined') return 'overview'
+    try {
+      const saved = window.sessionStorage.getItem(`dnd721:char-tab:${id}`) as ActiveTab | null
+      if (saved && ['overview', 'skills_traits', 'gear', 'magic', 'notes'].includes(saved)) return saved
+    } catch { /* ignore */ }
+    return 'overview'
+  })
+  useEffect(() => {
+    if (!id || typeof window === 'undefined') return
+    try { window.sessionStorage.setItem(`dnd721:char-tab:${id}`, activeTab) } catch { /* ignore */ }
+  }, [id, activeTab])
 
   // ✅ Local temp HP (mirrors DB; update written immediately)
   const [tempHp, setTempHpLocal] = useState<number>(0)
@@ -251,6 +357,36 @@ export default function CharacterSheetPage() {
     const current = Number(c.hit_points_current ?? d.hpMax)
     const next = clamp(current + effectiveDelta, 0, d.hpMax)
     setC((prev) => prev ? { ...prev, hit_points_current: next, temp_hp: nextTempHp } : prev)
+
+    // Wave AC4: route through the apply_combat_damage RPC when this character
+    // has a linked token. The RPC syncs token + character HP atomically and
+    // fires the realtime updates the DM panel + initiative tracker + canvas
+    // are listening for. Falls back to a direct character row write when no
+    // token is linked (e.g. character not yet placed on a map).
+    try {
+      const { data: tok } = await supabase
+        .from('tokens')
+        .select('id')
+        .eq('character_id', c.id)
+        .limit(1)
+        .maybeSingle()
+      const tokenId = (tok as any)?.id ?? null
+      if (tokenId) {
+        // RPC takes positive damage; positive delta in this UI = heal, so flip.
+        const { error } = await supabase.rpc('apply_combat_damage', {
+          p_token_id: tokenId,
+          p_amount: -effectiveDelta,
+        })
+        if (error) {
+          console.error('[char-sheet] onAdjustHp RPC error', error)
+          // Fall back to a direct char row write so the sheet still persists.
+          await supabase.from('characters').update({ hit_points_current: next }).eq('id', c.id)
+        }
+        return
+      }
+    } catch (e) {
+      console.error('[char-sheet] onAdjustHp token lookup failed', e)
+    }
     await supabase.from('characters').update({ hit_points_current: next }).eq('id', c.id)
   }
 
@@ -667,12 +803,39 @@ export default function CharacterSheetPage() {
             onDamage={rollMainDamage}
             onAdjustHp={onAdjustHp}
             onSetTempHp={onSetTempHp}
+            // Wave AC5: surface concentration + death saves from action_state.
+            concentratingOn={(actionState as any)?.concentration_active ? ((actionState as any)?.concentration_on ?? 'a spell') : null}
+            onEndConcentration={async () => {
+              setActionState((prev) => ({ ...(prev ?? {}), concentration_active: false, concentration_on: null }))
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('dnd721-concentration-broken', { detail: { wallet: c?.wallet_address?.toLowerCase() } }))
+              }
+            }}
+            deathSaves={((actionState as any)?.death_saves ?? null) as { s: number; f: number } | null}
+            onAdjustDeathSave={(kind, delta) => {
+              setActionState((prev: any) => {
+                const cur = (prev?.death_saves ?? { s: 0, f: 0 }) as { s: number; f: number }
+                const next = { ...cur, [kind]: clamp(cur[kind] + delta, 0, 3) }
+                return { ...(prev ?? {}), death_saves: next }
+              })
+            }}
           />
           <SavingThrowsPanel
             abilities={abilities}
             savingThrowSet={savingThrowSet}
             profBonus={d.profBonus}
             onRollSavingThrow={rollSavingThrow}
+            storedProfsEmpty={(c?.saving_throw_profs ?? []).length === 0}
+            onSyncFromClass={async () => {
+              if (!c?.id) return
+              const profs = Array.from(savingThrowSet)
+              try {
+                await supabase.from('characters').update({ saving_throw_profs: profs }).eq('id', c.id)
+                setC((prev) => prev ? { ...prev, saving_throw_profs: profs as any } : prev)
+              } catch (e) {
+                console.error('[char-sheet] sync saving_throw_profs failed', e)
+              }
+            }}
           />
         </div>
 
@@ -813,6 +976,11 @@ export default function CharacterSheetPage() {
                 slotUsed={resourceValues}
                 onSpendSlot={onSpendSlot}
                 onRestoreSlot={onRestoreSlot}
+                // Wave AC1: pass live-derived spell DC/attack so the panel can
+                // show the up-to-date numbers even before the stored columns
+                // are re-saved.
+                derivedSpellSaveDc={d?.spellSaveDc ?? null}
+                derivedSpellAttackBonus={d?.spellAttackBonus ?? null}
               />
               {/* Polish 3: Warlock invocations panel — auto-hides for non-Warlocks. */}
               <WarlockInvocationsPanel c={c} />

@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { toast } from '@/components/ui/ToastHub'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,10 @@ const TRIGGER_TYPES = [
   { value: 'pressure_plate', label: 'Pressure Plate' },
   { value: 'magic_rune',     label: 'Magic Rune' },
   { value: 'poison_gas',     label: 'Poison Gas' },
+  // Clues never fire damage — they're discovered with an Investigation check
+  // (vs the Perception DC field, used here as the Investigation DC) and their
+  // description is the clue text shown to the discovering player.
+  { value: 'clue',           label: '🔍 Clue (Investigation)' },
   { value: 'custom',         label: 'Custom' },
 ]
 const DAMAGE_TYPES = [
@@ -267,7 +272,9 @@ export function TriggersPanel({
       void fetchTriggers()
     } catch (e: any) {
       console.error('[TriggersPanel] save failed', e)
-      setErr(e.name === 'AbortError' ? 'Request timed out — please try again.' : (e.message || 'Save failed'))
+      const msg = e.name === 'AbortError' ? 'Request timed out — please try again.' : (e.message || 'Save failed')
+      setErr(msg)
+      toast.error(`Trigger save failed: ${msg}`)
     } finally {
       clearTimeout(timer)
       setSaving(false)

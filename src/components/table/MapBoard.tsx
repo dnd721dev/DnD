@@ -1226,13 +1226,18 @@ const MapBoard: React.FC<MapBoardProps> = ({
     if (!hudTokenId) return;
     const tok = tokens.find((t) => t.id === hudTokenId);
     if (!tok) return;
+    // `amount` here is the delta the HUD sent — positive heals, negative damages.
+    // Optimistic local update so the HUD feels instant; realtime will reconcile.
     const newHp = (tok.current_hp ?? tok.hp ?? 0) + amount;
     setTokens((prev) => prev.map((t) => (t.id === hudTokenId ? { ...t, current_hp: newHp } : t)));
-    await supabase.from('tokens').update({ current_hp: newHp }).eq('id', hudTokenId);
-    // MED-5: Keep characters.hit_points_current in sync for PC tokens
-    if (tok.character_id) {
-      await supabase.from('characters').update({ hit_points_current: newHp }).eq('id', tok.character_id);
-    }
+    // Use the apply_combat_damage RPC so the linked character's
+    // hit_points_current stays in sync automatically. RPC's p_amount is
+    // damage (positive = HP down), so we flip the sign.
+    const { error } = await supabase.rpc('apply_combat_damage', {
+      p_token_id: hudTokenId,
+      p_amount: -amount,
+    });
+    if (error) console.error('[MapBoard] HUD HP RPC error', error);
   };
 
   const onHudDelete = async () => {

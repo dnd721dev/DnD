@@ -263,17 +263,38 @@ export function SpellsPanel({
   slotUsed,
   onSpendSlot,
   onRestoreSlot,
+  derivedSpellSaveDc,
+  derivedSpellAttackBonus,
 }: {
   c: CharacterSheetData
   spellSlots: SpellSlotsSummary | null
   slotUsed?: Record<string, number>
   onSpendSlot?: (level: string) => void
   onRestoreSlot?: (level: string) => void
+  /** Spell save DC computed live from stats (Wave AC1). Falls back to c.spell_save_dc when null. */
+  derivedSpellSaveDc?: number | null
+  /** Spell attack bonus computed live from stats (Wave AC1). Falls back to c.spell_attack_bonus when null. */
+  derivedSpellAttackBonus?: number | null
 }) {
   // ── existing state ──────────────────────────────────────────────────────────
-  const [spellSearch, setSpellSearch] = useState('')
-  const [spellLevelFilter, setSpellLevelFilter] = useState<number | 'all'>('all')
-  const [onlyMyClassSpells, setOnlyMyClassSpells] = useState(false)
+  // Filter state — persisted to localStorage per-character so reloads keep
+  // context. Persistence uses the character id; falls back to a global key
+  // for unsaved drafts.
+  const filterStorageKey = `dnd721:spell-filters:${(c as any)?.id ?? 'draft'}`
+  const persistedFilters = (() => {
+    if (typeof window === 'undefined') return null
+    try { return JSON.parse(window.localStorage.getItem(filterStorageKey) ?? 'null') } catch { return null }
+  })()
+  const [spellSearch, setSpellSearch] = useState<string>(persistedFilters?.spellSearch ?? '')
+  const [spellLevelFilter, setSpellLevelFilter] = useState<number | 'all'>(persistedFilters?.spellLevelFilter ?? 'all')
+  const [onlyMyClassSpells, setOnlyMyClassSpells] = useState<boolean>(persistedFilters?.onlyMyClassSpells ?? false)
+  // ── new filter axes (Wave C) ────────────────────────────────────────────────
+  const [filterConcentration, setFilterConcentration] = useState<boolean>(persistedFilters?.filterConcentration ?? false)
+  const [filterRitual, setFilterRitual] = useState<boolean>(persistedFilters?.filterRitual ?? false)
+  const [filterDamageType, setFilterDamageType] = useState<string>(persistedFilters?.filterDamageType ?? 'all')
+  const [filterSource, setFilterSource] = useState<string>(persistedFilters?.filterSource ?? 'all')
+  const [filterOnlyPrepared, setFilterOnlyPrepared] = useState<boolean>(persistedFilters?.filterOnlyPrepared ?? false)
+  const [filterOnlyKnown, setFilterOnlyKnown] = useState<boolean>(persistedFilters?.filterOnlyKnown ?? false)
 
   const [selected, setSelected] = useState<SrdSpell | null>(null)
   const [saving, setSaving] = useState(false)
@@ -427,10 +448,38 @@ export function SpellsPanel({
     }
     if (spellSearch.trim()) {
       const q = spellSearch.toLowerCase()
-      spells = spells.filter((s) => s.name.toLowerCase().includes(q))
+      spells = spells.filter((s) => s.name.toLowerCase().includes(q) || (s.fullDescription ?? '').toLowerCase().includes(q))
     }
+    // Wave C: new filter axes — concentration / ritual / damage type / source / known / prepared.
+    if (filterConcentration) spells = spells.filter((s) => isConcentration(s))
+    if (filterRitual)        spells = spells.filter((s) => isRitual(s))
+    if (filterDamageType !== 'all') spells = spells.filter((s) => s.damageType === filterDamageType)
+    if (filterSource !== 'all')     spells = spells.filter((s) => (s.source ?? 'srd-5.1') === filterSource)
+    if (filterOnlyPrepared) spells = spells.filter((s) => preparedSet.has(s.name))
+    if (filterOnlyKnown)    spells = spells.filter((s) => knownSet.has(s.name))
     return spells
-  }, [onlyMyClassSpells, classSpellTags, spellLevelFilter, spellSearch])
+  }, [
+    onlyMyClassSpells, classSpellTags, spellLevelFilter, spellSearch,
+    filterConcentration, filterRitual, filterDamageType, filterSource,
+    filterOnlyPrepared, filterOnlyKnown, preparedSet, knownSet,
+  ])
+
+  // Persist filter state to localStorage so reloads keep context.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem(filterStorageKey, JSON.stringify({
+        spellSearch, spellLevelFilter, onlyMyClassSpells,
+        filterConcentration, filterRitual, filterDamageType, filterSource,
+        filterOnlyPrepared, filterOnlyKnown,
+      }))
+    } catch { /* quota — ignore */ }
+  }, [
+    filterStorageKey,
+    spellSearch, spellLevelFilter, onlyMyClassSpells,
+    filterConcentration, filterRitual, filterDamageType, filterSource,
+    filterOnlyPrepared, filterOnlyKnown,
+  ])
 
   // ── new memos for My Spells view ────────────────────────────────────────────
   // Bug fix: for prepared casters (cleric, druid, paladin) leveled spells
@@ -677,12 +726,12 @@ export function SpellsPanel({
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 rounded-md bg-violet-900/30 border border-violet-700/40 px-2.5 py-1">
               <span className="text-[10px] uppercase tracking-wide text-violet-400">Save DC</span>
-              <span className="text-base font-bold text-violet-200">{c.spell_save_dc ?? '—'}</span>
+              <span className="text-base font-bold text-violet-200">{(derivedSpellSaveDc ?? c.spell_save_dc) ?? '—'}</span>
             </div>
             <div className="flex items-center gap-1.5 rounded-md bg-blue-900/30 border border-blue-700/40 px-2.5 py-1">
               <span className="text-[10px] uppercase tracking-wide text-blue-400">Spell Attack</span>
               <span className="text-base font-bold text-blue-200">
-                {c.spell_attack_bonus != null ? formatMod(c.spell_attack_bonus) : '—'}
+                {(derivedSpellAttackBonus ?? c.spell_attack_bonus) != null ? formatMod((derivedSpellAttackBonus ?? c.spell_attack_bonus) as number) : '—'}
               </span>
             </div>
             <span className="text-[10px] text-slate-500 ml-1">
@@ -918,6 +967,62 @@ export function SpellsPanel({
               </label>
             </div>
 
+            {/* Wave C: rich filter row — concentration / ritual / known / prepared toggles + damage + source dropdowns */}
+            <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400">
+              <label className="flex items-center gap-0.5">
+                <input type="checkbox" className="h-3 w-3" checked={filterConcentration} onChange={(e) => setFilterConcentration(e.target.checked)} />
+                <span title="Only show concentration spells">⊙ Conc</span>
+              </label>
+              <label className="flex items-center gap-0.5">
+                <input type="checkbox" className="h-3 w-3" checked={filterRitual} onChange={(e) => setFilterRitual(e.target.checked)} />
+                <span title="Only show ritual-castable spells">✦ Ritual</span>
+              </label>
+              <label className="flex items-center gap-0.5">
+                <input type="checkbox" className="h-3 w-3" checked={filterOnlyPrepared} onChange={(e) => setFilterOnlyPrepared(e.target.checked)} />
+                <span title="Only show spells you have prepared">Only prepared</span>
+              </label>
+              <label className="flex items-center gap-0.5">
+                <input type="checkbox" className="h-3 w-3" checked={filterOnlyKnown} onChange={(e) => setFilterOnlyKnown(e.target.checked)} />
+                <span title="Only show spells in your spellbook / known list">Only known</span>
+              </label>
+              <select
+                className="rounded-md border border-slate-700 bg-slate-900 px-1 py-0.5 text-[10px]"
+                value={filterDamageType}
+                onChange={(e) => setFilterDamageType(e.target.value)}
+                title="Filter by damage type"
+              >
+                <option value="all">Damage: any</option>
+                {['acid','bludgeoning','cold','fire','force','lightning','necrotic','piercing','poison','psychic','radiant','slashing','thunder'].map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+              <select
+                className="rounded-md border border-slate-700 bg-slate-900 px-1 py-0.5 text-[10px]"
+                value={filterSource}
+                onChange={(e) => setFilterSource(e.target.value)}
+                title="Filter by sourcebook"
+              >
+                <option value="all">Source: any</option>
+                <option value="srd-5.1">SRD 5.1</option>
+                <option value="srd-5.2">SRD 5.2 (2024 PHB)</option>
+                <option value="class-gap">Class-gap fills</option>
+              </select>
+              {(filterConcentration || filterRitual || filterDamageType !== 'all' || filterSource !== 'all' || filterOnlyPrepared || filterOnlyKnown) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterConcentration(false); setFilterRitual(false)
+                    setFilterDamageType('all');     setFilterSource('all')
+                    setFilterOnlyPrepared(false);   setFilterOnlyKnown(false)
+                  }}
+                  className="rounded-md border border-slate-700 bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-700"
+                  title="Clear filters"
+                >
+                  ✕ Clear
+                </button>
+              )}
+            </div>
+
             <div className="text-[10px] text-slate-500">
               Click a spell to view details and mark Known / Prepared.
               {isPreparedCaster ? ' (This class prepares spells.)' : ''}
@@ -1005,8 +1110,10 @@ export function SpellsPanel({
           onClose={() => setSelected(null)}
           onToggleKnown={toggleKnown}
           onTogglePrepared={togglePrepared}
-          spellSaveDc={c.spell_save_dc ?? null}
-          spellAttackBonus={c.spell_attack_bonus ?? null}
+          // Wave AC1: prefer the live-derived values from stats so DC stays in
+          // sync after ASIs / level-ups; fall back to the stored row column.
+          spellSaveDc={derivedSpellSaveDc ?? c.spell_save_dc ?? null}
+          spellAttackBonus={derivedSpellAttackBonus ?? c.spell_attack_bonus ?? null}
         />
       )}
     </section>

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { SESSION_GATES, type SessionStatus } from '@/lib/sessionGates'
+import { toast } from '@/components/ui/ToastHub'
 
 type Message = {
   id: string
@@ -245,7 +246,14 @@ export default function TableChat({ sessionId, senderWallet, senderName = 'Adven
     const { error } = await supabase.from('session_messages').insert(row)
 
     setSending(false)
-    if (error) { console.error('chat send error', error); return }
+    if (error) {
+      console.error('chat send error', error)
+      const msg = (error as any).code === '42501' || /row-level security/i.test(error.message)
+        ? 'Message blocked — your wallet session expired. Reconnect your wallet and try again.'
+        : `Couldn't send: ${error.message}`
+      toast.error(msg)
+      return
+    }
     setDraft('')
   }
 

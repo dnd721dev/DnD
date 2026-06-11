@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { toast } from '@/components/ui/ToastHub'
 
 export type Handout = {
   id: string
@@ -11,16 +12,25 @@ export type Handout = {
   content: string
   content_type: 'text' | 'image' | 'url'
   revealed: boolean
+  /** Wallets this handout was revealed to individually (contest winners). */
+  revealed_to?: string[] | null
   created_at: string
 }
+
+const CONTEST_SKILLS = [
+  'investigation', 'perception', 'insight', 'arcana', 'history',
+  'nature', 'religion', 'survival', 'medicine',
+] as const
 
 interface Props {
   sessionId: string
   isGm: boolean
   gmWallet: string | null   // needed for GM auth header
+  /** The viewing player's wallet — lets the API include handouts revealed only to them. */
+  playerWallet?: string | null
 }
 
-export function HandoutsPanel({ sessionId, isGm, gmWallet }: Props) {
+export function HandoutsPanel({ sessionId, isGm, gmWallet, playerWallet }: Props) {
   const [handouts, setHandouts] = useState<Handout[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -31,16 +41,45 @@ export function HandoutsPanel({ sessionId, isGm, gmWallet }: Props) {
   const [creating, setCreating] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
 
+  // Contest state — GM picks a skill, then "rolls for it" per handout.
+  const [contestSkill, setContestSkill] = useState<string>('investigation')
+  const [contesting, setContesting] = useState<string | null>(null)
+
   const fetchHandouts = useCallback(async () => {
     const params = new URLSearchParams({ sessionId })
     if (isGm && gmWallet) params.set('gmWallet', gmWallet)
+    if (!isGm && playerWallet) params.set('wallet', playerWallet)
     const res = await fetch(`/api/handouts?${params}`)
     if (res.ok) {
       const { handouts: rows } = await res.json()
       setHandouts(rows ?? [])
     }
     setLoading(false)
-  }, [sessionId, isGm, gmWallet])
+  }, [sessionId, isGm, gmWallet, playerWallet])
+
+  /** GM: run a skill contest — every PC rolls; the highest gets the handout. */
+  async function handleContest(h: Handout) {
+    if (!gmWallet) return
+    setContesting(h.id)
+    try {
+      const res = await fetch('/api/handouts/contest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, handoutId: h.id, gmWallet, skill: contestSkill }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (res.ok) {
+        toast.success(`🎲 ${json.winner?.name ?? 'Winner'} rolled ${json.winner?.total} and receives "${h.title}".`)
+        void fetchHandouts()
+      } else {
+        toast.error(`Contest failed: ${json?.error ?? `HTTP ${res.status}`}`)
+      }
+    } catch (e: any) {
+      toast.error(`Contest failed: ${e?.message ?? 'network error'}`)
+    } finally {
+      setContesting(null)
+    }
+  }
 
   useEffect(() => {
     fetchHandouts()
@@ -74,7 +113,13 @@ export function HandoutsPanel({ sessionId, isGm, gmWallet }: Props) {
         setTitle('')
         setContent('')
         setFormOpen(false)
+        toast.success('Handout created.')
+      } else {
+        const body = await res.text().catch(() => '')
+        toast.error(`Couldn't create handout (HTTP ${res.status})${body ? `: ${body.slice(0, 80)}` : ''}`)
       }
+    } catch (e: any) {
+      toast.error(`Network error creating handout: ${e?.message ?? 'unknown'}`)
     } finally {
       setCreating(false)
     }
@@ -82,22 +127,36 @@ export function HandoutsPanel({ sessionId, isGm, gmWallet }: Props) {
 
   async function handleToggleReveal(h: Handout) {
     if (!gmWallet) return
-    const res = await fetch('/api/handouts', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: h.id, revealed: !h.revealed, gmWallet }),
-    })
-    if (res.ok) {
-      setHandouts(prev => prev.map(x => x.id === h.id ? { ...x, revealed: !x.revealed } : x))
+    try {
+      const res = await fetch('/api/handouts', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: h.id, revealed: !h.revealed, gmWallet }),
+      })
+      if (res.ok) {
+        setHandouts(prev => prev.map(x => x.id === h.id ? { ...x, revealed: !x.revealed } : x))
+      } else {
+        toast.error(`Couldn't toggle handout (HTTP ${res.status}).`)
+      }
+    } catch (e: any) {
+      toast.error(`Network error: ${e?.message ?? 'unknown'}`)
     }
   }
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this handout?')) return
     if (!gmWallet) return
-    const params = new URLSearchParams({ id, gmWallet })
-    const res = await fetch(`/api/handouts?${params}`, { method: 'DELETE' })
-    if (res.ok) setHandouts(prev => prev.filter(x => x.id !== id))
+    try {
+      const params = new URLSearchParams({ id, gmWallet })
+      const res = await fetch(`/api/handouts?${params}`, { method: 'DELETE' })
+      if (res.ok) {
+        setHandouts(prev => prev.filter(x => x.id !== id))
+      } else {
+        toast.error(`Couldn't delete handout (HTTP ${res.status}).`)
+      }
+    } catch (e: any) {
+      toast.error(`Network error deleting handout: ${e?.message ?? 'unknown'}`)
+    }
   }
 
   const visible = isGm ? handouts : handouts.filter(h => h.revealed)
@@ -172,6 +231,22 @@ export function HandoutsPanel({ sessionId, isGm, gmWallet }: Props) {
         </p>
       )}
 
+      {/* Contest skill picker — shared across all handouts (GM only). */}
+      {isGm && handouts.length > 0 && (
+        <div className="flex items-center gap-2 text-[10px] text-slate-400">
+          <span>Contest skill:</span>
+          <select
+            value={contestSkill}
+            onChange={(e) => setContestSkill(e.target.value)}
+            className="rounded border border-slate-700 bg-slate-900 px-1.5 py-0.5 text-[10px] text-slate-200 focus:border-amber-600 focus:outline-none"
+          >
+            {CONTEST_SKILLS.map((s) => (
+              <option key={s} value={s} className="capitalize">{s.replace(/_/g, ' ')}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <div className="space-y-2">
         {visible.map(h => (
           <HandoutCard
@@ -180,6 +255,9 @@ export function HandoutsPanel({ sessionId, isGm, gmWallet }: Props) {
             isGm={isGm}
             onToggleReveal={() => handleToggleReveal(h)}
             onDelete={() => handleDelete(h.id)}
+            onContest={() => handleContest(h)}
+            contesting={contesting === h.id}
+            contestSkill={contestSkill}
           />
         ))}
       </div>
@@ -192,11 +270,17 @@ function HandoutCard({
   isGm,
   onToggleReveal,
   onDelete,
+  onContest,
+  contesting,
+  contestSkill,
 }: {
   handout: Handout
   isGm: boolean
   onToggleReveal: () => void
   onDelete: () => void
+  onContest?: () => void
+  contesting?: boolean
+  contestSkill?: string
 }) {
   const [expanded, setExpanded] = useState(false)
 
@@ -245,8 +329,14 @@ function HandoutCard({
             <p className="whitespace-pre-wrap text-slate-300 leading-relaxed">{handout.content}</p>
           )}
 
+          {isGm && (handout.revealed_to?.length ?? 0) > 0 && (
+            <div className="text-[10px] text-emerald-300">
+              ✓ Won by contest: {handout.revealed_to!.map((w) => `${w.slice(0, 6)}…${w.slice(-4)}`).join(', ')}
+            </div>
+          )}
+
           {isGm && (
-            <div className="flex items-center gap-2 pt-1">
+            <div className="flex flex-wrap items-center gap-2 pt-1">
               <button
                 onClick={onToggleReveal}
                 className={`rounded px-2.5 py-1 text-[11px] font-medium ${
@@ -257,6 +347,17 @@ function HandoutCard({
               >
                 {handout.revealed ? 'Hide from players' : 'Reveal to players'}
               </button>
+              {/* Reveal via skill contest — every PC rolls; highest gets it. */}
+              {!handout.revealed && onContest && (
+                <button
+                  onClick={onContest}
+                  disabled={contesting}
+                  className="rounded bg-sky-800/60 px-2.5 py-1 text-[11px] font-medium text-sky-100 hover:bg-sky-700/70 disabled:opacity-50"
+                  title={`All player characters roll ${contestSkill ?? 'the chosen skill'}; the highest roll receives this handout privately.`}
+                >
+                  {contesting ? 'Rolling…' : `🎲 Roll ${contestSkill ?? 'check'} for it`}
+                </button>
+              )}
               <button
                 onClick={onDelete}
                 className="rounded px-2.5 py-1 text-[11px] text-rose-400 hover:bg-slate-800"

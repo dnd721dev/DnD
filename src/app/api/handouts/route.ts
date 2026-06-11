@@ -17,11 +17,14 @@ const ToggleRevealSchema = z.object({
   gmWallet: z.string().min(1),
 })
 
-/** GET /api/handouts?sessionId=&gmWallet= — returns all (GM) or revealed (players) */
+/** GET /api/handouts?sessionId=&gmWallet=&wallet= — returns all (GM) or
+ *  revealed-to-all + revealed-to-me (players). `wallet` is the requesting
+ *  player's wallet, used to include handouts won via a skill contest. */
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
   const sessionId = searchParams.get('sessionId')
   const gmWallet = searchParams.get('gmWallet')?.toLowerCase() ?? null
+  const wallet = searchParams.get('wallet')?.toLowerCase() ?? null
 
   if (!sessionId) return NextResponse.json({ error: 'sessionId required' }, { status: 400 })
 
@@ -38,19 +41,24 @@ export async function GET(req: NextRequest) {
     isGm = session?.gm_wallet?.toLowerCase() === gmWallet
   }
 
-  let query = db
+  const { data, error } = await db
     .from('session_handouts')
     .select('*')
     .eq('session_id', sessionId)
     .order('created_at', { ascending: true })
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+  let handouts = data ?? []
   if (!isGm) {
-    query = query.eq('revealed', true)
+    // Players see globally-revealed handouts plus any revealed only to them
+    // (e.g. won via the highest-roll contest).
+    handouts = handouts.filter((h: any) =>
+      h.revealed ||
+      (wallet && Array.isArray(h.revealed_to) && h.revealed_to.map((x: string) => x.toLowerCase()).includes(wallet))
+    )
   }
 
-  const { data, error } = await query
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ handouts: data ?? [] })
+  return NextResponse.json({ handouts })
 }
 
 /** POST /api/handouts — create a handout (GM only) */

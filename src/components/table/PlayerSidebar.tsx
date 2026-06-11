@@ -24,6 +24,7 @@ import { SKILLS, DIE_TYPES, type DieSides, DIE_CONFIG } from '@/lib/dnd5e'
 import { getActiveConditionMechanics, CONDITIONS as CONDITION_DEFS, type ConditionKey } from '@/lib/conditions'
 import { DiceShape } from '@/components/dice/DiceShape'
 import type { SessionStatus } from '@/lib/sessionGates'
+import { toast } from '@/components/ui/ToastHub'
 
 type AbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
 
@@ -411,7 +412,12 @@ export function PlayerSidebar({
       // player doesn't own. The RPC also syncs PC character-sheet HP.
       supabase
         .rpc('apply_combat_damage', { p_token_id: (target as any).id, p_amount: finalResult })
-        .then(({ error }) => { if (error) console.error('[PlayerSidebar] damage apply error', error) })
+        .then(({ error }) => {
+          if (error) {
+            console.error('[PlayerSidebar] damage apply error', error)
+            toast.error(`Damage didn't apply: ${error.message}`)
+          }
+        })
     }
   }
 
@@ -517,7 +523,11 @@ export function PlayerSidebar({
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ sessionId, triggerId: t.id, wallet: myWallet }),
                 })
-              } catch { /* silent */ }
+              } catch (e: any) {
+                // Reveal failed — the trap is still marked spotted locally, but
+                // won't persist for next session. Inform the player.
+                toast.error(`Trap spotted, but couldn't save your discovery: ${e?.message ?? 'network error'}`)
+              }
             }
             return
           }
@@ -540,31 +550,43 @@ export function PlayerSidebar({
     return () => window.removeEventListener('dnd721-trigger-tripped', handler)
   }, [addressLower, sessionId, sheet, onRoll])
 
-  // Active "Search for Traps" — roll Perception and reveal nearby hidden traps.
+  // Active area searches — Perception finds traps; Investigation finds clues.
+  // Both roll the relevant skill from the sheet and resolve server-side so
+  // hidden trigger data never reaches a client that hasn't earned it.
   const [searchingTraps, setSearchingTraps] = useState(false)
-  async function searchForTraps() {
+  async function searchArea(checkType: 'perception' | 'investigation') {
     if (!sheet || !sessionId || !addressLower) return
     setSearchingTraps(true)
+    const skillKey = checkType === 'investigation' ? 'investigation' : 'perception'
+    const label = checkType === 'investigation' ? 'Investigate (Clues)' : 'Search for Traps (Perception)'
     try {
       const abilities = (sheet.abilities as any) ?? {}
       const pb = proficiencyBonus(sheet.level)
-      const perc = skillDisplay('perception', sheet as any, abilities, pb)
+      const skill = skillDisplay(skillKey, sheet as any, abilities, pb)
       const d20 = Math.floor(Math.random() * 20) + 1
-      const roll = d20 + perc.total
+      const roll = d20 + skill.total
       const res = await fetch('/api/triggers/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, wallet: addressLower, roll }),
+        body: JSON.stringify({ sessionId, wallet: addressLower, roll, checkType }),
       })
       const json = await res.json().catch(() => ({}))
       const revealed: string[] = json?.revealed ?? []
+      const clues: Array<{ name: string; description: string | null }> = json?.clues ?? []
       onRoll?.({
-        label: 'Search for Traps (Perception)',
-        formula: `1d20${fmtMod(perc.total)}`,
+        label,
+        formula: `1d20${fmtMod(skill.total)}`,
         result: roll,
-        outcome: revealed.length > 0 ? `🔍 Spotted: ${revealed.join(', ')}` : 'Nothing found nearby',
+        outcome: revealed.length > 0 ? `🔍 Found: ${revealed.join(', ')}` : 'Nothing found nearby',
       })
-    } catch { /* silent */ } finally {
+      // Investigation clues carry their secret text — surface it directly to
+      // the discovering player. The toast lingers longer for reading.
+      for (const clue of clues) {
+        toast.info(`🔍 ${clue.name}${clue.description ? ` — ${clue.description}` : ''}`, 12000)
+      }
+    } catch (e: any) {
+      toast.error(`${label} failed: ${e?.message ?? 'network error'}`)
+    } finally {
       setSearchingTraps(false)
     }
   }
@@ -1913,15 +1935,25 @@ export function PlayerSidebar({
                   )}
                 </div>
 
-                {/* Search for traps */}
-                <button
-                  type="button"
-                  onClick={searchForTraps}
-                  disabled={!sheet || !sessionId || searchingTraps}
-                  className="w-full rounded-lg border border-amber-800/50 bg-amber-900/15 px-2 py-1.5 text-[11px] font-semibold text-amber-300 hover:bg-amber-900/30 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {searchingTraps ? 'Searching…' : '🔍 Search for Traps'}
-                </button>
+                {/* Area searches — Perception finds traps, Investigation finds clues */}
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => searchArea('perception')}
+                    disabled={!sheet || !sessionId || searchingTraps}
+                    className="flex-1 rounded-lg border border-amber-800/50 bg-amber-900/15 px-2 py-1.5 text-[11px] font-semibold text-amber-300 hover:bg-amber-900/30 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {searchingTraps ? 'Searching…' : '👁 Search Traps'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => searchArea('investigation')}
+                    disabled={!sheet || !sessionId || searchingTraps}
+                    className="flex-1 rounded-lg border border-sky-800/50 bg-sky-900/15 px-2 py-1.5 text-[11px] font-semibold text-sky-300 hover:bg-sky-900/30 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {searchingTraps ? 'Searching…' : '🔍 Investigate'}
+                  </button>
+                </div>
 
                 {/* Roll Mode toggle */}
                 <div className="rounded-lg border border-yellow-900/30 bg-slate-950/60 p-2">
@@ -2050,7 +2082,7 @@ export function PlayerSidebar({
           {sessionId ? (
             <>
               <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
-                <HandoutsPanel sessionId={sessionId} isGm={false} gmWallet={null} />
+                <HandoutsPanel sessionId={sessionId} isGm={false} gmWallet={null} playerWallet={addressLower} />
               </div>
               <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
                 <TableChat sessionId={sessionId} senderWallet={address} senderName={selectedCharacter?.name ?? undefined} sessionStatus={sessionStatus ?? null} />

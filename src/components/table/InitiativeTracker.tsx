@@ -304,9 +304,43 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
       )
       .subscribe();
 
+    // Token-level mirror: when a token's current_hp or conditions change
+    // (via apply_combat_damage RPC or a HUD edit) we want the initiative
+    // tracker row and the local condition pip to update without a refetch.
+    const tokensChannel = supabase
+      .channel(`initiative-tokens-${encounterId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'tokens', filter: `encounter_id=eq.${encounterId}` },
+        (payload) => {
+          const row: any = (payload as any).new
+          if (!row?.id) return
+          // Mirror current_hp into the matching initiative entry by token_id.
+          setEntries((prev) =>
+            prev.map((e: any) =>
+              e.token_id === row.id ? { ...e, hp: row.current_hp ?? e.hp ?? 0 } : e
+            )
+          )
+          // Mirror conditions into condMap so condition pips stay in sync
+          // across devices. condMap is keyed by initiative-entry id; resolve
+          // the entry id by token_id link.
+          if (Array.isArray(row.conditions)) {
+            setEntries((prevEntries) => {
+              const linked = prevEntries.find((e: any) => e.token_id === row.id)
+              if (linked) {
+                setCondMap((prev) => ({ ...prev, [linked.id]: new Set(row.conditions as any) }))
+              }
+              return prevEntries
+            })
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
       isMounted = false;
       supabase.removeChannel(channel);
+      supabase.removeChannel(tokensChannel);
     };
   }, [encounterId]);
 
@@ -600,8 +634,29 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
     const entry = entries.find((e) => e.id === id);
     if (!entry) return;
 
+    // Optimistic local update so the tracker pip animates immediately.
     const newHp = (entry.hp ?? 0) + delta;
+    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, hp: newHp } : e)));
 
+    // Prefer the canonical apply_combat_damage RPC when the entry has a
+    // linked token — it keeps the token row, the character row, AND the
+    // initiative entry hp in sync via the trigger chain. RPC's p_amount is
+    // damage (positive = HP down), so we flip the delta's sign.
+    const tokenId = (entry as any).token_id ?? null;
+    if (tokenId) {
+      const { error } = await supabase.rpc('apply_combat_damage', {
+        p_token_id: tokenId,
+        p_amount: -delta,
+      });
+      if (error) {
+        // Roll back the optimistic update on failure.
+        console.error('Error updating initiative HP via RPC:', error);
+        setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, hp: entry.hp ?? 0 } : e)));
+      }
+      return;
+    }
+
+    // Fallback for entries with no linked token (e.g. legacy rows).
     const { error } = await supabase
       .from('initiative_entries')
       .update({ hp: newHp })
@@ -609,6 +664,7 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
 
     if (error) {
       console.error('Error updating initiative HP:', error);
+      setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, hp: entry.hp ?? 0 } : e)));
     }
   }
 

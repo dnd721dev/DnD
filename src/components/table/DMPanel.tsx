@@ -188,29 +188,47 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
     return () => { mounted = false; supabase.removeChannel(channel) }
   }, [encounterId])
 
-  // Toggle a condition on the active attacker token (GM-writable; rings sync via event).
-  function toggleAttackerCondition(cond: string) {
+  // Toggle a condition on the active attacker token. We optimistically update
+  // local state, then write to the DB and dispatch the same-device event. The
+  // window event is for instant feedback on this device; cross-device sync
+  // flows through the per-encounter tokens realtime channel.
+  async function toggleAttackerCondition(cond: string) {
     if (!attackerToken?.id) return
-    setAttackerConditions((prev) => {
-      const next = prev.includes(cond) ? prev.filter((c) => c !== cond) : [...prev, cond]
-      supabase.from('tokens').update({ conditions: next }).eq('id', attackerToken.id)
-        .then(({ error }) => { if (error) console.error('[DMPanel] attacker condition error', error) })
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('dnd721-conditions-toggle', {
-          detail: { tokenId: attackerToken.id, conditions: next },
-        }))
-      }
-      return next
-    })
+    const next = attackerConditions.includes(cond)
+      ? attackerConditions.filter((c) => c !== cond)
+      : [...attackerConditions, cond]
+    setAttackerConditions(next)
+    const { error } = await supabase.from('tokens').update({ conditions: next }).eq('id', attackerToken.id)
+    if (error) {
+      console.error('[DMPanel] attacker condition error', error)
+      // Roll back the optimistic update on failure.
+      setAttackerConditions(attackerConditions)
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dnd721-conditions-toggle', {
+        detail: { tokenId: attackerToken.id, conditions: next },
+      }))
+    }
   }
 
   async function adjustTargetHp(delta: number) {
     if (!selectedToken?.id) return
-    const current = Number(selectedToken.current_hp ?? selectedToken.hp ?? 0)
-    const next = Math.max(0, current + delta)
-    // Optimistic local update
-    setSelectedToken((prev: any) => prev ? { ...prev, current_hp: next } : prev)
-    await supabase.from('tokens').update({ current_hp: next }).eq('id', selectedToken.id)
+    // Use the apply_combat_damage RPC so BOTH the token row AND the linked
+    // character.hit_points_current are kept in sync. Positive `p_amount` =
+    // damage, negative = healing — so flip the sign of the delta we receive
+    // (positive delta = heal in this UI).
+    const amount = -delta
+    const { error } = await supabase.rpc('apply_combat_damage', {
+      p_token_id: selectedToken.id,
+      p_amount: amount,
+    })
+    if (error) {
+      console.error('[DMPanel] adjustTargetHp RPC error', error)
+      return
+    }
+    // The per-id realtime subscription added in the target-panel fix updates
+    // `selectedToken` automatically, so no optimistic local write is needed.
   }
 
   async function applyHpDelta() {

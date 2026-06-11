@@ -10,13 +10,21 @@ const SearchSchema = z.object({
   wallet:    z.string().min(1),
   roll:      z.number().int().min(1).max(60),
   range:     z.number().int().min(1).max(10).default(2),
+  /**
+   * Which check the player rolled:
+   *  - 'perception'    → reveals trap-type triggers (everything except clues)
+   *  - 'investigation' → reveals clue-type triggers (description = the clue text)
+   */
+  checkType: z.enum(['perception', 'investigation']).default('perception'),
 })
 
 /**
  * POST /api/triggers/search
- * Active "Search for Traps": given the player's Perception roll, reveal any active
- * hidden trap within `range` tiles of the player's own token whose Perception DC ≤ roll.
- * Returns the names of newly-spotted traps. Server-side so hidden trap data never leaks.
+ * Active search: given the player's check roll, reveal any active hidden
+ * trigger within `range` tiles of the player's own token whose DC ≤ roll.
+ * Perception finds traps; Investigation finds clues. Returns the names (and,
+ * for clues, the descriptions) of newly-discovered entries. Server-side so
+ * hidden trigger data never leaks to clients that haven't earned it.
  */
 export async function POST(req: NextRequest) {
   const rl = checkRateLimit(rateLimitKey(req, 'triggers-search'), { limit: 60, windowMs: 60 * 1000 })
@@ -25,7 +33,7 @@ export async function POST(req: NextRequest) {
   const parsed = SearchSchema.safeParse(await req.json().catch(() => ({})))
   if (!parsed.success) return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
 
-  const { sessionId, wallet, roll, range } = parsed.data
+  const { sessionId, wallet, roll, range, checkType } = parsed.data
   const w = wallet.toLowerCase()
   const db = supabaseAdmin()
 
@@ -55,7 +63,12 @@ export async function POST(req: NextRequest) {
     .eq('is_hidden', true)
 
   const revealed: string[] = []
+  // Clues carry their secret text back to the discoverer.
+  const clues: Array<{ name: string; description: string | null }> = []
   for (const t of triggers ?? []) {
+    // Match the trigger category to the check the player rolled.
+    const isClue = t.trigger_type === 'clue'
+    if (checkType === 'investigation' ? !isClue : isClue) continue
     const already = Array.isArray(t.revealed_to) && t.revealed_to.map((x: string) => x.toLowerCase()).includes(w)
     if (already) continue
     const inRange = Math.hypot((t.tile_x ?? 0) - ptx, (t.tile_y ?? 0) - pty) <= range + 1e-9
@@ -67,8 +80,11 @@ export async function POST(req: NextRequest) {
       .update({ revealed_to: [...current, w] })
       .eq('id', t.id)
       .eq('session_id', sessionId)
-    if (!error) revealed.push(t.name ?? 'Trap')
+    if (!error) {
+      revealed.push(t.name ?? (isClue ? 'Clue' : 'Trap'))
+      if (isClue) clues.push({ name: t.name ?? 'Clue', description: t.description ?? null })
+    }
   }
 
-  return NextResponse.json({ revealed })
+  return NextResponse.json({ revealed, clues })
 }

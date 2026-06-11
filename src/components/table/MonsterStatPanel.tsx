@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { toast } from '@/components/ui/ToastHub'
 
 type MonsterStatPanelProps = {
   token: any
@@ -329,8 +330,12 @@ export function MonsterStatPanel({
       supabase
         .rpc('apply_combat_damage', { p_token_id: target.id, p_amount: result })
         .then(({ error }) => {
-          if (error) console.error('[MonsterStatPanel] damage apply error', error)
-          else void loadEncounterTokens()  // refresh target HP display
+          if (error) {
+            console.error('[MonsterStatPanel] damage apply error', error)
+            toast.error(`Damage didn't apply: ${error.message}`)
+          } else {
+            void loadEncounterTokens()  // refresh target HP display
+          }
         })
     }
     // Consume the hit result — requires a new attack roll before next damage applies

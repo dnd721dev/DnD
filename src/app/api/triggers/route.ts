@@ -89,9 +89,12 @@ export async function GET(req: NextRequest) {
   if (isTileDetection) {
     // Radius-aware detection: a trap fires when the moving token's tile is within
     // `radius` tiles of the trap tile (radius 0 → exact tile only).
+    // Clue-type triggers never fire on movement — they are only found via an
+    // active Investigation check (the /api/triggers/search endpoint).
     const tx = parseInt(tileX!)
     const ty = parseInt(tileY!)
     triggers = triggers.filter((t: any) => {
+      if (t.trigger_type === 'clue') return false
       const r = Number(t.radius ?? 0)
       return Math.hypot((t.tile_x ?? 0) - tx, (t.tile_y ?? 0) - ty) <= r + 1e-9
     })
