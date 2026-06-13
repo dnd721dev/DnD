@@ -173,39 +173,6 @@ export default function CharacterSheetPage() {
     return () => { supabase.removeChannel(ch) }
   }, [id])
 
-  // Wave AC1: debounced writeback of derived spell save DC / attack bonus into
-  // the stored character columns so other consumers (PlayerSidebar target panel,
-  // table HUDs, API exporters) see the up-to-date numbers without re-opening
-  // the sheet. Only writes when the derived value actually differs from what's
-  // already stored.
-  const spellWritebackTimer = useRef<any>(null)
-  useEffect(() => {
-    if (!c?.id || !d) return
-    if (loading) return
-    const derivedDc  = d.spellSaveDc
-    const derivedAtk = d.spellAttackBonus
-    const storedDc   = (c as any).spell_save_dc
-    const storedAtk  = (c as any).spell_attack_bonus
-    if (derivedDc == null && derivedAtk == null) return
-    if (derivedDc === storedDc && derivedAtk === storedAtk) return
-    if (spellWritebackTimer.current) clearTimeout(spellWritebackTimer.current)
-    spellWritebackTimer.current = setTimeout(async () => {
-      try {
-        await supabase
-          .from('characters')
-          .update({
-            spell_save_dc:      derivedDc,
-            spell_attack_bonus: derivedAtk,
-          })
-          .eq('id', c.id)
-        setC((prev) => prev ? { ...prev, spell_save_dc: derivedDc, spell_attack_bonus: derivedAtk } : prev)
-      } catch (e) {
-        console.error('[char-sheet] spell DC/attack writeback failed', e)
-      }
-    }, 1000)
-    return () => { if (spellWritebackTimer.current) clearTimeout(spellWritebackTimer.current) }
-  }, [c?.id, d?.spellSaveDc, d?.spellAttackBonus, c?.spell_save_dc, c?.spell_attack_bonus, loading])
-
   // Persist & restore scroll position so reloading the sheet doesn't lose
   // the player's place (e.g. after editing a spell or scrolling deep into
   // resources). Keyed by character id in sessionStorage.
@@ -267,6 +234,39 @@ export default function CharacterSheetPage() {
       : c
     return deriveStats(cWithHb as any, abilities)
   }, [c, abilities, homebrewSubclassFeatures])
+
+  // Wave AC1: debounced writeback of derived spell save DC / attack bonus into
+  // the stored character columns so other consumers (PlayerSidebar target panel,
+  // table HUDs, API exporters) see the up-to-date numbers without re-opening
+  // the sheet. Only writes when the derived value actually differs from what's
+  // already stored.
+  const spellWritebackTimer = useRef<any>(null)
+  useEffect(() => {
+    if (!c?.id || !d) return
+    if (loading) return
+    const derivedDc  = d.spellSaveDc
+    const derivedAtk = d.spellAttackBonus
+    const storedDc   = (c as any).spell_save_dc
+    const storedAtk  = (c as any).spell_attack_bonus
+    if (derivedDc == null && derivedAtk == null) return
+    if (derivedDc === storedDc && derivedAtk === storedAtk) return
+    if (spellWritebackTimer.current) clearTimeout(spellWritebackTimer.current)
+    spellWritebackTimer.current = setTimeout(async () => {
+      try {
+        await supabase
+          .from('characters')
+          .update({
+            spell_save_dc:      derivedDc,
+            spell_attack_bonus: derivedAtk,
+          })
+          .eq('id', c.id)
+        setC((prev) => prev ? { ...prev, spell_save_dc: derivedDc, spell_attack_bonus: derivedAtk } : prev)
+      } catch (e) {
+        console.error('[char-sheet] spell DC/attack writeback failed', e)
+      }
+    }, 1000)
+    return () => { if (spellWritebackTimer.current) clearTimeout(spellWritebackTimer.current) }
+  }, [c?.id, d?.spellSaveDc, d?.spellAttackBonus, c?.spell_save_dc, c?.spell_attack_bonus, loading])
 
   // Ensure resourceValues contains keys for derived resources (and clamp)
   useEffect(() => {

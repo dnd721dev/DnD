@@ -57,7 +57,9 @@ export async function downloadAsFlac(
   if (code !== 0) throw new Error(`ffmpeg exited with code ${code}`)
 
   const data = await ffmpeg.readFile(outputName)
-  const blob = new Blob([data as Uint8Array], { type: 'audio/flac' })
+  // Copy into a fresh Uint8Array so the Blob ctor sees a plain ArrayBuffer
+  // (ffmpeg.wasm may back its output with a SharedArrayBuffer).
+  const blob = new Blob([new Uint8Array(data as Uint8Array)], { type: 'audio/flac' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url

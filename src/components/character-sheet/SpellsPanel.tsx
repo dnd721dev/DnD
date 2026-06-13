@@ -455,13 +455,13 @@ export function SpellsPanel({
     if (filterRitual)        spells = spells.filter((s) => isRitual(s))
     if (filterDamageType !== 'all') spells = spells.filter((s) => s.damageType === filterDamageType)
     if (filterSource !== 'all')     spells = spells.filter((s) => (s.source ?? 'srd-5.1') === filterSource)
-    if (filterOnlyPrepared) spells = spells.filter((s) => preparedSet.has(s.name))
-    if (filterOnlyKnown)    spells = spells.filter((s) => knownSet.has(s.name))
+    if (filterOnlyPrepared) spells = spells.filter((s) => preparedList.includes(s.name))
+    if (filterOnlyKnown)    spells = spells.filter((s) => knownList.includes(s.name))
     return spells
   }, [
     onlyMyClassSpells, classSpellTags, spellLevelFilter, spellSearch,
     filterConcentration, filterRitual, filterDamageType, filterSource,
-    filterOnlyPrepared, filterOnlyKnown, preparedSet, knownSet,
+    filterOnlyPrepared, filterOnlyKnown, preparedList, knownList,
   ])
 
   // Persist filter state to localStorage so reloads keep context.

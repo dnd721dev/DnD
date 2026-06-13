@@ -25,6 +25,7 @@ export default function EditProfilePage() {
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [awaitingSignature, setAwaitingSignature] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const [username, setUsername] = useState('')
@@ -103,9 +104,23 @@ export default function EditProfilePage() {
     }
 
     try {
-      // Wallet signature proves ownership (since we aren't using Supabase Auth)
+      // Wallet signature proves ownership (since we aren't using Supabase Auth).
+      // WalletConnect sends the prompt to the phone wallet; if it's missed or
+      // the relay drops it the promise never settles, so race a timeout to
+      // avoid a permanently stuck "Saving…" button.
       const message = `DND721 Profile Update\nWallet: ${payload.wallet_address}\nTime: ${new Date().toISOString()}`
-      const signature = await signMessageAsync({ message })
+      setAwaitingSignature(true)
+      let signature: string
+      try {
+        signature = await Promise.race([
+          signMessageAsync({ message }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Signature request timed out. Open your wallet app and approve the "DND721 Profile Update" request, then try again.')), 60_000)
+          ),
+        ])
+      } finally {
+        setAwaitingSignature(false)
+      }
 
       const res = await fetch('/api/profiles/upsert', {
         method: 'POST',
@@ -258,6 +273,12 @@ export default function EditProfilePage() {
         >
           {saving ? 'Saving…' : 'Save profile'}
         </button>
+        {awaitingSignature && (
+          <p className="text-xs text-amber-400">
+            ✍️ Approve the signature request in your wallet to save. If you connected with
+            WalletConnect, the prompt is in your wallet app on your phone.
+          </p>
+        )}
       </form>
     </div>
   )
