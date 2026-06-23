@@ -65,12 +65,15 @@ type InitiativeTrackerProps = {
   encounterId?: string | null;
   /** Session ID — required for the Roll Initiative button to call /api/roll */
   sessionId?: string | null;
+  /** Currently-active map. The tracker only shows combatants on this map so
+   *  combat is per-map instead of spanning every map in the session. */
+  currentMapId?: string | null;
   onRoundChange?: (round: number) => void;
   /** Current session lifecycle status — gates Start Combat button */
   sessionStatus?: SessionStatus | null;
 };
 
-export default function InitiativeTracker({ encounterId, sessionId, onRoundChange, sessionStatus }: InitiativeTrackerProps) {
+export default function InitiativeTracker({ encounterId, sessionId, currentMapId, onRoundChange, sessionStatus }: InitiativeTrackerProps) {
   const [entries, setEntries] = useState<InitiativeEntry[]>([]);
   const [turnIdx, setTurnIdx] = useState(0);
   const [round, setRound] = useState(1);
@@ -233,11 +236,16 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
 
     async function loadEntries() {
       setLoading(true);
-      const { data, error } = await supabase
+      let query = supabase
         .from('initiative_entries')
         .select('*')
-        .eq('encounter_id', encounterId)
-        .order('init', { ascending: false });
+        .eq('encounter_id', encounterId);
+      // Scope to the current map. NULL map_id rows are legacy / not-yet-placed
+      // entries — show them on every map so nothing silently disappears.
+      if (currentMapId) {
+        query = query.or(`map_id.eq.${currentMapId},map_id.is.null`);
+      }
+      const { data, error } = await query.order('init', { ascending: false });
 
       if (!isMounted) return;
       setLoading(false);
@@ -342,7 +350,7 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
       supabase.removeChannel(channel);
       supabase.removeChannel(tokensChannel);
     };
-  }, [encounterId]);
+  }, [encounterId, currentMapId]);
 
   // Always work on a sorted copy high → low
   const sortedEntries = useMemo(() => {
@@ -526,6 +534,7 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
     }
     const { error } = await supabase.from('initiative_entries').insert({
       encounter_id: encounterId,
+      map_id: currentMapId ?? null,
       name,
       init: safeInit,
       hp,
@@ -561,11 +570,14 @@ export default function InitiativeTracker({ encounterId, sessionId, onRoundChang
     if (!encounterId) return;
     setLoading(true);
     try {
-      const { data: tokens, error: tokErr } = await supabase
+      let tokQuery = supabase
         .from('tokens')
         .select('id, name, current_hp, hp')
         .eq('encounter_id', encounterId)
         .eq('type', 'monster');
+      // Only pull monsters on the current map so the sync stays map-specific.
+      if (currentMapId) tokQuery = tokQuery.eq('map_id', currentMapId);
+      const { data: tokens, error: tokErr } = await tokQuery;
 
       if (tokErr) {
         console.error('syncMonsterTokens token load error', tokErr);

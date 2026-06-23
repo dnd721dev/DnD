@@ -1000,6 +1000,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
             const initVal = Number.isFinite(payload.initiativeRoll) ? Number(payload.initiativeRoll) : 0;
             const { error: initErr } = await supabase.from('initiative_entries').insert({
               encounter_id:   encounterId,
+              map_id:         mapId ?? null,
               name:           payload.label,
               init:           initVal,
               hp:             payload.hp,
@@ -1011,11 +1012,12 @@ const MapBoard: React.FC<MapBoardProps> = ({
             if (initErr) console.error('Failed to add monster to initiative', initErr);
           }
         } else if (payload.initiativeEntryId) {
-          // Placement came from InitiativeTracker — link the token to the existing entry
+          // Placement came from InitiativeTracker — link the token to the existing
+          // entry and pin it to the map it was placed on.
           if (newTokenId) {
             await supabase
               .from('initiative_entries')
-              .update({ token_id: newTokenId })
+              .update({ token_id: newTokenId, map_id: mapId ?? null })
               .eq('id', payload.initiativeEntryId);
           }
         } else if (payload.ownerWallet) {
@@ -1029,17 +1031,19 @@ const MapBoard: React.FC<MapBoardProps> = ({
             .maybeSingle();
 
           if (existingEntry) {
-            // Entry already exists — just link the new token
+            // Entry already exists — link the new token and move the entry onto
+            // the current map so the PC shows in this map's tracker.
             if (newTokenId) {
               await supabase
                 .from('initiative_entries')
-                .update({ token_id: newTokenId })
+                .update({ token_id: newTokenId, map_id: mapId ?? null })
                 .eq('id', existingEntry.id);
             }
           } else {
             // No entry yet — create one (init = 0, GM or player will roll later)
             await supabase.from('initiative_entries').insert({
               encounter_id:  encounterId,
+              map_id:        mapId ?? null,
               name:          payload.label,
               init:          0,
               hp:            payload.hp,

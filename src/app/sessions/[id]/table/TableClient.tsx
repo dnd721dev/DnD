@@ -709,6 +709,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
       .upsert(
         {
           encounter_id: encounterId,
+          map_id: currentMapId ?? null,
           character_id: sc.id,
           token_id: null,
           wallet_address: walletLower,
