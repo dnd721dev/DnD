@@ -25,8 +25,11 @@ export const TableTopBar = memo(function TableTopBar(props: {
   onOpenShop?: () => void
   /** Current session lifecycle status — used to gate features */
   sessionStatus?: SessionStatus | null
+  /** True when the player's selected character can cast spells. Hides the
+   *  Spell Dashboard button for non-casters (the GM always sees it). */
+  playerIsSpellcaster?: boolean
 }) {
-  const { session, isGm, address, displayName, roomName, showDiceLog, onToggleDiceLog, onEndSession, onOpenShop, sessionStatus } = props
+  const { session, isGm, address, displayName, roomName, showDiceLog, onToggleDiceLog, onEndSession, onOpenShop, sessionStatus, playerIsSpellcaster } = props
   const [srdOpen, setSrdOpen] = useState(false)
   const [confirmEnd, setConfirmEnd] = useState(false)
   const [endingSession, setEndingSession] = useState(false)
@@ -67,14 +70,16 @@ export const TableTopBar = memo(function TableTopBar(props: {
           >
             📖 SRD
           </button>
-          <button
-            type="button"
-            onClick={() => window.open(`/sessions/${session.id}/spells`, '_blank', 'noopener,noreferrer')}
-            className="rounded-md bg-purple-950 border border-purple-500/40 px-2.5 py-1 text-[11px] font-medium text-purple-400 hover:bg-purple-900 hover:text-purple-300 transition-colors"
-            title={isGm ? 'View all party spell slots' : 'Open spell dashboard in new tab'}
-          >
-            ✦ {isGm ? 'Party Slots' : 'Spells'}
-          </button>
+          {(isGm || playerIsSpellcaster) && (
+            <button
+              type="button"
+              onClick={() => window.open(`/sessions/${session.id}/spells`, '_blank', 'noopener,noreferrer')}
+              className="rounded-md bg-purple-950 border border-purple-500/40 px-2.5 py-1 text-[11px] font-medium text-purple-400 hover:bg-purple-900 hover:text-purple-300 transition-colors"
+              title={isGm ? 'View all party spell slots' : 'Open spell dashboard in new tab'}
+            >
+              ✦ {isGm ? 'Party Slots' : 'Spells'}
+            </button>
+          )}
           {isGm && (
             <button
               type="button"

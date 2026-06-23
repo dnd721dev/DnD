@@ -7,6 +7,7 @@ import { XpAwardPanel } from './XpAwardPanel'
 import { GmNotesPanel } from './GmNotesPanel'
 import { PrivateRollsPanel, type PrivateRollPlayer } from './PrivateRollsPanel'
 import { RecordingsPanel } from './RecordingsPanel'
+import { PartySlotsPanel } from '@/components/spells/PartySlotsPanel'
 import type { ConditionKey } from '@/lib/conditions'
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -50,13 +51,14 @@ type SessionPlayerRow = {
 }
 
 type TokenRow = {
+  id?: string | null
   character_id: string | null
   current_hp: number | null
   hp: number | null
   ac: number | null
 }
 
-type DashboardTab = 'notes' | 'xp' | 'private-rolls' | 'recordings'
+type DashboardTab = 'notes' | 'xp' | 'private-rolls' | 'recordings' | 'party-slots'
 
 function formatClassLabel(
   mainJob: string | null,
@@ -159,7 +161,7 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
   const reloadTokens = useCallback(async (eid: string) => {
     const { data } = await supabase
       .from('tokens')
-      .select('character_id, current_hp, hp, ac')
+      .select('id, character_id, current_hp, hp, ac')
       .eq('encounter_id', eid)
       .eq('type', 'pc')
     const next: Record<string, TokenRow> = {}
@@ -258,6 +260,10 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
         const liveAc = tok?.ac ?? c.ac ?? 10
         const actions = (c.action_state ?? {}) as Record<string, any>
         const conds = Array.isArray(actions.active_conditions) ? (actions.active_conditions as string[]) : []
+        const ds = actions.death_saves
+        const deathSaves = ds && typeof ds === 'object'
+          ? { s: Number(ds.s ?? 0), f: Number(ds.f ?? 0) }
+          : null
         return {
           characterId: c.id,
           name: c.name ?? 'Unnamed',
@@ -270,13 +276,16 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
           ac: liveAc,
           conditions: conds,
           concentratingOn: typeof actions.concentrating_on === 'string' ? actions.concentrating_on : null,
+          deathSaves,
           hasLiveToken: !!tok,
         }
       })
   }, [players, tokensByChar])
 
-  // Dual-write HP: tokens.current_hp + characters.hit_points_current (mirrors
-  // the MapBoard TokenHUD pattern so the table view stays in sync).
+  // Write HP. When the PC has a live combat token we go through the canonical
+  // apply_combat_damage RPC (keeps tokens + characters.hit_points_current +
+  // the initiative entry in sync). Out of combat (no token) we write the
+  // character row directly.
   const writeHp = useCallback(async (characterId: string, nextHpRaw: number) => {
     const card = cards.find((c) => c.characterId === characterId)
     if (!card) return
@@ -287,17 +296,20 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
       if (!ch || ch.id !== characterId) return p
       return { ...p, characters: { ...ch, hit_points_current: nextHp } }
     }))
-    if (card.hasLiveToken && encounterId) {
+    const tok = tokensByChar[characterId]
+    if (card.hasLiveToken && tok?.id) {
       setTokensByChar((prev) => ({
         ...prev,
-        [characterId]: { ...(prev[characterId] ?? { character_id: characterId, hp: card.hpMax, ac: card.ac }), current_hp: nextHp },
+        [characterId]: { ...(prev[characterId] ?? { id: tok.id, character_id: characterId, hp: card.hpMax, ac: card.ac }), current_hp: nextHp },
       }))
-      await supabase.from('tokens').update({ current_hp: nextHp })
-        .eq('character_id', characterId)
-        .eq('encounter_id', encounterId)
+      // p_amount is damage (positive); a heal is a negative amount.
+      const delta = nextHp - card.hpCurrent
+      const { error } = await supabase.rpc('apply_combat_damage', { p_token_id: tok.id, p_amount: -delta })
+      if (!error) return
+      console.error('[DmDashboard] apply_combat_damage failed, falling back', error)
     }
     await supabase.from('characters').update({ hit_points_current: nextHp }).eq('id', characterId)
-  }, [cards, encounterId])
+  }, [cards, tokensByChar])
 
   const adjustHp = useCallback((characterId: string, delta: number) => {
     const card = cards.find((c) => c.characterId === characterId)
@@ -329,6 +341,26 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
 
   const addCondition    = useCallback((characterId: string, k: ConditionKey) => mutateConditions(characterId, (s) => s.add(k)),    [mutateConditions])
   const removeCondition = useCallback((characterId: string, k: string)       => mutateConditions(characterId, (s) => s.delete(k.toLowerCase())), [mutateConditions])
+
+  // Death saves: read-modify-write characters.action_state.death_saves {s,f}
+  // (the same store the player's own character sheet uses), clamped 0–3.
+  const adjustDeathSave = useCallback(async (characterId: string, kind: 's' | 'f', delta: number) => {
+    const player = players.find((p) => p.characters?.id === characterId)
+    if (!player?.characters) return
+    const actionState = (player.characters.action_state ?? {}) as Record<string, any>
+    const cur = (actionState.death_saves ?? { s: 0, f: 0 }) as { s: number; f: number }
+    const next = {
+      s: kind === 's' ? Math.max(0, Math.min(3, (cur.s ?? 0) + delta)) : (cur.s ?? 0),
+      f: kind === 'f' ? Math.max(0, Math.min(3, (cur.f ?? 0) + delta)) : (cur.f ?? 0),
+    }
+    const nextActionState = { ...actionState, death_saves: next }
+    setPlayers((prev) => prev.map((p) => {
+      const ch = p.characters
+      if (!ch || ch.id !== characterId) return p
+      return { ...p, characters: { ...ch, action_state: nextActionState } }
+    }))
+    await supabase.from('characters').update({ action_state: nextActionState }).eq('id', characterId)
+  }, [players])
 
   // ── Render ──────────────────────────────────────────────────────────────────
   if (!wallet) {
@@ -398,6 +430,7 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
                 onSetHp={(next) => setHp(card.characterId, next)}
                 onAddCondition={(k) => addCondition(card.characterId, k)}
                 onRemoveCondition={(k) => removeCondition(card.characterId, k)}
+                onAdjustDeathSave={(kind, delta) => adjustDeathSave(card.characterId, kind, delta)}
               />
             ))
           )}
@@ -405,8 +438,8 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
 
         {/* Center panel — tab switcher (Waves 2 + 4) */}
         <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-          <nav className="mb-3 flex gap-2">
-            {(['notes', 'xp', 'private-rolls', 'recordings'] as DashboardTab[]).map((t) => (
+          <nav className="mb-3 flex flex-wrap gap-2">
+            {(['notes', 'xp', 'private-rolls', 'recordings', 'party-slots'] as DashboardTab[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setActiveTab(t)}
@@ -422,7 +455,9 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
                     ? '✨ XP Award'
                     : t === 'private-rolls'
                       ? '🎲 Private Rolls'
-                      : '🎙️ Recordings'}
+                      : t === 'recordings'
+                        ? '🎙️ Recordings'
+                        : '✦ Party Slots'}
               </button>
             ))}
           </nav>
@@ -451,6 +486,9 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
             )}
             {activeTab === 'recordings' && (
               <RecordingsPanel sessionId={sessionId} />
+            )}
+            {activeTab === 'party-slots' && (
+              <PartySlotsPanel sessionId={sessionId} />
             )}
           </div>
         </section>

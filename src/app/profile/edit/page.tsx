@@ -4,6 +4,12 @@ import { useEffect, useState, FormEvent } from 'react'
 import { useAccount, useSignMessage } from 'wagmi'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import {
+  DICE_PRESETS,
+  resolveDicePrefs,
+  type DiceMaterial,
+  type DicePrefs,
+} from '@/lib/diceSkins'
 
 type ProfileRow = {
   wallet_address: string
@@ -16,6 +22,7 @@ type ProfileRow = {
   twitter: string | null
   discord: string | null
   twitch: string | null
+  dice_prefs: DicePrefs | null
 }
 
 export default function EditProfilePage() {
@@ -37,6 +44,13 @@ export default function EditProfilePage() {
   const [twitter, setTwitter] = useState('')
   const [discord, setDiscord] = useState('')
   const [twitch, setTwitch] = useState('')
+
+  // 3D dice customization
+  const [diceBody, setDiceBody] = useState('#1e3a8a')
+  const [diceNumber, setDiceNumber] = useState('#f8fafc')
+  const [diceMaterial, setDiceMaterial] = useState<DiceMaterial>('plastic')
+  const [diceSound, setDiceSound] = useState(true)
+  const [diceVolume, setDiceVolume] = useState(0.5)
 
   useEffect(() => {
     if (!isConnected || !address) {
@@ -68,6 +82,12 @@ export default function EditProfilePage() {
         setTwitter(data.twitter ?? '')
         setDiscord(data.discord ?? '')
         setTwitch(data.twitch ?? '')
+        const dp = resolveDicePrefs(data.dice_prefs ?? null)
+        setDiceBody(dp.bodyColor ?? '#1e3a8a')
+        setDiceNumber(dp.numberColor)
+        setDiceMaterial(dp.material)
+        setDiceSound(dp.soundEnabled)
+        setDiceVolume(dp.soundVolume)
       }
 
       setLoading(false)
@@ -101,6 +121,13 @@ export default function EditProfilePage() {
       twitter: twitter.trim() || null,
       discord: discord.trim() || null,
       twitch: twitch.trim() || null,
+      dice_prefs: {
+        bodyColor: diceBody,
+        numberColor: diceNumber,
+        material: diceMaterial,
+        soundEnabled: diceSound,
+        soundVolume: diceVolume,
+      } as DicePrefs,
     }
 
     try {
@@ -263,6 +290,91 @@ export default function EditProfilePage() {
               value={twitch}
               onChange={(e) => setTwitch(e.target.value)}
             />
+          </div>
+        </div>
+
+        {/* ── 3D Dice ── */}
+        <div className="rounded-xl border border-gray-700 bg-gray-900/60 p-4">
+          <div className="mb-1 flex items-center justify-between">
+            <label className="block text-sm font-semibold">🎲 Dice</label>
+            {/* Live preview */}
+            <span
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-sm font-black shadow-inner"
+              style={{
+                background: diceMaterial === 'glass' ? `${diceBody}cc` : diceBody,
+                color: diceNumber,
+                border: diceMaterial === 'metal' ? '1px solid rgba(255,255,255,0.5)' : '1px solid rgba(0,0,0,0.3)',
+                boxShadow: diceMaterial === 'metal' ? 'inset 0 1px 3px rgba(255,255,255,0.4)' : 'inset 0 -2px 4px rgba(0,0,0,0.4)',
+              }}
+              title="Preview"
+            >
+              20
+            </span>
+          </div>
+          <p className="mb-3 text-xs text-gray-500">Customize how your dice look and sound when you roll at the table.</p>
+
+          {/* Presets */}
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {DICE_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => { setDiceBody(p.bodyColor); setDiceNumber(p.numberColor); setDiceMaterial(p.material) }}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800 px-2 py-1 text-xs hover:border-indigo-500"
+                title={p.name}
+              >
+                <span className="inline-block h-3.5 w-3.5 rounded-full" style={{ background: p.bodyColor, border: `1px solid ${p.numberColor}` }} />
+                {p.name}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs text-gray-400">Body color</label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={diceBody} onChange={(e) => setDiceBody(e.target.value)} className="h-8 w-10 cursor-pointer rounded border border-gray-700 bg-transparent" />
+                <input value={diceBody} onChange={(e) => setDiceBody(e.target.value)} className="w-24 rounded-lg border border-gray-700 bg-gray-900 px-2 py-1 text-xs outline-none focus:border-indigo-500" />
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-gray-400">Number color</label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={diceNumber} onChange={(e) => setDiceNumber(e.target.value)} className="h-8 w-10 cursor-pointer rounded border border-gray-700 bg-transparent" />
+                <input value={diceNumber} onChange={(e) => setDiceNumber(e.target.value)} className="w-24 rounded-lg border border-gray-700 bg-gray-900 px-2 py-1 text-xs outline-none focus:border-indigo-500" />
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-gray-400">Finish</label>
+              <select
+                value={diceMaterial}
+                onChange={(e) => setDiceMaterial(e.target.value as DiceMaterial)}
+                className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm outline-none focus:border-indigo-500"
+              >
+                <option value="plastic">Plastic (matte)</option>
+                <option value="metal">Metal (shiny)</option>
+                <option value="glass">Glass / Gem (translucent)</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-gray-400">Sound</label>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDiceSound((v) => !v)}
+                  className={`rounded-lg border px-2 py-1 text-xs ${diceSound ? 'border-emerald-600 bg-emerald-950/50 text-emerald-300' : 'border-gray-700 bg-gray-800 text-gray-400'}`}
+                >
+                  {diceSound ? '🔊 On' : '🔇 Off'}
+                </button>
+                <input
+                  type="range" min={0} max={1} step={0.05}
+                  value={diceVolume}
+                  disabled={!diceSound}
+                  onChange={(e) => setDiceVolume(parseFloat(e.target.value))}
+                  className="flex-1 disabled:opacity-40"
+                />
+              </div>
+            </div>
           </div>
         </div>
 

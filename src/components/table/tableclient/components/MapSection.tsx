@@ -10,6 +10,7 @@ import { DiceCanvas3D } from '@/components/dice/DiceCanvas3D'
 import type { DiceEntry } from '../types'
 import type { SessionMap } from '../hooks/useMapManager'
 import type { SessionStatus } from '@/lib/sessionGates'
+import type { DicePrefs } from '@/lib/diceSkins'
 
 export function MapSection(props: {
   // Map — either a full SessionMap or a fallback legacy URL
@@ -37,7 +38,9 @@ export function MapSection(props: {
   sessionId?: string
   rollerName?: string
   rollerWallet?: string
-  rollOverlay?: null | { roller: string; label: string; formula: string; result: number }
+  rollOverlay?: null | { roller: string; label: string; formula: string; result: number; dice?: number[] }
+  /** Current viewer's 3D dice prefs (colors / material / sound). */
+  dicePrefs?: DicePrefs | null
 
   // Shown inside the map area when no map is set (GM only)
   mapControls?: React.ReactNode
@@ -69,6 +72,7 @@ export function MapSection(props: {
     rollerName,
     rollerWallet,
     rollOverlay,
+    dicePrefs,
     mapControls,
     sessionStatus,
     expanded,
@@ -191,7 +195,7 @@ export function MapSection(props: {
           </div>
         )}
 
-        <DiceCanvas3D roll={rollOverlay ?? null} show={Boolean(rollOverlay)} />
+        <DiceCanvas3D roll={rollOverlay ?? null} show={Boolean(rollOverlay)} prefs={dicePrefs ?? null} />
         <DiceRollOverlay show={Boolean(rollOverlay)} payload={rollOverlay ?? null} />
         <DiceLogOverlay
           show={showDiceLog}

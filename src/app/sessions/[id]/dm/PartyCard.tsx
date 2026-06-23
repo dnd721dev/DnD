@@ -21,6 +21,8 @@ export type PartyCardData = {
   ac: number
   conditions: string[]              // raw strings from action_state.active_conditions
   concentratingOn: string | null
+  /** Death-save state {s,f} from action_state.death_saves (null when not dying). */
+  deathSaves: { s: number; f: number } | null
   /** True when an encounter is active and a token exists for this character.
    *  Drives whether HP buttons write to tokens.current_hp or characters.hit_points_current. */
   hasLiveToken: boolean
@@ -32,6 +34,7 @@ type PartyCardProps = {
   onSetHp:    (next: number)  => Promise<void> | void
   onAddCondition:    (key: ConditionKey) => Promise<void> | void
   onRemoveCondition: (key: string)       => Promise<void> | void
+  onAdjustDeathSave?: (kind: 's' | 'f', delta: number) => Promise<void> | void
 }
 
 function hpColor(pct: number) {
@@ -46,6 +49,7 @@ export function PartyCard({
   onSetHp,
   onAddCondition,
   onRemoveCondition,
+  onAdjustDeathSave,
 }: PartyCardProps) {
   const [customOpen, setCustomOpen] = useState(false)
   const [customDelta, setCustomDelta] = useState('')
@@ -167,6 +171,43 @@ export function PartyCard({
           />
           <button onClick={() => submitCustom(-1)} className="rounded-md bg-red-900/60 px-2 py-1 text-[11px] font-semibold text-red-200 hover:bg-red-800">− Damage</button>
           <button onClick={() => submitCustom(+1)} className="rounded-md bg-emerald-900/60 px-2 py-1 text-[11px] font-semibold text-emerald-200 hover:bg-emerald-800">+ Heal</button>
+        </div>
+      )}
+
+      {/* Death saves — only while the PC is at 0 HP. Writes to the same
+          action_state.death_saves the player's own character sheet reads. */}
+      {data.hpCurrent === 0 && data.deathSaves && onAdjustDeathSave && (
+        <div className="mt-3 rounded-lg border border-red-900/40 bg-red-950/20 p-2">
+          <div className="flex items-baseline justify-between text-[10px] text-red-300/80">
+            <span className="uppercase tracking-wide">💀 Death Saves</span>
+            <span className="tabular-nums">{data.deathSaves.s}/3 · {data.deathSaves.f}/3</span>
+          </div>
+          <div className="mt-1.5 flex items-center gap-3">
+            <div className="flex items-center gap-1">
+              <span className="text-[9px] text-emerald-400/80">Success</span>
+              {[1, 2, 3].map((i) => (
+                <button
+                  key={`s${i}`}
+                  type="button"
+                  onClick={() => onAdjustDeathSave('s', i <= data.deathSaves!.s ? -1 : 1)}
+                  className={`h-3.5 w-3.5 rounded-full border transition ${i <= data.deathSaves!.s ? 'border-emerald-500 bg-emerald-500/80' : 'border-emerald-700/50 bg-transparent hover:bg-emerald-900/40'}`}
+                  title={`Success ${i}`}
+                />
+              ))}
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[9px] text-red-400/80">Failure</span>
+              {[1, 2, 3].map((i) => (
+                <button
+                  key={`f${i}`}
+                  type="button"
+                  onClick={() => onAdjustDeathSave('f', i <= data.deathSaves!.f ? -1 : 1)}
+                  className={`h-3.5 w-3.5 rounded-full border transition ${i <= data.deathSaves!.f ? 'border-red-500 bg-red-500/80' : 'border-red-700/50 bg-transparent hover:bg-red-900/40'}`}
+                  title={`Failure ${i}`}
+                />
+              ))}
+            </div>
+          </div>
         </div>
       )}
 

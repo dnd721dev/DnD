@@ -41,12 +41,34 @@ function sanitizeAvatarUrl(raw: unknown): { ok: true; value: string | null } | {
   return { ok: true, value: trimmed }
 }
 
+// Sanitize the dice customization blob written to profiles.dice_prefs. We
+// validate the shape + hex colors so untrusted JSON can't poison the column
+// (it's read back and fed into the 3D renderer).
+function sanitizeDicePrefs(raw: unknown): Record<string, unknown> | undefined {
+  if (raw == null) return undefined
+  if (typeof raw !== 'object') return {}
+  const p = raw as Record<string, unknown>
+  const hex = (v: unknown) =>
+    typeof v === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v.trim()) ? v.trim() : undefined
+  const out: Record<string, unknown> = {}
+  if (typeof p.skin === 'string') out.skin = p.skin.slice(0, 40)
+  const bc = hex(p.bodyColor);   if (bc) out.bodyColor = bc
+  const nc = hex(p.numberColor); if (nc) out.numberColor = nc
+  if (p.material === 'plastic' || p.material === 'metal' || p.material === 'glass') out.material = p.material
+  if (typeof p.soundEnabled === 'boolean') out.soundEnabled = p.soundEnabled
+  if (typeof p.soundVolume === 'number' && isFinite(p.soundVolume)) {
+    out.soundVolume = Math.max(0, Math.min(1, p.soundVolume))
+  }
+  return out
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json()
     const {
       wallet_address, username, bio, display_name,
       avatar_url, location, timezone, twitter, discord, twitch,
+      dice_prefs,
       signature, message,
     } = body as {
       wallet_address: string
@@ -59,6 +81,7 @@ export async function POST(req: Request) {
       twitter?:       string
       discord?:       string
       twitch?:        string
+      dice_prefs?:    unknown
       signature:      string
       message:        string
     }
@@ -83,6 +106,7 @@ export async function POST(req: Request) {
     }
 
     const wallet = normalizeAddr(wallet_address)
+    const safeDicePrefs = sanitizeDicePrefs(dice_prefs)
 
     // Upsert profile — wallet_address is the PK, no auth.users dependency
     const { data, error } = await supabaseAdmin
@@ -99,6 +123,8 @@ export async function POST(req: Request) {
           twitter:      twitter      ?? null,
           discord:      discord      ?? null,
           twitch:       twitch       ?? null,
+          // Only overwrite dice_prefs when the client actually sent it.
+          ...(safeDicePrefs !== undefined ? { dice_prefs: safeDicePrefs } : {}),
         },
         { onConflict: 'wallet_address' }
       )

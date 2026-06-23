@@ -7,6 +7,8 @@ import * as THREE from 'three'
 import { BufferGeometryLoader } from 'three'
 import * as CANNON from 'cannon-es'
 import { DICE_MODELS, DICE_SHAPE } from './DiceModels'
+import { resolveDicePrefs, type DicePrefs, type ResolvedDicePrefs } from '@/lib/diceSkins'
+import { playDiceImpact, setDiceVolume } from './diceSound'
 
 export type DiceType = 'd4' | 'd6' | 'd8' | 'd10' | 'd12' | 'd20' | 'd100'
 
@@ -18,6 +20,29 @@ const PHYSICS_RADIUS = 2.2
 // Scale mesh so its radius roughly matches PHYSICS_RADIUS.
 const MESH_VISUAL_SCALE = PHYSICS_RADIUS / 90
 
+// Per-die-type default body colors (used when the user hasn't set a custom one).
+const DEFAULT_DIE_COLORS: Record<DiceType, number> = {
+  d4: 0x0e7490,
+  d6: 0xb45309,
+  d8: 0x065f46,
+  d10: 0x9a3412,
+  d12: 0x5b21b6,
+  d20: 0x1e3a8a,
+  d100: 0x334155,
+}
+
+// Numeral plane size as a fraction of the model bounding radius, per die type.
+const LABEL_SIZE_FACTOR: Record<string, number> = {
+  d4: 0.5, d6: 0.82, d8: 0.55, d10: 0.5, d12: 0.55, d20: 0.42, d100: 0.5,
+}
+
+interface FaceLabel {
+  position: THREE.Vector3   // mesh-local
+  quaternion: THREE.Quaternion
+  value: number
+  size: number
+}
+
 interface DieMesh {
   mesh: THREE.Mesh
   body: CANNON.Body
@@ -25,7 +50,13 @@ interface DieMesh {
   type: DiceType
   targetValue: number
   faceValues: number[]
+  settling?: { from: CANNON.Quaternion; to: CANNON.Quaternion; start: number }
 }
+
+// Numeral textures are shared across dice — cache by value+color.
+const textureCache = new Map<string, THREE.CanvasTexture>()
+// Face label layouts are identical per die type — compute once.
+const faceLayoutCache = new Map<DiceType, FaceLabel[]>()
 
 export class DiceBox {
   private container: HTMLElement
@@ -36,9 +67,19 @@ export class DiceBox {
   private diceMaterial!: CANNON.Material
   private dice: DieMesh[] = []
   private animFrameId: number | null = null
+  private prefs: ResolvedDicePrefs = resolveDicePrefs(null)
+  private cameraBase = new THREE.Vector3(0, 22, 18)
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, prefs?: DicePrefs | null) {
     this.container = container
+    if (prefs) this.prefs = resolveDicePrefs(prefs)
+    setDiceVolume(this.prefs.soundVolume)
+  }
+
+  /** Update appearance/sound prefs between rolls. */
+  setPrefs(prefs: DicePrefs | null) {
+    this.prefs = resolveDicePrefs(prefs)
+    setDiceVolume(this.prefs.soundVolume)
   }
 
   async initialize(): Promise<void> {
@@ -70,7 +111,7 @@ export class DiceBox {
     this.scene = new THREE.Scene()
 
     this.camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 1000)
-    this.camera.position.set(0, 22, 18)
+    this.camera.position.copy(this.cameraBase)
     this.camera.lookAt(0, 0, 0)
 
     // Key light with shadows
@@ -191,33 +232,75 @@ export class DiceBox {
     return new Promise<void>((resolve) => {
       const startTime = performance.now()
       const MAX_MS = 5500
+      const SETTLE_MS = 300
+      let settleStarted = false
 
       const animate = () => {
-        const elapsed = performance.now() - startTime
+        const now = performance.now()
+        const elapsed = now - startTime
         this.world.step(1 / 60, 1 / 60, 10)
 
-        for (const die of this.dice) {
-          die.mesh.position.copy(die.body.position as unknown as THREE.Vector3)
-          die.mesh.quaternion.copy(die.body.quaternion as unknown as THREE.Quaternion)
-        }
+        // Subtle camera drift that eases out over the first ~1.6s — gives the
+        // shot a hand-held, "watching the dice" feel without obscuring them.
+        const driftK = Math.max(0, 1 - elapsed / 1600)
+        const t = elapsed / 1000
+        this.camera.position.set(
+          this.cameraBase.x + Math.sin(t * 2.3) * 0.9 * driftK,
+          this.cameraBase.y + Math.sin(t * 1.7 + 1) * 0.5 * driftK,
+          this.cameraBase.z + Math.cos(t * 1.9) * 0.7 * driftK,
+        )
+        this.camera.lookAt(0, 0, 0)
 
-        this.renderer.render(this.scene, this.camera)
+        if (!settleStarted) {
+          for (const die of this.dice) {
+            die.mesh.position.copy(die.body.position as unknown as THREE.Vector3)
+            die.mesh.quaternion.copy(die.body.quaternion as unknown as THREE.Quaternion)
+          }
 
-        const allSettled =
-          elapsed > 2000 &&
-          this.dice.every(
-            (d) =>
-              d.body.sleepState === CANNON.Body.SLEEPING ||
-              (d.body.velocity.length() < 0.5 && d.body.angularVelocity.length() < 0.5)
-          )
+          const allSettled =
+            elapsed > 1500 &&
+            this.dice.every(
+              (d) =>
+                d.body.sleepState === CANNON.Body.SLEEPING ||
+                (d.body.velocity.length() < 0.6 && d.body.angularVelocity.length() < 0.6)
+            )
 
-        if (elapsed > MAX_MS || allSettled) {
-          for (const die of this.dice) this.snapToResult(die)
+          if (elapsed > MAX_MS || allSettled) {
+            // Begin the eased "tip into place" settle for each die.
+            settleStarted = true
+            for (const die of this.dice) this.beginSettle(die, now)
+          }
+        } else {
+          // Interpolate each die from its resting pose to the target-face pose.
+          let done = true
+          for (const die of this.dice) {
+            if (!die.settling) continue
+            const k = Math.min(1, (now - die.settling.start) / SETTLE_MS)
+            const eased = 1 - Math.pow(1 - k, 3) // easeOutCubic
+            const q = new CANNON.Quaternion()
+            slerpQuat(die.settling.from, die.settling.to, eased, q)
+            die.body.quaternion.copy(q)
+            die.body.velocity.set(0, 0, 0)
+            die.body.angularVelocity.set(0, 0, 0)
+            die.mesh.quaternion.copy(q as unknown as THREE.Quaternion)
+            die.mesh.position.copy(die.body.position as unknown as THREE.Vector3)
+            if (k < 1) done = false
+          }
           this.renderer.render(this.scene, this.camera)
-          resolve()
+          if (done) {
+            for (const die of this.dice) die.body.sleep()
+            // Ease camera back to its base for the result beat.
+            this.camera.position.copy(this.cameraBase)
+            this.camera.lookAt(0, 0, 0)
+            this.renderer.render(this.scene, this.camera)
+            resolve()
+            return
+          }
+          this.animFrameId = requestAnimationFrame(animate)
           return
         }
 
+        this.renderer.render(this.scene, this.camera)
         this.animFrameId = requestAnimationFrame(animate)
       }
 
@@ -234,6 +317,13 @@ export class DiceBox {
       this.scene.remove(die.mesh)
       die.mesh.geometry.dispose()
       ;(die.mesh.material as THREE.Material).dispose()
+      // Dispose label children (their shared textures stay cached).
+      die.mesh.traverse((o) => {
+        if (o instanceof THREE.Mesh && o !== die.mesh) {
+          o.geometry.dispose()
+          ;(o.material as THREE.Material).dispose()
+        }
+      })
       this.world.removeBody(die.body)
     }
     this.dice = []
@@ -276,18 +366,26 @@ export class DiceBox {
     geometry.computeBoundingSphere()
     geometry.computeVertexNormals()
 
-    const mesh = new THREE.Mesh(
-      geometry,
-      new THREE.MeshStandardMaterial({
-        color: this.dieColor(type),
-        metalness: 0.45,
-        roughness: 0.35,
-        envMapIntensity: 0.6,
-      })
-    )
+    const mesh = new THREE.Mesh(geometry, this.makeMaterial(type))
     mesh.scale.setScalar(MESH_VISUAL_SCALE)
     mesh.castShadow = true
     mesh.receiveShadow = true
+
+    // Attach numerals to each face (cached layout per die type).
+    for (const label of this.getFaceLayout(type)) {
+      const plane = new THREE.Mesh(
+        new THREE.PlaneGeometry(label.size, label.size),
+        new THREE.MeshBasicMaterial({
+          map: this.numberTexture(label.value, type),
+          transparent: true,
+          depthWrite: false,
+        }),
+      )
+      plane.position.copy(label.position)
+      plane.quaternion.copy(label.quaternion)
+      mesh.add(plane)
+    }
+
     this.scene.add(mesh)
 
     // cannon-es body
@@ -324,93 +422,222 @@ export class DiceBox {
 
     body.addShape(physicsShape)
 
-    // Random spawn from above
+    // ── Varied throw — randomize spawn, velocity direction/strength and spin
+    // generously so no two rolls look the same.
     const spread = total > 1 ? 4 : 2
     const xBase = (index - (total - 1) / 2) * spread
+    const side = Math.random() < 0.5 ? -1 : 1
     body.position.set(
-      xBase + (Math.random() - 0.5) * 3,
-      18 + Math.random() * 5,
-      (Math.random() - 0.5) * 4
+      xBase + (Math.random() - 0.5) * 6,
+      16 + Math.random() * 8,
+      -10 + Math.random() * 20
     )
+    const speed = 16 + Math.random() * 16
     body.velocity.set(
-      -xBase * 0.4 + (Math.random() - 0.5) * 3,
-      -22 - Math.random() * 8,
-      (Math.random() - 0.5) * 3
+      side * (4 + Math.random() * 8) - xBase * 0.3,
+      -speed,
+      (Math.random() - 0.5) * 14
     )
+    const spin = 14 + Math.random() * 18
     body.angularVelocity.set(
-      (Math.random() - 0.5) * 20,
-      (Math.random() - 0.5) * 20,
-      (Math.random() - 0.5) * 20
+      (Math.random() - 0.5) * spin * 2,
+      (Math.random() - 0.5) * spin * 2,
+      (Math.random() - 0.5) * spin * 2
     )
+
+    // Impact sound on collisions, scaled by impact speed.
+    if (this.prefs.soundEnabled) {
+      body.addEventListener('collide', (e: any) => {
+        const vn = Math.abs(e?.contact?.getImpactVelocityAlongNormal?.() ?? 0)
+        if (vn > 2.5) playDiceImpact(Math.min(1, vn / 30))
+      })
+    }
 
     this.world.addBody(body)
 
     return { mesh, body, shape: physicsShape, type, targetValue, faceValues }
   }
 
-  // ─── Result snapping ─────────────────────────────────────────────────────────
+  private makeMaterial(type: DiceType): THREE.Material {
+    const color = this.prefs.bodyColor ?? DEFAULT_DIE_COLORS[type]
+    if (this.prefs.material === 'glass') {
+      return new THREE.MeshPhysicalMaterial({
+        color,
+        metalness: 0,
+        roughness: 0.1,
+        transmission: 0.85,
+        thickness: 1.2,
+        ior: 1.5,
+        transparent: true,
+        opacity: 0.92,
+        envMapIntensity: 0.8,
+      })
+    }
+    if (this.prefs.material === 'metal') {
+      return new THREE.MeshStandardMaterial({
+        color, metalness: 0.9, roughness: 0.25, envMapIntensity: 0.8,
+      })
+    }
+    return new THREE.MeshStandardMaterial({
+      color, metalness: 0.15, roughness: 0.5, envMapIntensity: 0.5,
+    })
+  }
 
-  private snapToResult(die: DieMesh) {
+  // ─── Result settling ─────────────────────────────────────────────────────────
+
+  /** Prepare a die's eased settle: from its current pose to the nearest pose
+   *  that shows the target face up (minimal rotation, so it tips rather than
+   *  spins). Cylinders just sleep in place. */
+  private beginSettle(die: DieMesh, now: number) {
     const { body, shape, faceValues, targetValue } = die
-
     if (!(shape instanceof CANNON.ConvexPolyhedron)) {
       body.velocity.set(0, 0, 0)
       body.angularVelocity.set(0, 0, 0)
-      body.sleep()
       return
     }
+    const idx = faceValues.findIndex((v) => v === targetValue)
+    if (idx === -1 || !shape.faceNormals.length) return
 
-    const targetFaceIndex = faceValues.findIndex((v) => v === targetValue)
-    if (targetFaceIndex === -1 || !shape.faceNormals.length) {
-      body.sleep()
-      return
-    }
-
-    // Rotate the die so face normal points up (world +Y)
-    const faceNormal = shape.faceNormals[targetFaceIndex]
+    const faceNormal = shape.faceNormals[idx]
     const up = new CANNON.Vec3(0, 1, 0)
 
+    // Base rotation bringing the target face normal to +Y.
     const axis = new CANNON.Vec3()
     faceNormal.cross(up, axis)
-
-    let q: CANNON.Quaternion
+    let base: CANNON.Quaternion
     if (axis.length() < 1e-4) {
-      q = new CANNON.Quaternion(0, 0, 0, 1)
-      if (faceNormal.dot(up) < 0) q.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI)
+      base = new CANNON.Quaternion(0, 0, 0, 1)
+      if (faceNormal.dot(up) < 0) base.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI)
     } else {
       axis.normalize()
       const angle = Math.acos(Math.min(1, Math.max(-1, faceNormal.dot(up))))
-      q = new CANNON.Quaternion()
-      q.setFromAxisAngle(axis, angle)
+      base = new CANNON.Quaternion()
+      base.setFromAxisAngle(axis, angle)
     }
 
-    // Random in-plane rotation around Y (aesthetic)
-    const spin = new CANNON.Quaternion()
-    spin.setFromAxisAngle(up, Math.random() * Math.PI * 2)
-    const finalQ = new CANNON.Quaternion()
-    spin.mult(q, finalQ)
+    // Among yaw rotations about +Y (which keep the same face up), pick the one
+    // closest to the die's current orientation so the correction is minimal.
+    const current = body.quaternion
+    let best = base
+    let bestDot = -1
+    for (let i = 0; i < 12; i++) {
+      const yaw = new CANNON.Quaternion()
+      yaw.setFromAxisAngle(up, (i / 12) * Math.PI * 2)
+      const cand = new CANNON.Quaternion()
+      yaw.mult(base, cand)
+      const d = Math.abs(
+        cand.x * current.x + cand.y * current.y + cand.z * current.z + cand.w * current.w,
+      )
+      if (d > bestDot) { bestDot = d; best = cand }
+    }
 
-    body.quaternion.copy(finalQ)
-    body.velocity.set(0, 0, 0)
-    body.angularVelocity.set(0, 0, 0)
-    body.sleep()
-
-    die.mesh.quaternion.copy(body.quaternion as unknown as THREE.Quaternion)
+    die.settling = { from: current.clone(), to: best, start: now }
   }
 
-  // ─── Helpers ─────────────────────────────────────────────────────────────────
+  // ─── Face label layout ─────────────────────────────────────────────────────────
 
-  private dieColor(type: DiceType): number {
-    const map: Partial<Record<DiceType, number>> = {
-      d4: 0x0e7490,
-      d6: 0xb45309,
-      d8: 0x065f46,
-      d10: 0x9a3412,
-      d12: 0x5b21b6,
-      d20: 0x1e3a8a,
-      d100: 0x334155,
+  /** Compute (once per die type) where each numeral sits on the visual mesh.
+   *  We cluster the visual geometry's triangles into faces by flat normal,
+   *  then match each face to its value via the physics shape's face normals. */
+  private getFaceLayout(type: DiceType): FaceLabel[] {
+    const cached = faceLayoutCache.get(type)
+    if (cached) return cached
+
+    const shapeData = (DICE_SHAPE as any)[type]
+    if (!shapeData || shapeData.type !== 'ConvexPolyhedron') {
+      faceLayoutCache.set(type, [])
+      return []
     }
-    return map[type] ?? 0x334155
+
+    const geo = new BufferGeometryLoader().parse((DICE_MODELS as any)[type]) as THREE.BufferGeometry
+    geo.computeBoundingSphere()
+    const radius = geo.boundingSphere?.radius ?? 90
+    const size = radius * (LABEL_SIZE_FACTOR[type] ?? 0.5)
+
+    const pos = geo.attributes.position as THREE.BufferAttribute
+    const index = geo.index
+    const triCount = index ? index.count / 3 : pos.count / 3
+
+    // Cluster triangles by flat normal.
+    const clusters: { normal: THREE.Vector3; centroid: THREE.Vector3; n: number }[] = []
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3()
+    const ab = new THREE.Vector3(), ac = new THREE.Vector3(), nrm = new THREE.Vector3(), ctr = new THREE.Vector3()
+    for (let t = 0; t < triCount; t++) {
+      const i0 = index ? index.getX(t * 3) : t * 3
+      const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1
+      const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2
+      a.fromBufferAttribute(pos, i0)
+      b.fromBufferAttribute(pos, i1)
+      c.fromBufferAttribute(pos, i2)
+      ab.subVectors(b, a); ac.subVectors(c, a)
+      nrm.crossVectors(ab, ac)
+      if (nrm.lengthSq() < 1e-8) continue
+      nrm.normalize()
+      ctr.copy(a).add(b).add(c).multiplyScalar(1 / 3)
+      let cl = clusters.find((cc) => cc.normal.dot(nrm) > 0.97)
+      if (!cl) {
+        clusters.push({ normal: nrm.clone(), centroid: ctr.clone(), n: 1 })
+      } else {
+        cl.centroid.add(ctr); cl.n++
+        cl.normal.lerp(nrm, 1 / cl.n).normalize()
+      }
+    }
+
+    // Physics face normals (normalized verts) carry the face VALUES order.
+    const verts: CANNON.Vec3[] = shapeData.vertices.map((v: number[]) => new CANNON.Vec3(v[0], v[1], v[2]))
+    const faces: number[][] = shapeData.faces.map((f: number[]) => (shapeData.skipLastFaceIndex ? f.slice(0, -1) : f))
+    const poly = new CANNON.ConvexPolyhedron({ vertices: verts, faces })
+    const faceValues: number[] = shapeData.faceValues ?? []
+
+    const labels: FaceLabel[] = []
+    const fwd = new THREE.Vector3(0, 0, 1)
+    for (const cl of clusters) {
+      cl.centroid.multiplyScalar(1 / cl.n)
+      // Match this visual face normal to the nearest physics face normal.
+      let bestK = -1, bestDot = -1
+      for (let k = 0; k < poly.faceNormals.length; k++) {
+        const fn = poly.faceNormals[k]
+        const d = cl.normal.x * fn.x + cl.normal.y * fn.y + cl.normal.z * fn.z
+        if (d > bestDot) { bestDot = d; bestK = k }
+      }
+      const value = faceValues[bestK]
+      if (value == null) continue
+      const quaternion = new THREE.Quaternion().setFromUnitVectors(fwd, cl.normal)
+      const position = cl.normal.clone().multiplyScalar(0.6).add(cl.centroid) // tiny outward offset
+      labels.push({ position, quaternion, value, size })
+    }
+
+    faceLayoutCache.set(type, labels)
+    return labels
+  }
+
+  private numberTexture(value: number, type: DiceType): THREE.CanvasTexture {
+    const color = this.prefs.numberColor
+    // d100 faces read as "00".."90"; d10 as "0".."9".
+    const text = type === 'd100' ? String(value).padStart(2, '0') : String(value)
+    const key = `${text}|${color}`
+    const hit = textureCache.get(key)
+    if (hit) return hit
+
+    const S = 128
+    const canvas = document.createElement('canvas')
+    canvas.width = S; canvas.height = S
+    const g = canvas.getContext('2d')!
+    g.clearRect(0, 0, S, S)
+    g.fillStyle = color
+    g.font = `bold ${text.length > 1 ? 64 : 84}px "Arial Black", Arial, sans-serif`
+    g.textAlign = 'center'
+    g.textBaseline = 'middle'
+    g.fillText(text, S / 2, S / 2 + 4)
+    // Underline 6 and 9 so they're not ambiguous when tumbling.
+    if (text === '6' || text === '9') {
+      g.fillRect(S / 2 - 22, S / 2 + 34, 44, 7)
+    }
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.anisotropy = 4
+    tex.needsUpdate = true
+    textureCache.set(key, tex)
+    return tex
   }
 
   private size() {
@@ -419,4 +646,22 @@ export class DiceBox {
       h: this.container.clientHeight || window.innerHeight,
     }
   }
+}
+
+/** SLERP two cannon quaternions into `out` at t∈[0,1]. */
+function slerpQuat(qa: CANNON.Quaternion, qb: CANNON.Quaternion, t: number, out: CANNON.Quaternion) {
+  let ax = qa.x, ay = qa.y, az = qa.z, aw = qa.w
+  let bx = qb.x, by = qb.y, bz = qb.z, bw = qb.w
+  let cos = ax * bx + ay * by + az * bz + aw * bw
+  if (cos < 0) { bx = -bx; by = -by; bz = -bz; bw = -bw; cos = -cos }
+  if (cos > 0.9995) {
+    out.set(ax + t * (bx - ax), ay + t * (by - ay), az + t * (bz - az), aw + t * (bw - aw))
+    out.normalize()
+    return
+  }
+  const theta = Math.acos(Math.min(1, cos))
+  const sin = Math.sin(theta)
+  const wa = Math.sin((1 - t) * theta) / sin
+  const wb = Math.sin(t * theta) / sin
+  out.set(wa * ax + wb * bx, wa * ay + wb * by, wa * az + wb * bz, wa * aw + wb * bw)
 }

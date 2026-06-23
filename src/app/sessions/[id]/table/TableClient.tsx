@@ -14,6 +14,8 @@ import type { SpawnMonsterParams } from '@/components/table/MonsterLibrary'
 import type { DiceEntry, ExternalRoll } from '@/components/table/tableclient/types'
 import { TableTopBar } from '@/components/table/tableclient/components/TableTopBar'
 import { ShopModal } from '@/components/shop/ShopModal'
+import { isSpellcaster } from '@/lib/spellCategories'
+import type { DicePrefs } from '@/lib/diceSkins'
 import { MapSection } from '@/components/table/tableclient/components/MapSection'
 import { FloatingWindow } from '@/components/table/hud/FloatingWindow'
 import { useHudLayout } from '@/components/table/hud/useHudLayout'
@@ -224,13 +226,19 @@ export default function TableClient({ sessionId }: TableClientProps) {
     label: string
     formula: string
     result: number
+    /** Natural per-die values (pre-modifier) — what the 3D dice land on. */
+    dice?: number[]
     outcome?: string | null
   }>(null)
 
-  function flashRollOverlay(payload: { roller: string; label: string; formula: string; result: number; outcome?: string | null }) {
+  const rollOverlayTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  function flashRollOverlay(payload: { roller: string; label: string; formula: string; result: number; dice?: number[]; outcome?: string | null }) {
     setRollOverlay(payload)
-    // auto-hide
-    setTimeout(() => setRollOverlay(null), 950)
+    // Auto-hide AFTER the 3D dice settle (~2.4s) and the result number has had
+    // time to display + fade (DiceRollOverlay runs a ~5.7s lifecycle). The old
+    // 950ms clear cut the dice + result off before they appeared.
+    if (rollOverlayTimer.current) clearTimeout(rollOverlayTimer.current)
+    rollOverlayTimer.current = setTimeout(() => setRollOverlay(null), 6000)
   }
 
   // Campaign Character state (locked)
@@ -243,17 +251,21 @@ export default function TableClient({ sessionId }: TableClientProps) {
   const [sessionPlayers, setSessionPlayers] = useState<SessionPlayerRow[]>([])
   const [gmViewWallet, setGmViewWallet] = useState<string | null>(null)
 
-  // Current user's profile display_name (shown instead of raw wallet)
+  // Current user's profile display_name (shown instead of raw wallet) + dice prefs
   const [myDisplayName, setMyDisplayName] = useState<string | null>(null)
+  const [myDicePrefs, setMyDicePrefs] = useState<DicePrefs | null>(null)
 
   useEffect(() => {
-    if (!walletLower) { setMyDisplayName(null); return }
+    if (!walletLower) { setMyDisplayName(null); setMyDicePrefs(null); return }
     supabase
       .from('profiles')
-      .select('display_name')
+      .select('*') // '*' so a pre-migration deploy (no dice_prefs column) still loads
       .eq('wallet_address', walletLower)
       .maybeSingle()
-      .then(({ data }) => { setMyDisplayName((data as any)?.display_name ?? null) })
+      .then(({ data }) => {
+        setMyDisplayName((data as any)?.display_name ?? null)
+        setMyDicePrefs(((data as any)?.dice_prefs ?? null) as DicePrefs | null)
+      })
   }, [walletLower])
 
   // ✅ Multi-map management (GM only)
@@ -613,7 +625,12 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
     pushRollLocal(entry)
     setShowDiceLog(true)
-    flashRollOverlay({ roller: rollerName, label: roll.label, formula: roll.formula, result: roll.result, outcome: (roll as any).outcome ?? null })
+    // Natural per-die values (excluding advantage/disadvantage drops) so the 3D
+    // dice land on the real rolls rather than the modified total.
+    const naturalDice = Array.isArray(roll.individual_dice)
+      ? (roll.individual_dice as any[]).filter((d) => d && !d.dropped).map((d) => Number(d.value)).filter((n) => Number.isFinite(n))
+      : undefined
+    flashRollOverlay({ roller: rollerName, label: roll.label, formula: roll.formula, result: roll.result, dice: naturalDice && naturalDice.length > 0 ? naturalDice : undefined, outcome: (roll as any).outcome ?? null })
   }
 
   async function handleTestRoll() {
@@ -677,7 +694,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
     pushRollLocal(entry)
     setShowDiceLog(true)
-    flashRollOverlay({ roller: rollerName, label, formula, result: total })
+    flashRollOverlay({ roller: rollerName, label, formula, result: total, dice: [d20] })
   }
 
   async function handleInitiative() {
@@ -735,7 +752,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
     pushRollLocal(entry)
     setShowDiceLog(true)
-    flashRollOverlay({ roller: rollerName, label: 'Initiative', formula, result: total })
+    flashRollOverlay({ roller: rollerName, label: 'Initiative', formula, result: total, dice: [d20] })
   }
 
   // ---------- Map management handlers (GM only) ----------
@@ -992,7 +1009,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
       result: initTotal,
       rollerName,
     })
-    flashRollOverlay({ roller: rollerName, label: 'Initiative', formula, result: initTotal })
+    flashRollOverlay({ roller: rollerName, label: 'Initiative', formula, result: initTotal, dice: [d20] })
   }
 
   // Place a non-combatant NPC token (shopkeeper, quest giver, set-dressing).
@@ -1138,6 +1155,10 @@ export default function TableClient({ sessionId }: TableClientProps) {
         onEndSession={isGm ? handleEndSession : undefined}
         onOpenShop={handleOpenShop}
         sessionStatus={sessionStatus}
+        playerIsSpellcaster={
+          isSpellcaster((selectedCharacter as any)?.main_job) ||
+          isSpellcaster((selectedCharacter as any)?.secondary_class)
+        }
       />
       {/* Shop / session toast notifications */}
       {(shopToast || sessionToast) && (
@@ -1172,6 +1193,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
       rollerName={buildRollerName({ selectedCharacter, address, displayName: myDisplayName })}
       rollerWallet={walletLower ?? undefined}
       rollOverlay={rollOverlay}
+      dicePrefs={myDicePrefs}
       visionFeet={visionFeet}
       speedFeet={speedFeet}
       sessionPlayerWallets={sessionPlayers.map((p) => p.wallet_address)}

@@ -29,6 +29,7 @@ import {
 } from '@/lib/spellSlots'
 import { getDomainSpells, getMysticArcanumLevels } from '@/lib/spellcastingProgression'
 import { hasRitualCasting } from '@/lib/invocations'
+import { PartySlotsPanel } from '@/components/spells/PartySlotsPanel'
 
 /**
  * Effect 1: Agonizing Blast — when a Warlock has this invocation, Eldritch
@@ -85,6 +86,9 @@ type CharRow = {
   /** Wave 5: holds concentrating_on (spell name) + active_conditions array */
   action_state: Record<string, any> | null
   spells_prepared: string[] | null
+  /** Cantrips + (for known-casters) all known spells live here, separate from
+   *  spells_prepared which only holds prepared leveled spells. */
+  spells_known: string[] | null
   spell_save_dc: number | null
   spell_attack_bonus: number | null
   hit_points_current: number | null
@@ -221,74 +225,6 @@ function PartyHealthPanel({ tokens }: { tokens: Token[] }) {
           )
         })}
       </div>
-    </div>
-  )
-}
-
-// ── DM view: all casters' slots ────────────────────────────────────────────────
-
-function AllCastersSlots({ sessionId }: { sessionId: string }) {
-  const [casters, setCasters] = useState<CharRow[]>([])
-
-  useEffect(() => {
-    async function load() {
-      const { data: links } = await supabase
-        .from('session_characters')
-        .select('character_id')
-        .eq('session_id', sessionId)
-
-      if (!links?.length) return
-
-      const ids = links.map((l: any) => l.character_id).filter(Boolean)
-      const { data: chars } = await supabase
-        .from('characters')
-        .select('id, name, level, main_job, spell_slots, resource_state')
-        .in('id', ids)
-
-      const casterList = (chars ?? []).filter(
-        (c: any) => isSpellcaster(c.main_job) && c.spell_slots,
-      )
-      setCasters(casterList as CharRow[])
-    }
-    load()
-  }, [sessionId])
-
-  if (casters.length === 0) return null
-
-  return (
-    <div>
-      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-        Party Slots (DM)
-      </div>
-      {casters.map(char => {
-        const slots = buildSlotData(char.spell_slots, char.resource_state)
-        return (
-          <div key={char.id} className="mb-3">
-            <div className="text-[10px] text-slate-400 mb-1 truncate">
-              {char.name} · {char.main_job} {char.level}
-            </div>
-            <div className="space-y-0.5">
-              {Object.entries(slots).map(([lvl, data]) => (
-                <div key={lvl} className="flex items-center gap-1">
-                  <span className="w-4 text-[9px] text-slate-600">L{lvl}</span>
-                  <div className="flex gap-0.5">
-                    {Array.from({ length: data.max }).map((_, i) => (
-                      <div
-                        key={i}
-                        className={`h-2 w-2 rounded-full ${
-                          i < data.max - data.used
-                            ? 'bg-violet-500'
-                            : 'bg-slate-800 border border-slate-700'
-                        }`}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )
-      })}
     </div>
   )
 }
@@ -796,7 +732,7 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
 
       const { data: char } = await supabase
         .from('characters')
-        .select('id, name, level, main_job, subclass, secondary_class, secondary_subclass, secondary_level, race, abilities, spell_slots, resource_state, action_state, spells_prepared, spell_save_dc, spell_attack_bonus, hit_points_current, hit_points_max, mystic_arcanum, warlock_invocations, wallet_address')
+        .select('id, name, level, main_job, subclass, secondary_class, secondary_subclass, secondary_level, race, abilities, spell_slots, resource_state, action_state, spells_prepared, spells_known, spell_save_dc, spell_attack_bonus, hit_points_current, hit_points_max, mystic_arcanum, warlock_invocations, wallet_address')
         .eq('id', charId)
         .maybeSingle()
 
@@ -866,9 +802,13 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
   }, [encounterId])
 
   // ── Derived spell lists ───────────────────────────────────────────────────────
+  // The castable list is the UNION of spells_prepared (prepared leveled spells)
+  // and spells_known (cantrips for everyone + all known spells for known-casters
+  // like Sorcerer/Bard/Warlock/Ranger). Reading only spells_prepared previously
+  // hid every cantrip from the dashboard.
   const preparedNames = useMemo(
-    () => new Set(myChar?.spells_prepared ?? []),
-    [myChar?.spells_prepared],
+    () => new Set([...(myChar?.spells_prepared ?? []), ...(myChar?.spells_known ?? [])]),
+    [myChar?.spells_prepared, myChar?.spells_known],
   )
 
   // Magic audit section C.3: tag domain/oath/circle spells in the dashboard
@@ -963,7 +903,7 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
   }, [myChar, sessionId, wallet])
 
   const preparedSpells = useMemo(
-    () => SRD_SPELLS.filter(s => preparedNames.has(s.name) || s.level === 0 && preparedNames.has(s.name)),
+    () => SRD_SPELLS.filter(s => preparedNames.has(s.name)),
     [preparedNames],
   )
 
@@ -1039,7 +979,12 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
 
   // PC tokens for healing, all tokens for combat
   const pcTokens = useMemo(() => tokens.filter(t => t.type === 'pc'), [tokens])
-  const allTargets = useMemo(() => tokens.filter(t => t.id !== /* my own? */ undefined), [tokens])
+  // Combat targets = every token EXCEPT the caster's own (you don't target
+  // yourself with attack/save offensive spells). Matched by owner_wallet.
+  const allTargets = useMemo(
+    () => tokens.filter(t => !(wallet && t.owner_wallet?.toLowerCase() === wallet)),
+    [tokens, wallet],
+  )
 
   // ── Wave 5: Concentration tracking ───────────────────────────────────────
   // Declared BEFORE handleRoll so the useCallback dep array can reference
@@ -1214,10 +1159,19 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
       ? Math.min(max, cur + pending.result)
       : Math.max(0, cur - pending.result)
 
-    await supabase
-      .from('tokens')
-      .update({ current_hp: newHp })
-      .eq('id', token.id)
+    // Apply through the canonical RPC so the token row, the linked character's
+    // hit_points_current, AND the initiative entry all stay in sync. p_amount is
+    // damage (positive); healing flips the sign. Fall back to a direct token
+    // write only if the RPC is unavailable.
+    const effectiveDelta = newHp - cur // negative = damage, positive = heal
+    const { error: rpcErr } = await supabase.rpc('apply_combat_damage', {
+      p_token_id: token.id,
+      p_amount: -effectiveDelta,
+    })
+    if (rpcErr) {
+      console.error('[SpellDashboard] apply_combat_damage failed, falling back', rpcErr)
+      await supabase.from('tokens').update({ current_hp: newHp }).eq('id', token.id)
+    }
 
     // Defeat message
     if (pending.type === 'damage' && newHp === 0) {
@@ -1265,19 +1219,29 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
             const hasConProf = Array.isArray((targetChar as any).saving_throw_profs)
               && (targetChar as any).saving_throw_profs.includes('con')
             const totalMod = baseMod + (hasConProf ? targetPB : 0)
-            const d20 = Math.floor(Math.random() * 20) + 1
-            const total = d20 + totalMod
-            const maintained = total >= dc
             const sign = totalMod >= 0 ? '+' : ''
-            await supabase.from('session_rolls').insert({
-              session_id: sessionId,
-              roll_type: 'save',
-              label: `Concentration Save — ${(targetChar as any).name} (${targetConcSpell}) DC ${dc}`,
-              formula: `1d20${sign}${totalMod}`,
-              result_total: total,
-              roller_name: (targetChar as any).name,
-              roller_wallet: token.owner_wallet,
-            })
+            // Roll through /api/roll so the concentration save is a real logged
+            // roll (and shows the 3D dice for watchers) instead of a silent
+            // Math.random. /api/roll persists to session_rolls itself.
+            let total: number
+            try {
+              const sres = await fetch('/api/roll', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  notation: `1d20${sign}${totalMod}`,
+                  rollType: 'save',
+                  label: `Concentration Save — ${(targetChar as any).name} (${targetConcSpell}) DC ${dc}`,
+                  sessionId,
+                  rollerName: (targetChar as any).name,
+                  rollerWallet: token.owner_wallet ?? undefined,
+                }),
+              })
+              total = sres.ok ? Number((await sres.json()).total ?? 0) : (Math.floor(Math.random() * 20) + 1) + totalMod
+            } catch {
+              total = (Math.floor(Math.random() * 20) + 1) + totalMod
+            }
+            const maintained = total >= dc
             if (!maintained) {
               const nextConditions: string[] = Array.isArray(targetActionState.active_conditions)
                 ? targetActionState.active_conditions.filter((c: string) => c !== 'concentration')
@@ -1419,6 +1383,22 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-950">
         <div className="text-red-400 text-sm">{error}</div>
+      </div>
+    )
+  }
+
+  // Non-caster who reached the route directly (the table button is hidden for
+  // them). The GM keeps access for the party-slots view even without a caster.
+  const charIsCaster = !!myChar && (isSpellcaster(myChar.main_job) || isSpellcaster(myChar.secondary_class))
+  if (myChar && !charIsCaster && !isGm) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-950 px-6 text-center">
+        <div className="max-w-sm">
+          <p className="text-sm font-semibold text-slate-200">{myChar.name} isn’t a spellcaster.</p>
+          <p className="mt-1 text-[12px] text-slate-500">
+            The spell dashboard is only for characters with spellcasting. Head back to the table.
+          </p>
+        </div>
       </div>
     )
   }
@@ -1621,7 +1601,7 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
           <PartyHealthPanel tokens={pcTokens.length > 0 ? pcTokens : tokens} />
 
           {/* DM all-casters view */}
-          {isGm && <AllCastersSlots sessionId={sessionId} />}
+          {isGm && <PartySlotsPanel sessionId={sessionId} />}
 
           {/* Spellcasting stats */}
           {myChar && isSpellcaster(myChar.main_job) && (

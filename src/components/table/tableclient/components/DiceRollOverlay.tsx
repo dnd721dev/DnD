@@ -8,6 +8,9 @@ export type RollOverlayPayload = {
   label: string
   formula: string
   result: number
+  /** Natural per-die values (BEFORE modifiers) — drives the faces the 3D dice
+   *  land on. When absent, DiceCanvas3D derives it from `formula` + `result`. */
+  dice?: number[]
   outcomeText?: string | null
 }
 
