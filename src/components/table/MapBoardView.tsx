@@ -849,18 +849,19 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
         ctx.stroke()
         ctx.restore()
       }
-      // Trap marker (⚠) at the trap tile
+      // Marker — portals are a 🚪 doorway, traps a red "!".
+      const isPortal = trig.trigger_type === 'portal'
       const iconR = Math.max(6, gridSize * 0.16)
       ctx.save()
       ctx.beginPath()
-      ctx.fillStyle = 'rgba(239,68,68,0.92)'
+      ctx.fillStyle = isPortal ? 'rgba(99,102,241,0.92)' : 'rgba(239,68,68,0.92)'
       ctx.arc(cx, cy, iconR, 0, Math.PI * 2)
       ctx.fill()
-      ctx.font = `bold ${Math.max(9, Math.floor(gridSize * 0.2))}px system-ui,sans-serif`
+      ctx.font = `${Math.max(9, Math.floor(gridSize * (isPortal ? 0.22 : 0.2)))}px system-ui,sans-serif`
       ctx.fillStyle = '#fff'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillText('!', cx, cy + 0.5)
+      ctx.fillText(isPortal ? '🚪' : '!', cx, cy + 0.5)
       ctx.restore()
     })
   }, [tokens, canvasSize, gridSize, ownerLower, revealSet, activeInitiativeName, activeWalletLower, tokenImgVersion, tapSelectTokenId, targetTokenId, playerTriggers])

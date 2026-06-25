@@ -60,6 +60,8 @@ type SessionPlayerRow = {
   display_name?: string | null
   vision?: number | null
   race?: string | null
+  /** Per-player current map override (null = follow the GM's session map). */
+  current_map_id?: string | null
 }
 
 export default function TableClient({ sessionId }: TableClientProps) {
@@ -206,19 +208,38 @@ export default function TableClient({ sessionId }: TableClientProps) {
         if (!res.ok) return
         const json = await res.json()
         const triggers: any[] = json.triggers ?? []
-        if (triggers.length > 0) {
-          // Fire the first active trigger found at this tile
-          // Include tokenId so PlayerSidebar can apply damage / conditions to the right token
-          window.dispatchEvent(new CustomEvent('dnd721-trigger-tripped', {
-            detail: { trigger: triggers[0], tokenId: ev.detail.tokenId ?? null },
-          }))
+        if (triggers.length === 0) return
+        const trig = triggers[0]
+
+        // Map-transition portal: switch the token's owner to the destination
+        // map at the landing tile instead of firing a save prompt.
+        if (trig.trigger_type === 'portal' && trig.target_map_id) {
+          // Pre-seed the destination tile so arrival there doesn't re-fire.
+          if (tokenId) lastTriggerTileRef.current.set(tokenId, { x: trig.target_x ?? 0, y: trig.target_y ?? 0 })
+          await fetch('/api/maps/transition', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId: session.id,
+              callerWallet: walletLower,
+              tokenId,
+              triggerId: trig.id,
+            }),
+          }).catch(() => {})
+          return
         }
+
+        // Fire the first active trigger found at this tile
+        // Include tokenId so PlayerSidebar can apply damage / conditions to the right token
+        window.dispatchEvent(new CustomEvent('dnd721-trigger-tripped', {
+          detail: { trigger: trig, tokenId: ev.detail.tokenId ?? null },
+        }))
       } catch { /* silent */ }
     }
 
     window.addEventListener('dnd721-token-moved', handler)
     return () => window.removeEventListener('dnd721-token-moved', handler)
-  }, [session])
+  }, [session, walletLower])
 
   // Dice roll animation overlay (small, quick, satisfying)
   const [rollOverlay, setRollOverlay] = useState<null | {
@@ -302,6 +323,37 @@ export default function TableClient({ sessionId }: TableClientProps) {
     [maps, currentMapId]
   )
 
+  // Feature A: the map THIS viewer actually sees. Players (and the GM's
+  // "View As" POV) can be on a per-player map; everyone else follows the
+  // session's default map. The GM's own editing tools still use currentMapId.
+  const [myCurrentMapId, setMyCurrentMapId] = useState<string | null>(null)
+  const effectiveMapId = useMemo(() => {
+    if (isGm) {
+      if (gmViewWallet) {
+        const row = sessionPlayers.find((p) => p.wallet_address?.toLowerCase() === gmViewWallet.toLowerCase())
+        return row?.current_map_id ?? currentMapId
+      }
+      return currentMapId
+    }
+    return myCurrentMapId ?? currentMapId
+  }, [isGm, gmViewWallet, sessionPlayers, myCurrentMapId, currentMapId])
+  const effectiveMap = useMemo(
+    () => maps.find((m) => m.id === effectiveMapId) ?? null,
+    [maps, effectiveMapId]
+  )
+
+  // GM: send one player to a specific map (moves their token too). Empty mapId
+  // clears the override so the player follows the session map again.
+  const [showPartyMaps, setShowPartyMaps] = useState(false)
+  const assignPlayerMap = useCallback(async (targetWallet: string, mapId: string) => {
+    if (!session?.id || !walletLower || !mapId) return
+    await fetch('/api/player-map', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: session.id, callerWallet: walletLower, targetWallet, mapId }),
+    }).catch(() => {})
+  }, [session?.id, walletLower])
+
   // ✅ Pull speed from character row — default 30 if missing
   const speedFeet = useMemo(() => {
     if (isGm) return 9999
@@ -361,7 +413,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
     const loadPlayers = async () => {
       const { data, error } = await supabase
         .from('session_players')
-        .select('wallet_address, character_id')
+        .select('*') // '*' so a pre-migration deploy (no current_map_id) still loads
         .eq('session_id', session.id)
 
       if (!mounted) return
@@ -416,10 +468,51 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
     void loadPlayers()
 
+    // Refresh when players join/leave or get reassigned to a different map
+    // (per-player current_map_id) so the GM roster + "View As" stay current.
+    const ch = supabase
+      .channel(`gm-session-players-${session.id}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'session_players', filter: `session_id=eq.${session.id}` },
+        () => { void loadPlayers() })
+      .subscribe()
+
     return () => {
       mounted = false
+      supabase.removeChannel(ch)
     }
   }, [isGm, session?.id])
+
+  // ── Per-player current map (feature A) ──────────────────────────────────────
+  // Players track their own session_players.current_map_id override (null =
+  // follow the GM's session map). Updated live so portals / GM reassignment
+  // switch the player's view without a refresh. (State declared earlier, near
+  // the effectiveMap derivation, so the memo can reference it.)
+  useEffect(() => {
+    if (isGm || !session?.id || !walletLower) { setMyCurrentMapId(null); return }
+    let mounted = true
+    const load = async () => {
+      const { data } = await supabase
+        .from('session_players')
+        .select('current_map_id')
+        .eq('session_id', session.id)
+        .eq('wallet_address', walletLower)
+        .maybeSingle()
+      if (mounted) setMyCurrentMapId(((data as any)?.current_map_id ?? null) as string | null)
+    }
+    void load()
+    const ch = supabase
+      .channel(`my-map-${session.id}-${walletLower}`)
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'session_players', filter: `session_id=eq.${session.id}` },
+        (payload: any) => {
+          if (String(payload.new?.wallet_address ?? '').toLowerCase() === walletLower) {
+            setMyCurrentMapId((payload.new?.current_map_id ?? null) as string | null)
+          }
+        })
+      .subscribe()
+    return () => { mounted = false; supabase.removeChannel(ch) }
+  }, [isGm, session?.id, walletLower])
 
   // ✅ Load characters + campaign selection (players only)
   useEffect(() => {
@@ -1175,7 +1268,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
     <MapSection
       expanded={hud.mapExpanded}
       onToggleExpand={() => hud.setMapExpanded(!hud.mapExpanded)}
-      currentMap={currentMap}
+      currentMap={effectiveMap}
       legacyMapUrl={legacyMapUrl}
       encounterId={encounterId}
       encounterLoading={encounterLoading}
@@ -1475,6 +1568,47 @@ export default function TableClient({ sessionId }: TableClientProps) {
                   <option key={m.id} value={m.id}>{m.name}</option>
                 ))}
               </select>
+
+              {/* Feature A: per-player map assignment. */}
+              {maps.length > 1 && sessionPlayers.length > 0 && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowPartyMaps((v) => !v)}
+                    className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 hover:border-indigo-500"
+                    title="Put players on different maps"
+                  >
+                    🗺 Party Maps
+                  </button>
+                  {showPartyMaps && (
+                    <div className="absolute left-0 top-full z-[70] mt-1 w-64 rounded-lg border border-slate-700 bg-slate-900/95 p-2 shadow-xl backdrop-blur">
+                      <div className="mb-1 text-[10px] uppercase tracking-wide text-slate-400">Send player to map</div>
+                      <div className="space-y-1.5">
+                        {sessionPlayers.map((p) => {
+                          const label = p.display_name?.trim() || `${p.wallet_address.slice(0, 6)}…${p.wallet_address.slice(-4)}`
+                          const cur = p.current_map_id ?? currentMapId
+                          return (
+                            <div key={p.wallet_address} className="flex items-center gap-1.5">
+                              <span className="w-20 shrink-0 truncate text-[11px] text-slate-200" title={label}>{label}</span>
+                              <select
+                                value={cur ?? ''}
+                                onChange={(e) => assignPlayerMap(p.wallet_address, e.target.value)}
+                                className="flex-1 rounded border border-slate-700 bg-slate-950 px-1.5 py-1 text-[11px] text-slate-100"
+                              >
+                                <option value="" disabled>— map —</option>
+                                {maps.map((m) => (
+                                  <option key={m.id} value={m.id}>{m.name}{m.id === currentMapId ? ' (default)' : ''}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <p className="mt-1.5 text-[9px] text-slate-500">Moves the player + their token. Use “View As” to see their map.</p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <button
                 onClick={() => {

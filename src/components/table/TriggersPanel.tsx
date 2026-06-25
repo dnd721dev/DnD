@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from '@/components/ui/ToastHub'
+import { supabase } from '@/lib/supabase'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,8 +23,13 @@ type Trigger = {
   is_active: boolean
   is_hidden: boolean
   radius: number | null
+  target_map_id: string | null
+  target_x: number | null
+  target_y: number | null
   created_at: string
 }
+
+type SessionMapOption = { id: string; name: string }
 
 type TriggerForm = {
   name: string
@@ -36,6 +42,10 @@ type TriggerForm = {
   conditionApplied: string
   description: string
   radius: number
+  // Portal destination
+  targetMapId: string
+  targetX: number
+  targetY: number
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -52,6 +62,8 @@ const TRIGGER_TYPES = [
   // (vs the Perception DC field, used here as the Investigation DC) and their
   // description is the clue text shown to the discovering player.
   { value: 'clue',           label: '🔍 Clue (Investigation)' },
+  // Portals never fire damage — they move the stepping player to another map.
+  { value: 'portal',         label: '🚪 Map Transition' },
   { value: 'custom',         label: 'Custom' },
 ]
 const DAMAGE_TYPES = [
@@ -66,6 +78,7 @@ const CONDITIONS = [
 const BLANK_FORM: TriggerForm = {
   name: '', triggerType: 'trap', saveType: 'DEX', dc: 15, saveDc: 15,
   damageDice: '', damageType: 'piercing', conditionApplied: 'None', description: '', radius: 0,
+  targetMapId: '', targetX: 0, targetY: 0,
 }
 
 /** Extract a useful error message from a non-ok response, tolerating non-JSON
@@ -108,6 +121,17 @@ export function TriggersPanel({
   const [modalOpen, setModalOpen]   = useState(false)
   const [editingId, setEditingId]   = useState<string | null>(null)
   const [form, setForm]             = useState<TriggerForm>(BLANK_FORM)
+
+  // Session maps — destination options for portal ('map transition') triggers.
+  const [sessionMaps, setSessionMaps] = useState<SessionMapOption[]>([])
+  useEffect(() => {
+    supabase
+      .from('maps')
+      .select('id, name')
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: true })
+      .then(({ data }) => setSessionMaps((data ?? []) as SessionMapOption[]))
+  }, [sessionId])
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -162,6 +186,9 @@ export function TriggersPanel({
         conditionApplied: trigger.condition_applied ?? 'None',
         description:      trigger.description       ?? '',
         radius:           trigger.radius            ?? 0,
+        targetMapId:      trigger.target_map_id     ?? '',
+        targetX:          trigger.target_x          ?? 0,
+        targetY:          trigger.target_y          ?? 0,
       })
       setPendingTile({ tileX: trigger.tile_x, tileY: trigger.tile_y })
       setWaitingForTile(false)
@@ -239,6 +266,9 @@ export function TriggersPanel({
             conditionApplied: form.conditionApplied !== 'None' ? form.conditionApplied : undefined,
             description:      form.description      || undefined,
             radius:           form.radius,
+            targetMapId:      form.triggerType === 'portal' ? (form.targetMapId || null) : null,
+            targetX:          form.triggerType === 'portal' ? form.targetX : null,
+            targetY:          form.triggerType === 'portal' ? form.targetY : null,
           }),
         })
         if (!res.ok) throw new Error(await readError(res, 'Failed to update'))
@@ -264,6 +294,11 @@ export function TriggersPanel({
             conditionApplied: form.conditionApplied !== 'None' ? form.conditionApplied : undefined,
             description:      form.description      || undefined,
             radius:           form.radius,
+            // Portals are visible doorways and carry a destination.
+            isHidden:         form.triggerType === 'portal' ? false : undefined,
+            targetMapId:      form.triggerType === 'portal' ? (form.targetMapId || null) : undefined,
+            targetX:          form.triggerType === 'portal' ? form.targetX : undefined,
+            targetY:          form.triggerType === 'portal' ? form.targetY : undefined,
           }),
         })
         if (!res.ok) throw new Error(await readError(res, 'Failed to create'))
@@ -353,10 +388,52 @@ export function TriggersPanel({
                 </div>
               </div>
 
-              {/* Save + DC row */}
-              <div className="grid grid-cols-3 gap-2">
+              {/* Portal ('map transition') destination — only for portals */}
+              {form.triggerType === 'portal' && (
+                <div className="rounded-md border border-indigo-700/40 bg-indigo-950/30 p-2 space-y-2">
+                  <div>
+                    <label className="block text-[10px] text-indigo-300 mb-0.5">Destination map</label>
+                    <select
+                      value={form.targetMapId}
+                      onChange={(e) => setForm(f => ({ ...f, targetMapId: e.target.value }))}
+                      className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-100 focus:border-indigo-500 focus:outline-none"
+                    >
+                      <option value="">— choose a map —</option>
+                      {sessionMaps.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-indigo-300 mb-0.5">Land at X</label>
+                      <input
+                        type="number" min={0}
+                        value={form.targetX}
+                        onChange={(e) => setForm(f => ({ ...f, targetX: parseInt(e.target.value) || 0 }))}
+                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-100 focus:border-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-indigo-300 mb-0.5">Land at Y</label>
+                      <input
+                        type="number" min={0}
+                        value={form.targetY}
+                        onChange={(e) => setForm(f => ({ ...f, targetY: parseInt(e.target.value) || 0 }))}
+                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-100 focus:border-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-slate-500">The player who steps here is moved to this map at this tile.</p>
+                </div>
+              )}
+
+              {/* Discovery DC — Perception for traps, Investigation for clues.
+                  Not used by portals (always visible). */}
+              {form.triggerType !== 'portal' && (
+              <div className={`grid gap-2 ${form.triggerType === 'clue' ? 'grid-cols-1' : 'grid-cols-3'}`}>
                 <div>
-                  <label className="block text-[10px] text-slate-400 mb-0.5">Perception DC</label>
+                  <label className="block text-[10px] text-slate-400 mb-0.5">
+                    {form.triggerType === 'clue' ? 'Investigation DC' : 'Perception DC'}
+                  </label>
                   <input
                     type="number" min={1} max={30}
                     value={form.dc}
@@ -364,28 +441,36 @@ export function TriggersPanel({
                     className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-100 focus:border-orange-500 focus:outline-none"
                   />
                 </div>
-                <div>
-                  <label className="block text-[10px] text-slate-400 mb-0.5">Save Type</label>
-                  <select
-                    value={form.saveType}
-                    onChange={(e) => setForm(f => ({ ...f, saveType: e.target.value }))}
-                    className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-100 focus:border-orange-500 focus:outline-none"
-                  >
-                    {SAVE_TYPES.map(s => <option key={s}>{s}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] text-slate-400 mb-0.5">Save DC</label>
-                  <input
-                    type="number" min={1} max={30}
-                    value={form.saveDc}
-                    onChange={(e) => setForm(f => ({ ...f, saveDc: parseInt(e.target.value) || 15 }))}
-                    className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-100 focus:border-orange-500 focus:outline-none"
-                  />
-                </div>
+                {/* Save fields don't apply to a clue (it's a discovery, not a hazard). */}
+                {form.triggerType !== 'clue' && (
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-0.5">Save Type</label>
+                    <select
+                      value={form.saveType}
+                      onChange={(e) => setForm(f => ({ ...f, saveType: e.target.value }))}
+                      className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-100 focus:border-orange-500 focus:outline-none"
+                    >
+                      {SAVE_TYPES.map(s => <option key={s}>{s}</option>)}
+                    </select>
+                  </div>
+                )}
+                {form.triggerType !== 'clue' && (
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-0.5">Save DC</label>
+                    <input
+                      type="number" min={1} max={30}
+                      value={form.saveDc}
+                      onChange={(e) => setForm(f => ({ ...f, saveDc: parseInt(e.target.value) || 15 }))}
+                      className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-100 focus:border-orange-500 focus:outline-none"
+                    />
+                  </div>
+                )}
               </div>
+              )}
 
-              {/* Trigger radius */}
+              {/* Trigger radius — clues are found via the Investigate search
+                  range, not by stepping into an area, so it's hidden for them. */}
+              {form.triggerType !== 'clue' && (
               <div>
                 <label className="flex items-center justify-between text-[10px] text-slate-400 mb-0.5">
                   <span>Trigger Radius</span>
@@ -400,11 +485,15 @@ export function TriggersPanel({
                   className="w-full accent-orange-500"
                 />
                 <p className="text-[9px] text-slate-500 mt-0.5">
-                  Any token entering this area trips the trap. The ring previews on the map.
+                  {form.triggerType === 'portal'
+                    ? 'Any token entering this area is transported. The ring previews on the map.'
+                    : 'Any token entering this area trips the trap. The ring previews on the map.'}
                 </p>
               </div>
+              )}
 
-              {/* Damage row */}
+              {/* Damage row — not for clues (a clue deals no damage). */}
+              {!['portal', 'clue'].includes(form.triggerType) && (
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-[10px] text-slate-400 mb-0.5">Damage Dice</label>
@@ -426,8 +515,10 @@ export function TriggersPanel({
                   </select>
                 </div>
               </div>
+              )}
 
-              {/* Condition */}
+              {/* Condition — not for clues (a clue applies no condition). */}
+              {!['portal', 'clue'].includes(form.triggerType) && (
               <div>
                 <label className="block text-[10px] text-slate-400 mb-0.5">Condition on Fail</label>
                 <select
@@ -438,10 +529,13 @@ export function TriggersPanel({
                   {CONDITIONS.map(c => <option key={c}>{c}</option>)}
                 </select>
               </div>
+              )}
 
-              {/* Description */}
+              {/* Description — doubles as the clue text revealed to the finder. */}
               <div>
-                <label className="block text-[10px] text-slate-400 mb-0.5">DM Notes (optional)</label>
+                <label className="block text-[10px] text-slate-400 mb-0.5">
+                  {form.triggerType === 'clue' ? 'Clue text (shown to the player who finds it)' : 'DM Notes (optional)'}
+                </label>
                 <textarea
                   rows={2}
                   value={form.description}
@@ -567,6 +661,9 @@ export function TriggersPanel({
                         conditionApplied: t.condition_applied ?? 'None',
                         description:      t.description       ?? '',
                         radius:           t.radius            ?? 0,
+                        targetMapId:      t.target_map_id     ?? '',
+                        targetX:          t.target_x          ?? 0,
+                        targetY:          t.target_y          ?? 0,
                       })
                       setPendingTile({ tileX: t.tile_x, tileY: t.tile_y })
                       setModalOpen(true)

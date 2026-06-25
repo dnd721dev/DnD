@@ -19,6 +19,11 @@ const CreateSchema = z.object({
   damageType:       z.string().max(30).optional(),
   conditionApplied: z.string().max(30).optional(),
   radius:           z.number().int().min(0).max(20).default(0),
+  isHidden:         z.boolean().optional(),
+  // Portal ('map transition') fields — destination map + landing tile.
+  targetMapId:      z.string().uuid().nullable().optional(),
+  targetX:          z.number().int().nullable().optional(),
+  targetY:          z.number().int().nullable().optional(),
 })
 
 const PatchSchema = z.object({
@@ -39,6 +44,9 @@ const PatchSchema = z.object({
   conditionApplied: z.string().max(30).optional(),
   description:      z.string().max(500).optional(),
   radius:           z.number().int().min(0).max(20).optional(),
+  targetMapId:      z.string().uuid().nullable().optional(),
+  targetX:          z.number().int().nullable().optional(),
+  targetY:          z.number().int().nullable().optional(),
 })
 
 async function verifyGm(db: ReturnType<typeof supabaseAdmin>, sessionId: string, wallet: string) {
@@ -117,7 +125,8 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
 
   const { sessionId, gmWallet, mapId, tileX, tileY, name, saveType, dc, saveDc, description,
-          triggerType, damageDice, damageType, conditionApplied, radius } = parsed.data
+          triggerType, damageDice, damageType, conditionApplied, radius, isHidden,
+          targetMapId, targetX, targetY } = parsed.data
   const db = supabaseAdmin()
 
   if (!(await verifyGm(db, sessionId, gmWallet))) {
@@ -141,6 +150,10 @@ export async function POST(req: NextRequest) {
       damage_type:       damageType         ?? null,
       condition_applied: conditionApplied   ?? null,
       radius:            radius             ?? 0,
+      target_map_id:     targetMapId        ?? null,
+      target_x:          targetX            ?? null,
+      target_y:          targetY            ?? null,
+      ...(isHidden !== undefined ? { is_hidden: isHidden } : {}),
     })
     .select()
     .maybeSingle()
@@ -157,6 +170,7 @@ export async function PATCH(req: NextRequest) {
   const {
     id, gmWallet, sessionId, isActive, isHidden,
     name, saveType, dc, saveDc, triggerType, damageDice, damageType, conditionApplied, description, radius,
+    targetMapId, targetX, targetY,
   } = parsed.data
   const db = supabaseAdmin()
 
@@ -177,6 +191,9 @@ export async function PATCH(req: NextRequest) {
   if (conditionApplied !== undefined) update.condition_applied = conditionApplied
   if (description      !== undefined) update.description       = description
   if (radius           !== undefined) update.radius            = radius
+  if (targetMapId      !== undefined) update.target_map_id     = targetMapId
+  if (targetX          !== undefined) update.target_x          = targetX
+  if (targetY          !== undefined) update.target_y          = targetY
 
   const { data, error } = await db
     .from('map_triggers')

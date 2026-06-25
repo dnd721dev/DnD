@@ -686,19 +686,22 @@ const MapBoard: React.FC<MapBoardProps> = ({
         ctx.stroke();
         ctx.restore();
       }
+      const isPortal = trigger.trigger_type === 'portal';
       const iconX = trigger.tile_x * gridSize + gridSize * 0.18;
       const iconY = trigger.tile_y * gridSize + gridSize * 0.18;
       const iconR = Math.max(5, gridSize * 0.14);
       ctx.save();
       ctx.beginPath();
-      ctx.fillStyle = trigger.is_active ? 'rgba(239,68,68,0.9)' : 'rgba(100,116,139,0.6)';
+      ctx.fillStyle = isPortal
+        ? 'rgba(99,102,241,0.9)'
+        : trigger.is_active ? 'rgba(239,68,68,0.9)' : 'rgba(100,116,139,0.6)';
       ctx.arc(iconX, iconY, iconR, 0, Math.PI * 2);
       ctx.fill();
-      ctx.font = `bold ${Math.max(8, Math.floor(gridSize * 0.15))}px system-ui,sans-serif`;
+      ctx.font = `${Math.max(9, Math.floor(gridSize * (isPortal ? 0.17 : 0.15)))}px system-ui,sans-serif`;
       ctx.fillStyle = '#fff';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('!', iconX, iconY);
+      ctx.fillText(isPortal ? '🚪' : '!', iconX, iconY);
       ctx.restore();
     });
 
