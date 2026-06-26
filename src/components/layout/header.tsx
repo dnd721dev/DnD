@@ -10,6 +10,7 @@ const NAV_LINKS = [
   { href: '/homebrew',  label: 'Homebrew' },
   { href: '/shop',      label: 'Shop'  },
   { href: '/sponsor',   label: 'Sponsor' },
+  { href: '/community', label: 'Community' },
 ]
 
 export default function Header() {
