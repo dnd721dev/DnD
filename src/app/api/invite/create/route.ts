@@ -7,6 +7,7 @@ import { randomUUID } from 'crypto'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { walletFromRequest } from '@/lib/inviteServer'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
+import { sendTelegramMessage } from '@/lib/telegram'
 
 const Schema = z.object({
   campaignId:     z.string().uuid(),
@@ -14,6 +15,8 @@ const Schema = z.object({
   role:           z.enum(['player', 'gm']).optional().default('player'),
   maxUses:        z.number().int().positive().max(1000).optional(),
   expiresInHours: z.number().int().positive().max(24 * 365).optional(),
+  /** When true, post a recruitment announcement to the Telegram group. */
+  announce:       z.boolean().optional().default(false),
 })
 
 function makeToken(): string {
@@ -32,14 +35,14 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.errors[0]?.message ?? 'Invalid request' }, { status: 400 })
   }
-  const { campaignId, sessionId, role, maxUses, expiresInHours } = parsed.data
+  const { campaignId, sessionId, role, maxUses, expiresInHours, announce } = parsed.data
 
   const db = supabaseAdmin()
 
   // Caller must be the campaign's GM.
   const { data: campaign } = await db
     .from('campaigns')
-    .select('id, gm_wallet')
+    .select('id, gm_wallet, title, description')
     .eq('id', campaignId)
     .maybeSingle()
   if (!campaign) return NextResponse.json({ error: 'Campaign not found' }, { status: 404 })
@@ -48,15 +51,17 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   // If a session is specified, it must belong to this campaign.
+  let sessionRow: { title: string | null; scheduled_start: string | null } | null = null
   if (sessionId) {
     const { data: sess } = await db
       .from('sessions')
-      .select('id, campaign_id')
+      .select('id, campaign_id, title, scheduled_start')
       .eq('id', sessionId)
       .maybeSingle()
     if (!sess || (sess as any).campaign_id !== campaignId) {
       return NextResponse.json({ error: 'Session does not belong to this campaign' }, { status: 400 })
     }
+    sessionRow = { title: (sess as any).title ?? null, scheduled_start: (sess as any).scheduled_start ?? null }
   }
 
   const token = makeToken()
@@ -90,5 +95,32 @@ export async function POST(req: NextRequest): Promise<Response> {
     (req.headers.get('host') ? `${new URL(req.url).protocol}//${req.headers.get('host')}` : null) ??
     process.env.NEXT_PUBLIC_APP_URL ??
     new URL(req.url).origin
-  return NextResponse.json({ token: invite.token, url: `${origin}/join/${invite.token}` })
+  const url = `${origin}/join/${invite.token}`
+
+  // Best-effort recruitment announcement to the Telegram group. A Telegram
+  // failure must never fail invite creation.
+  if (announce) {
+    try {
+      const c = campaign as any
+      const lines: string[] = [`🎲 New invite — ${c.title ?? 'a campaign'}`, '']
+      let sessionLine = `🗓 Session: ${sessionRow?.title || 'TBA'}`
+      if (sessionRow?.scheduled_start) {
+        const when = new Date(sessionRow.scheduled_start)
+        if (!Number.isNaN(when.getTime())) {
+          sessionLine += `  ·  ${when.toLocaleString('en-US', {
+            weekday: 'short', month: 'short', day: 'numeric',
+            hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+          })}`
+        }
+      }
+      lines.push(sessionLine)
+      if (c.description) lines.push(`📖 ${c.description}`)
+      lines.push('', "🛒 Don't forget to grab your gear from Bishop's Shop before you play!", '', `👉 Join: ${url}`)
+      await sendTelegramMessage(lines.join('\n'))
+    } catch (e) {
+      console.error('[invite/create] telegram announce failed', e)
+    }
+  }
+
+  return NextResponse.json({ token: invite.token, url })
 }

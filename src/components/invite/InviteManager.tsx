@@ -43,6 +43,8 @@ export function InviteManager({ campaignId, sessionId }: Props) {
   // Optional limits
   const [expiresInHours, setExpiresInHours] = useState('')
   const [maxUses, setMaxUses] = useState('')
+  // Post a recruitment announcement to the Telegram group on create (default on).
+  const [announce, setAnnounce] = useState(true)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -72,6 +74,7 @@ export function InviteManager({ campaignId, sessionId }: Props) {
           sessionId: sessionId ?? undefined,
           maxUses: maxUses ? Number(maxUses) : undefined,
           expiresInHours: expiresInHours ? Number(expiresInHours) : undefined,
+          announce,
         }),
       })
       const json = await res.json()
@@ -133,6 +136,17 @@ export function InviteManager({ campaignId, sessionId }: Props) {
           {creating ? 'Creating…' : '+ Create invite link'}
         </button>
       </div>
+
+      {/* Telegram announcement toggle */}
+      <label className="mt-2 flex items-center gap-2 text-[11px] text-slate-300">
+        <input
+          type="checkbox"
+          checked={announce}
+          onChange={(e) => setAnnounce(e.target.checked)}
+          className="h-3.5 w-3.5 accent-sky-500"
+        />
+        📣 Announce to the Telegram community when I create this link
+      </label>
       {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
 
       {/* List */}
