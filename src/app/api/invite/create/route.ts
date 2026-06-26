@@ -112,6 +112,7 @@ export async function POST(req: NextRequest): Promise<Response> {
         const when = new Date(sessionRow.scheduled_start)
         if (!Number.isNaN(when.getTime())) {
           sessionLine += `  ·  ${when.toLocaleString('en-US', {
+            timeZone: 'America/New_York', // post times in Eastern (EST/EDT)
             weekday: 'short', month: 'short', day: 'numeric',
             hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
           })}`
