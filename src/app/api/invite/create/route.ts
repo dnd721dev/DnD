@@ -116,7 +116,8 @@ export async function POST(req: NextRequest): Promise<Response> {
       lines.push(sessionLine)
       if (c.description) lines.push(`📖 ${c.description}`)
       lines.push('', "🛒 Don't forget to grab your gear from Bishop's Shop before you play!", '', `👉 Join: ${url}`)
-      await sendTelegramMessage(lines.join('\n'))
+      const r = await sendTelegramMessage(lines.join('\n'))
+      console.log('[invite/create] announce result:', r.ok ? 'sent' : `failed: ${r.error}`)
     } catch (e) {
       console.error('[invite/create] telegram announce failed', e)
     }

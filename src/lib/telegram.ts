@@ -12,7 +12,10 @@ export async function sendTelegramMessage(
 ): Promise<{ ok: boolean; error?: string }> {
   const token  = process.env.TELEGRAM_BOT_TOKEN
   const chatId = process.env.TELEGRAM_CHAT_ID
-  if (!token || !chatId) return { ok: false, error: 'Telegram not configured' }
+  if (!token || !chatId) {
+    console.error('[telegram] not configured — missing', !token ? 'TELEGRAM_BOT_TOKEN' : 'TELEGRAM_CHAT_ID')
+    return { ok: false, error: 'Telegram not configured' }
+  }
 
   try {
     const res = await fetch(`${API}/bot${token}/sendMessage`, {
