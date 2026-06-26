@@ -51,17 +51,21 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   // If a session is specified, it must belong to this campaign.
-  let sessionRow: { title: string | null; scheduled_start: string | null } | null = null
+  let sessionRow: { title: string | null; description: string | null; scheduled_start: string | null } | null = null
   if (sessionId) {
     const { data: sess } = await db
       .from('sessions')
-      .select('id, campaign_id, title, scheduled_start')
+      .select('id, campaign_id, title, description, scheduled_start')
       .eq('id', sessionId)
       .maybeSingle()
     if (!sess || (sess as any).campaign_id !== campaignId) {
       return NextResponse.json({ error: 'Session does not belong to this campaign' }, { status: 400 })
     }
-    sessionRow = { title: (sess as any).title ?? null, scheduled_start: (sess as any).scheduled_start ?? null }
+    sessionRow = {
+      title: (sess as any).title ?? null,
+      description: (sess as any).description ?? null,
+      scheduled_start: (sess as any).scheduled_start ?? null,
+    }
   }
 
   const token = makeToken()
@@ -114,8 +118,16 @@ export async function POST(req: NextRequest): Promise<Response> {
         }
       }
       lines.push(sessionLine)
+      // Session-specific blurb (only for session invites), then the campaign overview.
+      if (sessionRow?.description) lines.push(`📝 ${sessionRow.description}`)
       if (c.description) lines.push(`📖 ${c.description}`)
-      lines.push('', "🛒 Don't forget to grab your gear from Bishop's Shop before you play!", '', `👉 Join: ${url}`)
+      lines.push(
+        '',
+        "🛒 Don't forget to grab your gear from Bishop's Shop before you play!",
+        `${origin}/shop`,
+        '',
+        `👉 Join: ${url}`,
+      )
       const r = await sendTelegramMessage(lines.join('\n'))
       console.log('[invite/create] announce result:', r.ok ? 'sent' : `failed: ${r.error}`)
     } catch (e) {
