@@ -2,7 +2,7 @@
 
 import { useAccount } from 'wagmi'
 import VoiceChat from '@/components/table/VoiceChat'
-import { TelegramComments } from '@/components/community/TelegramComments'
+import { TelegramLiveChat } from '@/components/community/TelegramLiveChat'
 
 const TELEGRAM_URL = 'https://t.me/DND721'
 // One shared community voice room — any visitor can drop in.
@@ -22,7 +22,7 @@ export default function CommunityPage() {
       </header>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Telegram community chat */}
+        {/* Telegram community chat — live read-only feed */}
         <section className="lg:col-span-2 rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-200">💬 Telegram Community</h2>
@@ -30,12 +30,12 @@ export default function CommunityPage() {
               href={TELEGRAM_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500"
+              className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700"
             >
               Open in Telegram →
             </a>
           </div>
-          <TelegramComments />
+          <TelegramLiveChat />
         </section>
 
         {/* Community voice lounge */}
