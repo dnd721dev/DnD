@@ -57,19 +57,23 @@ export async function POST(req: NextRequest) {
   if (!text) return NextResponse.json({ ok: true }) // nothing displayable
 
   try {
-    await supabaseAdmin()
+    // Plain insert. The partial unique index (chat_id, tg_message_id) still
+    // dedupes webhook retries — a duplicate raises 23505, which we ignore.
+    // (We avoid upsert+onConflict here because Postgres can't use a *partial*
+    // unique index as an ON CONFLICT arbiter, which silently failed the write.)
+    const { error } = await supabaseAdmin()
       .from('telegram_messages')
-      .upsert(
-        {
-          chat_id:       String(msg.chat?.id ?? CHAT_ID),
-          tg_message_id: msg.message_id ?? null,
-          sender_name:   senderName(msg.from ?? msg.sender_chat),
-          text:          text.slice(0, 2000),
-        },
-        { onConflict: 'chat_id,tg_message_id', ignoreDuplicates: true },
-      )
+      .insert({
+        chat_id:       String(msg.chat?.id ?? CHAT_ID),
+        tg_message_id: msg.message_id ?? null,
+        sender_name:   senderName(msg.from ?? msg.sender_chat),
+        text:          text.slice(0, 2000),
+      })
+    if (error && (error as any).code !== '23505') {
+      console.error('[telegram/webhook] insert failed', error)
+    }
   } catch (e) {
-    console.error('[telegram/webhook] insert failed', e)
+    console.error('[telegram/webhook] insert threw', e)
   }
 
   // Always 200 so Telegram doesn't retry-storm.
