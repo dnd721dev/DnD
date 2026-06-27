@@ -1081,7 +1081,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
         ownerWallet: null,
         initiativeEntryId: '',
         characterId: null,
-        tokenImageUrl: null,
+        tokenImageUrl: monster.tokenImageUrl ?? null,
         type: 'monster',
         monster_id: homebrewDbId ? null : monster.id,
         homebrew_monster_id: homebrewDbId,

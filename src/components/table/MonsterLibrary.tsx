@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { MONSTERS, type Monster as SrdMonster } from '@/lib/monsters'
+import { monsterImageUrl } from '@/lib/monsterImages'
 
 // Ability modifier helper
 function mod(score: number): string {
@@ -97,6 +98,8 @@ export type SpawnMonsterParams = {
   ac?: number | null
   dexScore?: number | null
   homebrewMonsterDbId?: string | null
+  /** Token artwork URL (bundled monster art for SRD, or homebrew portrait). */
+  tokenImageUrl?: string | null
 }
 
 export type SpawnNpcParams = {
@@ -226,7 +229,9 @@ export default function MonsterLibrary({
         type: m.type,
         armorClass: m.armorClass,
         hitPoints: m.hitPoints,
-        tokenImage: m.tokenImage ?? null,
+        // Fall back to bundled monster art (public/monsters) when the SRD entry
+        // has no explicit tokenImage.
+        tokenImage: m.tokenImage ?? monsterImageUrl(m.name),
         tags: m.tags ?? [],
         source: 'srd' as MonsterSource,
       })
@@ -292,7 +297,11 @@ export default function MonsterLibrary({
 
   // ── Spawn helpers ────────────────────────────────────────────────────────────
   function spawnSrd(monster: UnifiedMonster) {
-    onSpawnMonster?.({ id: monster.id, name: monster.name })
+    onSpawnMonster?.({
+      id: monster.id,
+      name: monster.name,
+      tokenImageUrl: monster.tokenImage ?? monsterImageUrl(monster.name),
+    })
     setSelectedMonsterId(null)
   }
 
@@ -304,6 +313,7 @@ export default function MonsterLibrary({
       ac: monster.ac ?? null,
       dexScore: monster.dex ?? null,
       homebrewMonsterDbId: monster.id,
+      tokenImageUrl: monster.token_image_url ?? null,
     })
     setSelectedHomebrewId(null)
   }
