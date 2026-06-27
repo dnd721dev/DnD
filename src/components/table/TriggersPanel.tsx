@@ -42,10 +42,10 @@ type TriggerForm = {
   conditionApplied: string
   description: string
   radius: number
-  // Portal destination
+  // Portal destination (targetX/Y null until the GM clicks the landing tile)
   targetMapId: string
-  targetX: number
-  targetY: number
+  targetX: number | null
+  targetY: number | null
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -78,7 +78,7 @@ const CONDITIONS = [
 const BLANK_FORM: TriggerForm = {
   name: '', triggerType: 'trap', saveType: 'DEX', dc: 15, saveDc: 15,
   damageDice: '', damageType: 'piercing', conditionApplied: 'None', description: '', radius: 0,
-  targetMapId: '', targetX: 0, targetY: 0,
+  targetMapId: '', targetX: null, targetY: null,
 }
 
 /** Extract a useful error message from a non-ok response, tolerating non-JSON
@@ -132,6 +132,38 @@ export function TriggersPanel({
       .order('created_at', { ascending: true })
       .then(({ data }) => setSessionMaps((data ?? []) as SessionMapOption[]))
   }, [sessionId])
+
+  // ── Portal endpoint pick ──────────────────────────────────────────────────
+  // Hide the modal, switch the GM's view to the destination map, and let them
+  // click the landing tile (MapBoard handles the click). pickingRef guards so
+  // we only react to events from a pick we started.
+  const pickingRef = useRef(false)
+  function pickEndpoint() {
+    if (!form.targetMapId) return
+    pickingRef.current = true
+    setModalOpen(false) // hide overlay so the map is visible; form state persists
+    window.dispatchEvent(new CustomEvent('dnd721-pick-portal-endpoint', { detail: { mapId: form.targetMapId } }))
+  }
+  useEffect(() => {
+    const onPicked = (e: Event) => {
+      if (!pickingRef.current) return
+      pickingRef.current = false
+      const d = (e as CustomEvent<{ tileX: number; tileY: number }>).detail
+      setForm((f) => ({ ...f, targetX: d.tileX, targetY: d.tileY }))
+      setModalOpen(true)
+    }
+    const onCancel = () => {
+      if (!pickingRef.current) return
+      pickingRef.current = false
+      setModalOpen(true)
+    }
+    window.addEventListener('dnd721-portal-endpoint-picked', onPicked)
+    window.addEventListener('dnd721-portal-endpoint-cancel', onCancel)
+    return () => {
+      window.removeEventListener('dnd721-portal-endpoint-picked', onPicked)
+      window.removeEventListener('dnd721-portal-endpoint-cancel', onCancel)
+    }
+  }, [])
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -187,8 +219,8 @@ export function TriggersPanel({
         description:      trigger.description       ?? '',
         radius:           trigger.radius            ?? 0,
         targetMapId:      trigger.target_map_id     ?? '',
-        targetX:          trigger.target_x          ?? 0,
-        targetY:          trigger.target_y          ?? 0,
+        targetX:          trigger.target_x          ?? null,
+        targetY:          trigger.target_y          ?? null,
       })
       setPendingTile({ tileX: trigger.tile_x, tileY: trigger.tile_y })
       setWaitingForTile(false)
@@ -238,6 +270,11 @@ export function TriggersPanel({
   async function handleSave() {
     if (!form.name.trim() || !pendingTile) return
     if (!gmWallet) { setErr('Wallet not connected'); return }
+    // Portals must have a destination map + a landing tile picked on it.
+    if (form.triggerType === 'portal' && (!form.targetMapId || form.targetX == null || form.targetY == null)) {
+      setErr('Choose a destination map and click its landing tile.')
+      return
+    }
     setSaving(true)
     setErr(null)
 
@@ -402,27 +439,28 @@ export function TriggersPanel({
                       {sessionMaps.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[10px] text-indigo-300 mb-0.5">Land at X</label>
-                      <input
-                        type="number" min={0}
-                        value={form.targetX}
-                        onChange={(e) => setForm(f => ({ ...f, targetX: parseInt(e.target.value) || 0 }))}
-                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-100 focus:border-indigo-500 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] text-indigo-300 mb-0.5">Land at Y</label>
-                      <input
-                        type="number" min={0}
-                        value={form.targetY}
-                        onChange={(e) => setForm(f => ({ ...f, targetY: parseInt(e.target.value) || 0 }))}
-                        className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-100 focus:border-indigo-500 focus:outline-none"
-                      />
-                    </div>
+                  {/* Landing tile — picked by clicking the destination map */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] text-slate-300">
+                      Landing tile:{' '}
+                      {form.targetX != null && form.targetY != null
+                        ? <span className="font-semibold text-indigo-300">({form.targetX}, {form.targetY})</span>
+                        : <span className="text-slate-500">Not set</span>}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={!form.targetMapId}
+                      onClick={pickEndpoint}
+                      className="rounded-md border border-indigo-600/50 bg-indigo-900/40 px-2 py-1 text-[10px] font-semibold text-indigo-200 hover:bg-indigo-900/70 disabled:opacity-40"
+                    >
+                      📍 Place on map
+                    </button>
                   </div>
-                  <p className="text-[9px] text-slate-500">The player who steps here is moved to this map at this tile.</p>
+                  <p className="text-[9px] text-slate-500">
+                    {form.targetMapId
+                      ? 'Click “Place on map” — the view switches to the destination map; tap where the player should arrive.'
+                      : 'Choose a destination map first.'}
+                  </p>
                 </div>
               )}
 
@@ -662,8 +700,8 @@ export function TriggersPanel({
                         description:      t.description       ?? '',
                         radius:           t.radius            ?? 0,
                         targetMapId:      t.target_map_id     ?? '',
-                        targetX:          t.target_x          ?? 0,
-                        targetY:          t.target_y          ?? 0,
+                        targetX:          t.target_x          ?? null,
+                        targetY:          t.target_y          ?? null,
                       })
                       setPendingTile({ tileX: t.tile_x, tileY: t.tile_y })
                       setModalOpen(true)

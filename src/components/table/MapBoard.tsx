@@ -164,6 +164,9 @@ const MapBoard: React.FC<MapBoardProps> = ({
 
   // Trigger placement mode
   const [triggerMode, setTriggerMode] = useState(false);
+  // Portal endpoint-pick mode: like triggerMode, but the click reports the
+  // landing tile back to the trigger panel instead of placing a trigger.
+  const [endpointMode, setEndpointMode] = useState(false);
   const [hoveredTile, setHoveredTile] = useState<{ x: number; y: number } | null>(null);
   const [mapTriggers, setMapTriggers] = useState<TriggerIcon[]>([]);
   // Live radius ring preview while the GM edits a trigger's radius in the panel.
@@ -272,6 +275,20 @@ const MapBoard: React.FC<MapBoardProps> = ({
     return () => window.removeEventListener('dnd721-trigger-placement-cancel', handler);
   }, []);
 
+  /** Enter portal endpoint-pick mode (the GM's view has switched to the
+   *  destination map; the next click reports its landing tile). */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const start = () => { setEndpointMode(true); setHoveredTile(null); };
+    const stop  = () => { setEndpointMode(false); setHoveredTile(null); };
+    window.addEventListener('dnd721-pick-portal-endpoint', start);
+    window.addEventListener('dnd721-portal-endpoint-cancel', stop);
+    return () => {
+      window.removeEventListener('dnd721-pick-portal-endpoint', start);
+      window.removeEventListener('dnd721-portal-endpoint-cancel', stop);
+    };
+  }, []);
+
   /** Receive updated trigger list from TriggersPanel */
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -311,13 +328,14 @@ const MapBoard: React.FC<MapBoardProps> = ({
       if (e.key === 'Escape') {
         if (fogToolActive) { setFogToolActive(false); isFogPaintingRef.current = false; }
         if (triggerMode) { setTriggerMode(false); setHoveredTile(null); }
+        if (endpointMode) { setEndpointMode(false); setHoveredTile(null); window.dispatchEvent(new CustomEvent('dnd721-portal-endpoint-cancel')); }
         if (placementPending) { setPlacementPending(null); setGhostPos(null); }
         if (rulerActive) { setRulerActive(false); setMeasureStart(null); setMeasureEnd(null); setMeasureFrozen(false); }
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [fogToolActive, placementPending, rulerActive]);
+  }, [fogToolActive, placementPending, rulerActive, triggerMode, endpointMode]);
 
   /** Subscribe to encounters.active_entry_id for cross-device reliability */
   useEffect(() => {
@@ -922,6 +940,17 @@ const MapBoard: React.FC<MapBoardProps> = ({
       return;
     }
 
+    // Portal endpoint-pick mode — click/tap a tile to report the landing point
+    if (endpointMode) {
+      const world = getWorldPoint(e);
+      const tileX = Math.floor(world.x / gridSize);
+      const tileY = Math.floor(world.y / gridSize);
+      window.dispatchEvent(new CustomEvent('dnd721-portal-endpoint-picked', { detail: { tileX, tileY } }));
+      setEndpointMode(false);
+      setHoveredTile(null);
+      return;
+    }
+
     // Fog brush mode
     if (fogToolActive) {
       isFogPaintingRef.current = true;
@@ -1107,8 +1136,8 @@ const MapBoard: React.FC<MapBoardProps> = ({
       return;
     }
 
-    // In trigger mode, track which tile the cursor is over for the highlight overlay
-    if (triggerMode) {
+    // In trigger / endpoint mode, track which tile the cursor is over for the highlight overlay
+    if (triggerMode || endpointMode) {
       const world = getWorldPoint(e);
       setHoveredTile({ x: Math.floor(world.x / gridSize), y: Math.floor(world.y / gridSize) });
       return;
@@ -1293,7 +1322,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
       ref={containerRef}
       className="relative h-full w-full overflow-hidden overscroll-none rounded-xl border border-slate-800 bg-slate-950/80"
       style={{
-        cursor: fogToolActive ? 'cell' : triggerMode ? 'crosshair' : rulerActive ? 'crosshair' : placementPending ? 'crosshair' : undefined,
+        cursor: fogToolActive ? 'cell' : (triggerMode || endpointMode) ? 'crosshair' : rulerActive ? 'crosshair' : placementPending ? 'crosshair' : undefined,
         touchAction: 'none',
       }}
       onPointerDown={onDown}
@@ -1430,9 +1459,9 @@ const MapBoard: React.FC<MapBoardProps> = ({
       )}
 
       {/* Trigger placement hover highlight */}
-      {triggerMode && hoveredTile && (
+      {(triggerMode || endpointMode) && hoveredTile && (
         <div
-          className="pointer-events-none absolute border-2 border-orange-500 bg-orange-500/20"
+          className={`pointer-events-none absolute border-2 ${endpointMode ? 'border-indigo-400 bg-indigo-500/20' : 'border-orange-500 bg-orange-500/20'}`}
           style={{
             left:   translate.x + hoveredTile.x * gridSize * zoom,
             top:    translate.y + hoveredTile.y * gridSize * zoom,
@@ -1440,6 +1469,20 @@ const MapBoard: React.FC<MapBoardProps> = ({
             height: gridSize * zoom,
           }}
         />
+      )}
+
+      {/* Portal endpoint-pick banner */}
+      {endpointMode && (
+        <div className="pointer-events-auto absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-indigo-500/60 bg-slate-950/90 px-3 py-1.5 text-xs text-indigo-200 shadow-lg">
+          <span>📍 Tap a tile to set the portal&apos;s landing point</span>
+          <button
+            type="button"
+            onClick={() => { setEndpointMode(false); setHoveredTile(null); window.dispatchEvent(new CustomEvent('dnd721-portal-endpoint-cancel')); }}
+            className="rounded bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300 hover:bg-slate-700"
+          >
+            Cancel (Esc)
+          </button>
+        </div>
       )}
 
       {/* Trigger placement mode banner */}

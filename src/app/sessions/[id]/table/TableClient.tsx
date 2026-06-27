@@ -327,7 +327,12 @@ export default function TableClient({ sessionId }: TableClientProps) {
   // "View As" POV) can be on a per-player map; everyone else follows the
   // session's default map. The GM's own editing tools still use currentMapId.
   const [myCurrentMapId, setMyCurrentMapId] = useState<string | null>(null)
+  // Transient GM-local override while picking a portal's landing tile: the GM's
+  // view temporarily switches to the destination map (does NOT touch the
+  // session map, so players are unaffected).
+  const [portalPickMapId, setPortalPickMapId] = useState<string | null>(null)
   const effectiveMapId = useMemo(() => {
+    if (portalPickMapId) return portalPickMapId
     if (isGm) {
       if (gmViewWallet) {
         const row = sessionPlayers.find((p) => p.wallet_address?.toLowerCase() === gmViewWallet.toLowerCase())
@@ -336,7 +341,25 @@ export default function TableClient({ sessionId }: TableClientProps) {
       return currentMapId
     }
     return myCurrentMapId ?? currentMapId
-  }, [isGm, gmViewWallet, sessionPlayers, myCurrentMapId, currentMapId])
+  }, [portalPickMapId, isGm, gmViewWallet, sessionPlayers, myCurrentMapId, currentMapId])
+
+  // Portal endpoint pick: switch the GM's view to the destination map while
+  // picking, restore it once a tile is picked or the pick is cancelled.
+  useEffect(() => {
+    const onStart = (e: Event) => {
+      const mapId = (e as CustomEvent<{ mapId?: string }>).detail?.mapId
+      if (mapId) setPortalPickMapId(mapId)
+    }
+    const onEnd = () => setPortalPickMapId(null)
+    window.addEventListener('dnd721-pick-portal-endpoint', onStart)
+    window.addEventListener('dnd721-portal-endpoint-picked', onEnd)
+    window.addEventListener('dnd721-portal-endpoint-cancel', onEnd)
+    return () => {
+      window.removeEventListener('dnd721-pick-portal-endpoint', onStart)
+      window.removeEventListener('dnd721-portal-endpoint-picked', onEnd)
+      window.removeEventListener('dnd721-portal-endpoint-cancel', onEnd)
+    }
+  }, [])
   const effectiveMap = useMemo(
     () => maps.find((m) => m.id === effectiveMapId) ?? null,
     [maps, effectiveMapId]
