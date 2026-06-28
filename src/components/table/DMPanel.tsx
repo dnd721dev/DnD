@@ -7,6 +7,7 @@ import { DiceShape } from '@/components/dice/DiceShape'
 import { calculateEncounterDifficulty, CR_OPTIONS, type CRKey, type Difficulty } from '@/lib/encounter'
 import { PlaceCharactersPanel } from '@/components/table/PlaceCharactersPanel'
 import { supabase } from '@/lib/supabase'
+import { setConditions } from '@/lib/conditionsSync'
 import { MonsterStatPanel } from '@/components/table/MonsterStatPanel'
 import { MONSTERS } from '@/lib/monsters'
 
@@ -198,11 +199,12 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
       ? attackerConditions.filter((c) => c !== cond)
       : [...attackerConditions, cond]
     setAttackerConditions(next)
-    const { error } = await supabase.from('tokens').update({ conditions: next }).eq('id', attackerToken.id)
-    if (error) {
+    // Write BOTH stores (token ring + linked PC's action_state → enforcement)
+    // via the SECURITY DEFINER RPC.
+    const { ok, error } = await setConditions(supabase, { tokenId: attackerToken.id, conditions: next })
+    if (!ok) {
       console.error('[DMPanel] attacker condition error', error)
-      // Roll back the optimistic update on failure.
-      setAttackerConditions(attackerConditions)
+      setAttackerConditions(attackerConditions) // roll back optimistic update
       return
     }
     if (typeof window !== 'undefined') {
@@ -242,8 +244,11 @@ export default function DMPanel({ encounterId, round, onRoll, onGrantInspiration
     setTargetConditions((prev) => {
       const has = prev.includes(cond)
       const next = has ? prev.filter((c) => c !== cond) : [...prev, cond]
-      // Broadcast so MapBoard condition rings stay in sync
       if (typeof window !== 'undefined' && selectedToken?.id) {
+        // Persist to BOTH stores (was previously a same-device event only, so
+        // target conditions never saved/enforced/synced).
+        void setConditions(supabase, { tokenId: selectedToken.id, conditions: next })
+        // Instant local ring feedback; realtime reconciles other clients.
         window.dispatchEvent(
           new CustomEvent('dnd721-conditions-toggle', {
             detail: { tokenId: selectedToken.id, conditions: next },

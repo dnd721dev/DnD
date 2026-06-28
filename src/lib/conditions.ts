@@ -234,12 +234,14 @@ export type ConditionMechanics = {
 export const CONDITION_MECHANICS: Partial<Record<ConditionKey, ConditionMechanics>> = {
   blinded:        { attackDisadvantage: true },
   frightened:     { attackDisadvantage: true },
+  grappled:       { zeroMovement: true },
   incapacitated:  { blockActions: true, blockReactions: true },
   poisoned:       { attackDisadvantage: true },
   prone:          { attackDisadvantage: true, halfMovement: true },
-  restrained:     { attackDisadvantage: true },
+  restrained:     { attackDisadvantage: true, zeroMovement: true },
   stunned:        { blockActions: true, blockReactions: true, zeroMovement: true, autoFailStr: true, autoFailDex: true },
   paralyzed:      { blockActions: true, blockReactions: true, zeroMovement: true, autoFailStr: true, autoFailDex: true },
+  petrified:      { blockActions: true, blockReactions: true, zeroMovement: true, autoFailStr: true, autoFailDex: true },
   unconscious:    { blockActions: true, blockReactions: true, zeroMovement: true, autoFailStr: true, autoFailDex: true },
   // 'concentration' is not a standard condition key — tracked separately via the string 'concentration'
 }

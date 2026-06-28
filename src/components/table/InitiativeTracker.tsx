@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { setConditions } from '@/lib/conditionsSync';
 import { SESSION_GATES, type SessionStatus } from '@/lib/sessionGates';
 
 type InitiativeEntry = {
@@ -775,22 +776,18 @@ export default function InitiativeTracker({ encounterId, sessionId, currentMapId
       else current.add(cond);
       const next = { ...prev, [entryId]: current };
 
-      // Persist to characters.action_state for PC entries (enables cross-device enforcement)
+      // Persist to BOTH stores via the SECURITY DEFINER RPC. (The old direct
+      // characters.update was blocked by owner-only RLS when the GM toggled a
+      // PC, and never wrote tokens.conditions, so other clients' rings + the
+      // player's enforcement didn't update.)
       const entry = entries.find(e => e.id === entryId);
-      if (entry?.character_id) {
-        const updatedConds = [...current];
-        supabase
-          .from('characters')
-          .select('action_state')
-          .eq('id', entry.character_id)
-          .maybeSingle()
-          .then(({ data }) => {
-            const existing = (data?.action_state ?? {}) as Record<string, any>;
-            return supabase
-              .from('characters')
-              .update({ action_state: { ...existing, active_conditions: updatedConds } })
-              .eq('id', entry.character_id!);
-          });
+      const updatedConds = [...current];
+      if (entry?.token_id || entry?.character_id) {
+        void setConditions(supabase, {
+          tokenId: entry.token_id ?? undefined,
+          characterId: entry.character_id ?? undefined,
+          conditions: updatedConds,
+        });
       }
 
       return next;

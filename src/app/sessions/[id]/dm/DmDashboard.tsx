@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { setConditions } from '@/lib/conditionsSync'
 import { PartyCard, type PartyCardData } from './PartyCard'
 import { XpAwardPanel } from './XpAwardPanel'
 import { GmNotesPanel } from './GmNotesPanel'
@@ -336,7 +337,10 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
       if (!ch || ch.id !== characterId) return p
       return { ...p, characters: { ...ch, action_state: nextActionState } }
     }))
-    await supabase.from('characters').update({ action_state: nextActionState }).eq('id', characterId)
+    // Persist via the SECURITY DEFINER RPC: a direct characters.update is
+    // blocked by owner-only RLS (the GM isn't the PC's owner), and it also
+    // mirrors to the token so map rings/pips stay in sync.
+    await setConditions(supabase, { characterId, conditions: nextArr })
   }, [players])
 
   const addCondition    = useCallback((characterId: string, k: ConditionKey) => mutateConditions(characterId, (s) => s.add(k)),    [mutateConditions])

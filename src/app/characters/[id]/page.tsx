@@ -35,6 +35,7 @@ import { useCharacterRoll } from '@/hooks/useCharacterRoll'
 import { levelForXp, xpForLevel } from '@/lib/rules'
 
 import { canUseAction, type SheetAction } from '@/lib/actions'
+import { setConditions } from '@/lib/conditionsSync'
 import { ALL_ACTIONS } from '@/lib/actions/registry'
 
 function clamp(n: number, min: number, max: number) {
@@ -471,6 +472,9 @@ export default function CharacterSheetPage() {
     setActionState((prev) => {
       const cur: string[] = Array.isArray(prev?.active_conditions) ? prev.active_conditions : []
       const next = cur.includes(key) ? cur.filter((c) => c !== key) : [...cur, key]
+      // Mirror to the token store (map rings / initiative pips / DM panels) via the
+      // canonical RPC; the debounced action_state save handles enforcement persistence.
+      void setConditions(supabase, { characterId: id, conditions: next })
       return { ...prev, active_conditions: next }
     })
   }
