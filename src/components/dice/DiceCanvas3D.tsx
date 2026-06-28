@@ -21,12 +21,22 @@ function diceValues(roll: RollOverlayPayload): number[] {
   if (roll.dice && roll.dice.length > 0) return roll.dice
   const m = roll.formula.match(/(\d+)[dD](\d+)\s*([+-]\d+)?/)
   if (!m) return [roll.result]
-  const count = parseInt(m[1], 10)
-  const mod = m[3] ? parseInt(m[3], 10) : 0
-  if (count === 1) return [roll.result - mod]
-  // Multi-die without naturals: best effort — clamp the total into range.
+  const count = parseInt(m[1], 10) || 1
   const sides = parseInt(m[2], 10)
-  return [Math.max(1, Math.min(sides, roll.result - mod))]
+  const mod = m[3] ? parseInt(m[3], 10) : 0
+  if (count === 1) return [Math.max(1, Math.min(sides, roll.result - mod))]
+  // Multi-die without per-die naturals: distribute the post-modifier total across
+  // `count` dice so each shows a valid in-range face and they sum to the total.
+  let remaining = roll.result - mod
+  const out: number[] = []
+  for (let i = count; i > 0; i--) {
+    const lo = Math.max(1, remaining - (i - 1) * sides) // leave ≥1 each for the rest
+    const hi = Math.min(sides, remaining - (i - 1))     // leave ≤sides each for the rest
+    const v = Math.max(1, Math.min(sides, Math.round((lo + hi) / 2)))
+    out.push(v)
+    remaining -= v
+  }
+  return out
 }
 
 /**
@@ -67,11 +77,14 @@ export function DiceCanvas3D({ roll, show = true, prefs }: Props) {
     const box = boxRef.current
     if (!box) return
 
-    const formula = roll.formula
-    const results = diceValues(roll)
+    // Mixed-type rolls (e.g. 1d8 + 1d6) carry a typed per-die spec so each die
+    // renders as its own type; otherwise fall back to single-type by formula.
+    const launch = roll.diceSpec && roll.diceSpec.length > 0
+      ? box.rollSpec(roll.diceSpec)
+      : box.roll(roll.formula, diceValues(roll))
 
     setActive(true)
-    box.roll(formula, results).then(() => {
+    launch.then(() => {
       // Keep dice visible for 3 s then clear
       const timer = setTimeout(() => {
         box.clear()

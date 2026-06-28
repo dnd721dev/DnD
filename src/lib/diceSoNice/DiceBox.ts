@@ -216,18 +216,44 @@ export class DiceBox {
     const match = notation.match(/(\d+)[dD](\d+)/)
     if (!match) return
 
-    const count = Math.min(parseInt(match[1], 10), 6)
     const type = `d${match[2]}` as DiceType
 
     if (!(type in DICE_MODELS) || !(type in DICE_SHAPE)) return
 
+    // The pre-rolled `results` are authoritative (one entry per die actually
+    // shown — kept dice only, so advantage/disadvantage drops aren't rendered as
+    // a phantom extra die). Fall back to the formula's die count when no
+    // per-die values were supplied. Cap at 6 so the physics stays readable.
+    const formulaCount = parseInt(match[1], 10) || 1
+    const count = Math.min(results.length > 0 ? results.length : formulaCount, 6)
+
+    const specs = Array.from({ length: count }, (_, i) => ({ type, value: results[i] ?? 1 }))
+    return this.launch(specs)
+  }
+
+  /**
+   * Roll an explicit, possibly MIXED set of dice (e.g. 1d8 + 1d6 weapon +
+   * elemental damage). Each entry renders as its own die of the given type
+   * showing the given value. Unknown die types are skipped; capped at 6 dice so
+   * the physics stays readable.
+   * @param dice  one entry per die: `{ type: 'd8', value: 5 }`
+   */
+  async rollSpec(dice: { type: string; value: number }[]): Promise<void> {
+    const specs = dice
+      .filter((d) => d.type in DICE_MODELS && d.type in DICE_SHAPE)
+      .slice(0, 6)
+      .map((d) => ({ type: d.type as DiceType, value: d.value }))
+    if (specs.length === 0) return
+    return this.launch(specs)
+  }
+
+  /** Shared roll launcher — spawns each spec'd die and runs the physics/settle. */
+  private launch(specs: { type: DiceType; value: number }[]): Promise<void> {
     this.clear()
 
-    for (let i = 0; i < count; i++) {
-      const target = results[i] ?? 1
-      const die = this.createDie(type, target, i, count)
-      this.dice.push(die)
-    }
+    specs.forEach((s, i) => {
+      this.dice.push(this.createDie(s.type, s.value, i, specs.length))
+    })
 
     return new Promise<void>((resolve) => {
       const startTime = performance.now()
@@ -574,6 +600,10 @@ export class DiceBox {
       if (nrm.lengthSq() < 1e-8) continue
       nrm.normalize()
       ctr.copy(a).add(b).add(c).multiplyScalar(1 / 3)
+      // Orient the face normal outward (die is centered at origin) so it can
+      // never match the antipodal physics face — the source of duplicate /
+      // missing numerals printed on the die faces.
+      if (nrm.dot(ctr) < 0) nrm.negate()
       let cl = clusters.find((cc) => cc.normal.dot(nrm) > 0.97)
       if (!cl) {
         clusters.push({ normal: nrm.clone(), centroid: ctr.clone(), n: 1 })

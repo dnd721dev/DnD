@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
+import { parseDiceFormula } from '@/lib/diceNotation'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -40,16 +41,6 @@ function rollDieClient(sides: number): number {
   return (buf[0] % sides) + 1
 }
 
-/** Parse "2d6+3" → { count, sides, mod } */
-function parseFormula(f: string): { count: number; sides: number; mod: number } | null {
-  const m = f.trim().match(/^(\d+)[dD](\d+)\s*([+-]\d+)?$/)
-  if (!m) return null
-  const count = parseInt(m[1], 10)
-  const sides = parseInt(m[2], 10)
-  const mod = m[3] ? parseInt(m[3], 10) : 0
-  if (count < 1 || count > 20 || sides < 2 || sides > 100) return null
-  return { count, sides, mod }
-}
 
 /**
  * Normalise formula before sending to the API:
@@ -133,15 +124,20 @@ export function useCharacterRoll(params: {
    */
   function roll({ label, formula, rollType = 'sheet' }: CharRollParams): CharRollResult {
     const normalized = normalizeFormula(formula)
-    const parsed = parseFormula(normalized)
+    const parsed = parseDiceFormula(normalized)
 
     let total = 0
     const individualDice: { die: string; value: number }[] = []
 
     if (parsed) {
-      const rolls = Array.from({ length: parsed.count }, () => rollDieClient(parsed.sides))
-      rolls.forEach((v) => individualDice.push({ die: `d${parsed.sides}`, value: v }))
-      total = rolls.reduce((a, b) => a + b, 0) + parsed.mod
+      // Roll every die of every group (handles MIXED formulas like 1d8 + 2d6),
+      // tagging each die with its type so the 3D dice render the correct mix.
+      for (const g of parsed.groups) {
+        for (let i = 0; i < g.count; i++) {
+          individualDice.push({ die: `d${g.sides}`, value: rollDieClient(g.sides) })
+        }
+      }
+      total = individualDice.reduce((a, b) => a + b.value, 0) + parsed.mod
     }
 
     // Fire-and-forget: persist to session dice log when a session is active

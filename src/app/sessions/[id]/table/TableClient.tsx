@@ -267,11 +267,13 @@ export default function TableClient({ sessionId }: TableClientProps) {
     result: number
     /** Natural per-die values (pre-modifier) — what the 3D dice land on. */
     dice?: number[]
+    /** Typed per-die values for MIXED rolls (e.g. 1d8 + 1d6). */
+    diceSpec?: { type: string; value: number }[]
     outcome?: string | null
   }>(null)
 
   const rollOverlayTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  function flashRollOverlay(payload: { roller: string; label: string; formula: string; result: number; dice?: number[]; outcome?: string | null }) {
+  function flashRollOverlay(payload: { roller: string; label: string; formula: string; result: number; dice?: number[]; diceSpec?: { type: string; value: number }[]; outcome?: string | null }) {
     setRollOverlay(payload)
     // Auto-hide AFTER the 3D dice settle (~2.4s) and the result number has had
     // time to display + fade (DiceRollOverlay runs a ~5.7s lifecycle). The old
@@ -761,10 +763,24 @@ export default function TableClient({ sessionId }: TableClientProps) {
     setShowDiceLog(true)
     // Natural per-die values (excluding advantage/disadvantage drops) so the 3D
     // dice land on the real rolls rather than the modified total.
-    const naturalDice = Array.isArray(roll.individual_dice)
-      ? (roll.individual_dice as any[]).filter((d) => d && !d.dropped).map((d) => Number(d.value)).filter((n) => Number.isFinite(n))
-      : undefined
-    flashRollOverlay({ roller: rollerName, label: roll.label, formula: roll.formula, result: roll.result, dice: naturalDice && naturalDice.length > 0 ? naturalDice : undefined, outcome: (roll as any).outcome ?? null })
+    const keptDice = Array.isArray(roll.individual_dice)
+      ? (roll.individual_dice as any[]).filter((d) => d && !d.dropped)
+      : []
+    const naturalDice = keptDice.map((d) => Number(d.value)).filter((n) => Number.isFinite(n))
+    // Typed per-die list so MIXED rolls (e.g. 1d8 + 1d6) render each die as its
+    // own type. Only usable when every kept die carries a valid `dN` type tag.
+    const diceSpec = keptDice
+      .filter((d) => typeof d.die === 'string' && /^d\d+$/.test(d.die) && Number.isFinite(Number(d.value)))
+      .map((d) => ({ type: String(d.die), value: Number(d.value) }))
+    flashRollOverlay({
+      roller: rollerName,
+      label: roll.label,
+      formula: roll.formula,
+      result: roll.result,
+      dice: naturalDice.length > 0 ? naturalDice : undefined,
+      diceSpec: diceSpec.length === keptDice.length && diceSpec.length > 0 ? diceSpec : undefined,
+      outcome: (roll as any).outcome ?? null,
+    })
   }
 
   async function handleTestRoll() {

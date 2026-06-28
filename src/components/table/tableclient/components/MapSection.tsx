@@ -38,7 +38,7 @@ export function MapSection(props: {
   sessionId?: string
   rollerName?: string
   rollerWallet?: string
-  rollOverlay?: null | { roller: string; label: string; formula: string; result: number; dice?: number[] }
+  rollOverlay?: null | { roller: string; label: string; formula: string; result: number; dice?: number[]; diceSpec?: { type: string; value: number }[] }
   /** Current viewer's 3D dice prefs (colors / material / sound). */
   dicePrefs?: DicePrefs | null
 

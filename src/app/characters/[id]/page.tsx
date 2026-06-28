@@ -439,17 +439,13 @@ export default function CharacterSheetPage() {
 
       const sneak = rollDamageWithCrit(sneakFormula, lastAttackWasCrit)
       total += sneak.total
+      // Combine into one MIXED roll (e.g. "1d8+3 + 2d6") so it logs/animates as a
+      // single weapon + sneak hit rather than two separate rolls.
       formula = `${base.formula} + ${sneak.formula}`
 
       // mark used + disarm
       setActionState((prev) => ({ ...prev, sneak_used_turn: true }))
       setSneakArmed(false)
-
-      charRoll({
-        label: lastAttackWasCrit ? 'CRIT Sneak Attack' : 'Sneak Attack',
-        formula: sneak.formula,
-        rollType: 'damage',
-      })
     }
 
     const label = lastAttackWasCrit

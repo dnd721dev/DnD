@@ -3,14 +3,15 @@ import { randomInt } from 'crypto'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { z } from 'zod'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
+import { parseDiceFormula, DICE_FORMULA_REGEX, type ParsedDice } from '@/lib/diceNotation'
 
 const RollSchema = z.object({
-  /** Dice notation: "1d20", "2d6+3", "1d20-1". Max 20 dice, sides 2–100. */
+  /** Dice notation incl. MIXED groups: "1d20", "2d6+3", "1d8 + 2d6 + 3". */
   notation: z
     .string()
     .min(1)
-    .max(50)
-    .regex(/^\d+[dD]\d+([+-]\d+)?$/, 'Invalid notation — use e.g. 1d20+5'),
+    .max(60)
+    .regex(DICE_FORMULA_REGEX, 'Invalid notation — use e.g. 1d20+5 or 1d8+2d6'),
 
   /** Optional — when absent the roll is not persisted to session_rolls. */
   sessionId: z.string().uuid().optional(),
@@ -39,23 +40,6 @@ const RollSchema = z.object({
 
 // ── Parsing ────────────────────────────────────────────────────────────────────
 
-interface ParsedNotation {
-  count: number
-  sides: number
-  mod: number
-}
-
-function parseNotation(raw: string): ParsedNotation | null {
-  const m = raw.match(/^(\d+)[dD](\d+)\s*([+-]\d+)?$/)
-  if (!m) return null
-  const count = parseInt(m[1], 10)
-  const sides = parseInt(m[2], 10)
-  const mod   = m[3] ? parseInt(m[3], 10) : 0
-  if (count < 1 || count > 20) return null
-  if (sides < 2  || sides > 100) return null
-  return { count, sides, mod }
-}
-
 // ── Rolling ────────────────────────────────────────────────────────────────────
 
 /** Roll a single die using a CSPRNG. */
@@ -76,24 +60,21 @@ interface RollOutput {
 }
 
 function executeRoll(
-  parsed: ParsedNotation,
+  parsed: ParsedDice,
   advantage: boolean,
   disadvantage: boolean,
 ): RollOutput {
-  const { count, sides, mod } = parsed
-  const dieName = `d${sides}`
+  const { groups, mod } = parsed
 
-  // Advantage/disadvantage only applies to single d20 rolls (1d20)
-  const useAdv = (advantage || disadvantage) && count === 1 && sides === 20
-
-  if (useAdv) {
+  // Advantage/disadvantage only applies to a single d20 roll (1d20).
+  const isSingleD20 = groups.length === 1 && groups[0].count === 1 && groups[0].sides === 20
+  if ((advantage || disadvantage) && isSingleD20) {
+    const sides = 20
+    const dieName = 'd20'
     const roll1 = rollDie(sides)
     const roll2 = rollDie(sides)
-    const kept   = advantage
-      ? Math.max(roll1, roll2)
-      : Math.min(roll1, roll2)
+    const kept    = advantage ? Math.max(roll1, roll2) : Math.min(roll1, roll2)
     const dropped = advantage ? Math.min(roll1, roll2) : Math.max(roll1, roll2)
-
     return {
       individualDice: [
         { die: dieName, value: kept },
@@ -105,13 +86,23 @@ function executeRoll(
     }
   }
 
-  // Standard roll
-  const rolls = Array.from({ length: count }, () => rollDie(sides))
+  // Standard roll — every die of every group, each tagged with its own type so
+  // MIXED rolls (e.g. 1d8 + 2d6) carry the right per-die info downstream.
+  const individualDice: RollOutput['individualDice'] = []
+  const kept: number[] = []
+  for (const g of groups) {
+    const dieName = `d${g.sides}`
+    for (let i = 0; i < g.count; i++) {
+      const v = rollDie(g.sides)
+      individualDice.push({ die: dieName, value: v })
+      kept.push(v)
+    }
+  }
   return {
-    individualDice: rolls.map((v) => ({ die: dieName, value: v })),
-    kept: rolls,
+    individualDice,
+    kept,
     mod,
-    total: rolls.reduce((a, b) => a + b, 0) + mod,
+    total: kept.reduce((a, b) => a + b, 0) + mod,
   }
 }
 
@@ -242,11 +233,11 @@ export async function POST(req: NextRequest) {
     }, { status: 201 })
   }
 
-  // ── Parse notation ─────────────────────────────────────────────────────────
-  const parsedNotation = parseNotation(notation)
+  // ── Parse notation (multi-group aware) ─────────────────────────────────────
+  const parsedNotation = parseDiceFormula(notation)
   if (!parsedNotation) {
     return NextResponse.json(
-      { error: `Cannot parse notation "${notation}". Use e.g. 2d6+3` },
+      { error: `Cannot parse notation "${notation}". Use e.g. 2d6+3 or 1d8+2d6` },
       { status: 400 },
     )
   }
@@ -261,7 +252,7 @@ export async function POST(req: NextRequest) {
   const outcome = await computeOutcome({
     rollType,
     kept:          rollOutput.kept,
-    sides:         parsedNotation.sides,
+    sides:         parsedNotation.groups[0]?.sides ?? 0,
     total:         finalTotal,
     targetTokenId,
     db,
