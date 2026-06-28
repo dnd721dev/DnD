@@ -23,6 +23,7 @@ type Trigger = {
   is_active: boolean
   is_hidden: boolean
   radius: number | null
+  target_rule: string | null
   target_map_id: string | null
   target_x: number | null
   target_y: number | null
@@ -42,6 +43,7 @@ type TriggerForm = {
   conditionApplied: string
   description: string
   radius: number
+  targetRule: string
   // Portal destination (targetX/Y null until the GM clicks the landing tile)
   targetMapId: string
   targetX: number | null
@@ -74,10 +76,20 @@ const CONDITIONS = [
   'None','Poisoned','Stunned','Frightened','Blinded',
   'Prone','Paralyzed','Restrained','Incapacitated',
 ]
+// Who the effect lands on. 'self' = whoever trips the tile (default, unchanged).
+const TARGET_RULES = [
+  { value: 'self',              label: 'Whoever triggers it' },
+  { value: 'lowest_hp_party',   label: 'Lowest HP party member' },
+  { value: 'lowest_hp_percent', label: 'Lowest HP % party member' },
+  { value: 'highest_hp_party',  label: 'Highest HP party member' },
+  { value: 'random_party',      label: 'Random party member' },
+  { value: 'all_party',         label: 'Entire party' },
+]
 
 const BLANK_FORM: TriggerForm = {
   name: '', triggerType: 'trap', saveType: 'DEX', dc: 15, saveDc: 15,
   damageDice: '', damageType: 'piercing', conditionApplied: 'None', description: '', radius: 0,
+  targetRule: 'self',
   targetMapId: '', targetX: null, targetY: null,
 }
 
@@ -218,6 +230,7 @@ export function TriggersPanel({
         conditionApplied: trigger.condition_applied ?? 'None',
         description:      trigger.description       ?? '',
         radius:           trigger.radius            ?? 0,
+        targetRule:       trigger.target_rule       ?? 'self',
         targetMapId:      trigger.target_map_id     ?? '',
         targetX:          trigger.target_x          ?? null,
         targetY:          trigger.target_y          ?? null,
@@ -303,6 +316,7 @@ export function TriggersPanel({
             conditionApplied: form.conditionApplied !== 'None' ? form.conditionApplied : undefined,
             description:      form.description      || undefined,
             radius:           form.radius,
+            targetRule:       form.targetRule,
             targetMapId:      form.triggerType === 'portal' ? (form.targetMapId || null) : null,
             targetX:          form.triggerType === 'portal' ? form.targetX : null,
             targetY:          form.triggerType === 'portal' ? form.targetY : null,
@@ -331,6 +345,7 @@ export function TriggersPanel({
             conditionApplied: form.conditionApplied !== 'None' ? form.conditionApplied : undefined,
             description:      form.description      || undefined,
             radius:           form.radius,
+            targetRule:       form.targetRule,
             // Portals are visible doorways and carry a destination.
             isHidden:         form.triggerType === 'portal' ? false : undefined,
             targetMapId:      form.triggerType === 'portal' ? (form.targetMapId || null) : undefined,
@@ -374,6 +389,29 @@ export function TriggersPanel({
   }
 
   function fireTrigger(trigger: Trigger) {
+    // Redirect-target traps resolve their victim(s) server-side and notify the
+    // affected players' own clients to roll the save (see /api/triggers/fire).
+    if (trigger.target_rule && trigger.target_rule !== 'self') {
+      fetch('/api/triggers/fire', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId,
+          callerWallet: gmWallet,
+          triggerId: trigger.id,
+          triggeringTokenId: null,
+        }),
+      })
+        .then(async (res) => {
+          const json = await res.json().catch(() => ({}))
+          if (!res.ok) { toast.error(json?.error ?? 'Failed to fire trigger'); return }
+          toast.info(json?.count ? `${trigger.name} fired at ${json.count} target(s)` : `${trigger.name}: no valid target`)
+        })
+        .catch((e) => toast.error(`Failed to fire trigger: ${e?.message ?? 'network error'}`))
+      onFireTrigger?.(trigger)
+      return
+    }
+    // Self-target: same-device save prompt (unchanged).
     window.dispatchEvent(new CustomEvent('dnd721-trigger-tripped', { detail: { trigger } }))
     onFireTrigger?.(trigger)
   }
@@ -569,6 +607,28 @@ export function TriggersPanel({
               </div>
               )}
 
+              {/* Effect Target — who the damage/condition lands on. Not for
+                  portals/clues (they deal no effect). */}
+              {!['portal', 'clue'].includes(form.triggerType) && (
+              <div>
+                <label className="block text-[10px] text-slate-400 mb-0.5">Effect Target</label>
+                <select
+                  value={form.targetRule}
+                  onChange={(e) => setForm(f => ({ ...f, targetRule: e.target.value }))}
+                  className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[11px] text-slate-100 focus:border-orange-500 focus:outline-none"
+                >
+                  {TARGET_RULES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+                <p className="mt-0.5 text-[10px] text-slate-500">
+                  {form.targetRule === 'self'
+                    ? 'Hits whoever steps on the tile (or whoever you manually fire it on).'
+                    : form.targetRule === 'all_party'
+                    ? 'Every party member must save against the effect.'
+                    : 'The effect ignores who tripped it and strikes the chosen party member — they roll their own save.'}
+                </p>
+              </div>
+              )}
+
               {/* Description — doubles as the clue text revealed to the finder. */}
               <div>
                 <label className="block text-[10px] text-slate-400 mb-0.5">
@@ -699,6 +759,7 @@ export function TriggersPanel({
                         conditionApplied: t.condition_applied ?? 'None',
                         description:      t.description       ?? '',
                         radius:           t.radius            ?? 0,
+                        targetRule:       t.target_rule       ?? 'self',
                         targetMapId:      t.target_map_id     ?? '',
                         targetX:          t.target_x          ?? null,
                         targetY:          t.target_y          ?? null,

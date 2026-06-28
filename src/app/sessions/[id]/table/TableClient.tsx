@@ -229,8 +229,26 @@ export default function TableClient({ sessionId }: TableClientProps) {
           return
         }
 
-        // Fire the first active trigger found at this tile
-        // Include tokenId so PlayerSidebar can apply damage / conditions to the right token
+        // Redirect-target triggers (target_rule !== 'self') apply their effect
+        // to a DIFFERENT token (e.g. lowest-HP party member) who may be on
+        // another device. Resolve + fan out server-side so each victim's own
+        // client rolls its save; do NOT fire the same-device path.
+        if (trig.target_rule && trig.target_rule !== 'self') {
+          await fetch('/api/triggers/fire', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId: session.id,
+              callerWallet: walletLower,
+              triggerId: trig.id,
+              triggeringTokenId: tokenId ?? null,
+            }),
+          }).catch(() => {})
+          return
+        }
+
+        // Self-target (default): fire the same-device path. Include tokenId so
+        // PlayerSidebar applies damage / conditions to the triggering token.
         window.dispatchEvent(new CustomEvent('dnd721-trigger-tripped', {
           detail: { trigger: trig, tokenId: ev.detail.tokenId ?? null },
         }))

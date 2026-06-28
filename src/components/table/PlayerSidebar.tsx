@@ -488,6 +488,8 @@ export function PlayerSidebar({
     damageDice: string | null
     conditionApplied: string | null
     tokenId: string | null
+    /** When set, the effect was REDIRECTED here from another token's trap. */
+    triggeredByLabel?: string | null
   } | null>(null)
   const [saveRolling, setSaveRolling] = useState(false)
 
@@ -550,6 +552,42 @@ export function PlayerSidebar({
     return () => window.removeEventListener('dnd721-trigger-tripped', handler)
   }, [addressLower, sessionId, sheet, onRoll])
 
+  // Cross-device redirected traps (target_rule !== 'self'). The server resolves
+  // the victim (e.g. lowest-HP party member) and inserts a trigger_save_events
+  // row; the victim's OWN client (this one, when target_wallet === my wallet)
+  // rolls its save and applies the effect to its own token. Unlike the self
+  // path there is no perception auto-spot — the victim didn't step on the tile.
+  const processedSaveEventsRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (!sessionId || !addressLower) return
+    const channel = supabase
+      .channel(`trigger-saves-${sessionId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'trigger_save_events', filter: `session_id=eq.${sessionId}` },
+        (payload) => {
+          const row = (payload as any).new as any
+          if (!row?.id || processedSaveEventsRef.current.has(row.id)) return
+          if (String(row.target_wallet ?? '').toLowerCase() !== addressLower) return
+          processedSaveEventsRef.current.add(row.id)
+          const fx = (row.effect ?? {}) as Record<string, any>
+          setTriggerPrompt({
+            name:             fx.name ?? 'Trap',
+            saveType:         fx.save_type ?? 'DEX',
+            dc:               Number(fx.save_dc ?? 15),
+            saveDc:           Number(fx.save_dc ?? 15),
+            description:      fx.description ?? null,
+            damageDice:       fx.damage_dice ?? null,
+            conditionApplied: fx.condition_applied ?? null,
+            tokenId:          row.target_token_id ?? null,
+            triggeredByLabel: row.triggering_label ?? null,
+          })
+        },
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [sessionId, addressLower])
+
   // Active area searches — Perception finds traps; Investigation finds clues.
   // Both roll the relevant skill from the sheet and resolve server-side so
   // hidden trigger data never reaches a client that hasn't earned it.
@@ -606,7 +644,9 @@ export function PlayerSidebar({
     const success = total >= triggerPrompt.saveDc
 
     onRoll?.({
-      label: `${triggerPrompt.saveType} Save (${triggerPrompt.name})`,
+      label: triggerPrompt.triggeredByLabel
+        ? `${triggerPrompt.saveType} Save (${triggerPrompt.name} — triggered by ${triggerPrompt.triggeredByLabel})`
+        : `${triggerPrompt.saveType} Save (${triggerPrompt.name})`,
       formula: `1d20${fmtMod(mod + pb)}`,
       result: total,
       outcome: success ? `SUCCESS vs DC ${triggerPrompt.saveDc}` : `FAIL vs DC ${triggerPrompt.saveDc}`,
@@ -953,6 +993,11 @@ export function PlayerSidebar({
             <span className="text-lg">⚠</span>
             <h3 className="text-base font-bold text-orange-300">{triggerPrompt.name}</h3>
           </div>
+          {triggerPrompt.triggeredByLabel && (
+            <p className="mb-2 text-xs font-semibold text-amber-300">
+              {triggerPrompt.triggeredByLabel} sprang this — but it strikes you!
+            </p>
+          )}
           {triggerPrompt.description && (
             <p className="mb-3 text-sm italic text-slate-300">{triggerPrompt.description}</p>
           )}
