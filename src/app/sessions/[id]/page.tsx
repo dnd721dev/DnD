@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAccount } from 'wagmi'
 import { supabase } from '@/lib/supabase'
+import { useProfileNames } from '@/hooks/useProfileNames'
 import { InviteManager } from '@/components/invite/InviteManager'
 import { characterMatchesType, mismatchReason } from '@/lib/gameType'
 
@@ -45,10 +46,6 @@ function normalizeParam(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? '' : v
 }
 
-function shortWallet(w: string) {
-  if (!w) return ''
-  return `${w.slice(0, 6)}…${w.slice(-4)}`
-}
 
 export default function SessionPage() {
   const router = useRouter()
@@ -58,6 +55,7 @@ export default function SessionPage() {
   const sessionId = useMemo(() => normalizeParam(params?.id), [params])
 
   const [session, setSession] = useState<SessionRow | null>(null)
+  const nameForWallet = useProfileNames([session?.gm_wallet])
   const [isCampaignParticipant, setIsCampaignParticipant] = useState(false)
   const [campaignCharacterId, setCampaignCharacterId] = useState<string | null>(null)
   const [campaignCharacterLevel, setCampaignCharacterLevel] = useState<number | null>(null)
@@ -288,7 +286,7 @@ export default function SessionPage() {
 
           {session.gm_wallet && (
             <p className="text-xs text-slate-400">
-              GM: <span className="font-mono">{shortWallet(session.gm_wallet)}</span>
+              GM: <span className="text-slate-200">{nameForWallet(session.gm_wallet)}</span>
             </p>
           )}
 

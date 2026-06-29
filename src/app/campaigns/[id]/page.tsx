@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAccount } from 'wagmi'
 import { supabase } from '@/lib/supabase'
+import { useProfileNames } from '@/hooks/useProfileNames'
 import { InviteManager } from '@/components/invite/InviteManager'
 import { characterMatchesType, mismatchReason, typeShort } from '@/lib/gameType'
 
@@ -36,10 +37,6 @@ type CharacterRow = {
   is_caya: boolean
 }
 
-function shortWallet(w: string) {
-  if (!w) return ''
-  return `${w.slice(0, 6)}…${w.slice(-4)}`
-}
 
 export default function CampaignPage() {
   const params = useParams<{ id: string }>()
@@ -51,6 +48,8 @@ export default function CampaignPage() {
 
   const [campaign, setCampaign] = useState<Campaign | null>(null)
   const [participants, setParticipants] = useState<Participant[]>([])
+  // Resolve GM + participant wallets to profile names — wallets are never shown.
+  const nameFor = useProfileNames([campaign?.gm_wallet, ...participants.map((p) => p.wallet_address)])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -373,7 +372,7 @@ export default function CampaignPage() {
             <div className="flex flex-col items-stretch gap-2 md:items-end">
               {campaign.gm_wallet && (
                 <p className="text-xs text-slate-400">
-                  GM: <span className="font-mono">{shortWallet(campaign.gm_wallet)}</span>
+                  GM: <span className="text-slate-200">{nameFor(campaign.gm_wallet)}</span>
                 </p>
               )}
 
@@ -463,7 +462,7 @@ export default function CampaignPage() {
 
           <section className="rounded border border-slate-700 bg-slate-900/60 p-4">
             <h2 className="text-sm font-semibold text-slate-100">Participants</h2>
-            <p className="text-xs text-slate-400">Wallets currently joined to this campaign.</p>
+            <p className="text-xs text-slate-400">Players currently joined to this campaign.</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {participants.length === 0 && <p className="text-xs text-slate-400">No participants yet.</p>}
               {participants.map(p => (
@@ -471,7 +470,7 @@ export default function CampaignPage() {
                   key={p.wallet_address}
                   className="inline-flex items-center gap-2 rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-100"
                 >
-                  <span className="font-mono">{shortWallet(p.wallet_address)}</span>
+                  <span>{nameFor(p.wallet_address)}</span>
                   <span className="rounded-full bg-slate-700 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-200">
                     {p.role}
                   </span>

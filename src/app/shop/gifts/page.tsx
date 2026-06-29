@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAccount } from 'wagmi'
 import { supabase } from '@/lib/supabase'
+import { useProfileNames } from '@/hooks/useProfileNames'
 
 type GiftRow = {
   id:             string
@@ -26,10 +27,6 @@ const TIER_COLOR: Record<string, string> = {
   C: 'bg-amber-800/60 text-amber-200',
   D: 'bg-orange-800/60 text-orange-200',
   E: 'bg-purple-800/60 text-purple-200',
-}
-
-function shortWallet(w: string) {
-  return `${w.slice(0, 6)}…${w.slice(-4)}`
 }
 
 function timeAgo(iso: string) {
@@ -56,6 +53,7 @@ function GiftCard({
   wallet:     string
 }) {
   const [selectedChar, setSelectedChar] = useState(characters[0]?.id ?? '')
+  const nameFor = useProfileNames([gift.gifter_wallet])
   const [acceptState,  setAcceptState]  = useState<AcceptState>('idle')
   const [errorMsg,     setErrorMsg]     = useState<string | null>(null)
 
@@ -115,7 +113,7 @@ function GiftCard({
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            From <span className="font-mono text-slate-400">{shortWallet(gift.gifter_wallet)}</span>
+            From <span className="text-slate-400">{nameFor(gift.gifter_wallet)}</span>
             {' · '}{timeAgo(gift.created_at)}
           </p>
           {gift.price_usd && (

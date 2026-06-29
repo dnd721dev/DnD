@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useAccount } from 'wagmi'
 import { supabase } from '@/lib/supabase'
+import { useProfileNames } from '@/hooks/useProfileNames'
 import Link from 'next/link'
 
 type SessionStatus = 'planned' | 'in_progress' | 'completed' | 'cancelled'
@@ -67,6 +68,15 @@ export default function SessionClient({ sessionId }: SessionClientProps) {
 
   const [sponsors, setSponsors] = useState<SponsoredMonster[]>([])
   const [approvingId, setApprovingId] = useState<string | null>(null)
+
+  // Resolve every wallet shown on this page (GM, self, participants, sponsors)
+  // to a profile name — wallets are never rendered.
+  const nameFor = useProfileNames([
+    session?.gm_wallet,
+    address,
+    ...participants.map((p) => p.wallet_address),
+    ...sponsors.map((s) => s.sponsor_wallet),
+  ])
   const [recordings, setRecordings] = useState<Recording[]>([])
 
   const isGm = Boolean(
@@ -332,9 +342,8 @@ export default function SessionClient({ sessionId }: SessionClientProps) {
                 {session.gm_wallet && (
                   <p className="text-xs text-slate-400">
                     GM:{' '}
-                    <span className="font-mono text-slate-200">
-                      {session.gm_wallet.slice(0, 6)}…
-                      {session.gm_wallet.slice(-4)}
+                    <span className="text-slate-200">
+                      {nameFor(session.gm_wallet)}
                     </span>
                   </p>
                 )}
@@ -355,9 +364,9 @@ export default function SessionClient({ sessionId }: SessionClientProps) {
             {address && (
               <>
                 <p className="mb-3 text-xs text-slate-400">
-                  Connected wallet:{' '}
-                  <span className="font-mono text-slate-200">
-                    {address.slice(0, 6)}…{address.slice(-4)}
+                  Connected as:{' '}
+                  <span className="text-slate-200">
+                    {nameFor(address)}
                   </span>
                 </p>
 
@@ -433,19 +442,12 @@ export default function SessionClient({ sessionId }: SessionClientProps) {
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-slate-100">
-                        {p.profile_username ||
-                          `${p.wallet_address.slice(
-                            0,
-                            6
-                          )}…${p.wallet_address.slice(-4)}`}
+                        {p.profile_username?.trim() || nameFor(p.wallet_address)}
                       </span>
                       <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-300">
                         {p.role}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-400">
-                      {p.wallet_address}
-                    </p>
                   </div>
                   <div>
                     <span
@@ -519,7 +521,7 @@ export default function SessionClient({ sessionId }: SessionClientProps) {
                           )}
 
                           <p className="mt-1.5 text-[10px] text-slate-600">
-                            From: {s.sponsor_wallet.slice(0, 6)}…{s.sponsor_wallet.slice(-4)}
+                            From: {nameFor(s.sponsor_wallet)}
                             {' · '}{s.payment_amount} DND721
                             {' · '}{new Date(s.created_at).toLocaleDateString()}
                           </p>

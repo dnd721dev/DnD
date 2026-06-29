@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { toast } from '@/components/ui/ToastHub'
+import { useProfileNames } from '@/hooks/useProfileNames'
 
 export type Handout = {
   id: string
@@ -283,6 +284,8 @@ function HandoutCard({
   contestSkill?: string
 }) {
   const [expanded, setExpanded] = useState(false)
+  // Contest winners are shown by profile name, never wallet.
+  const nameFor = useProfileNames(handout.revealed_to ?? [])
 
   return (
     <div
@@ -331,7 +334,7 @@ function HandoutCard({
 
           {isGm && (handout.revealed_to?.length ?? 0) > 0 && (
             <div className="text-[10px] text-emerald-300">
-              ✓ Won by contest: {handout.revealed_to!.map((w) => `${w.slice(0, 6)}…${w.slice(-4)}`).join(', ')}
+              ✓ Won by contest: {handout.revealed_to!.map((w) => nameFor(w)).join(', ')}
             </div>
           )}
 

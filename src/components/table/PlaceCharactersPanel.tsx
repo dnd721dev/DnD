@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { resolveDisplayName } from '@/lib/displayName'
 
 type CharRow = {
   id: string
@@ -20,6 +21,7 @@ type SessionPlayerRow = {
   character_id: string | null
   characters: CharRow | null
   display_name?: string | null
+  username?: string | null
 }
 
 type PlacedToken = {
@@ -61,15 +63,18 @@ export function PlaceCharactersPanel({
       const wallets = players.map((p) => p.wallet_address)
       const { data: profiles, error: profErr } = await supabase
         .from('profiles')
-        .select('wallet_address, display_name')
+        .select('wallet_address, display_name, username')
         .in('wallet_address', wallets)
 
       if (profErr) console.error('PlaceCharactersPanel: failed to load profiles:', profErr)
 
       const profileMap = new Map(
-        (profiles ?? []).map((p: any) => [p.wallet_address as string, p.display_name as string | null])
+        (profiles ?? []).map((p: any) => [p.wallet_address as string, p as { display_name: string | null; username: string | null }])
       )
-      setPlayers(players.map((p) => ({ ...p, display_name: profileMap.get(p.wallet_address) ?? null })))
+      setPlayers(players.map((p) => {
+        const prof = profileMap.get(p.wallet_address)
+        return { ...p, display_name: prof?.display_name ?? null, username: prof?.username ?? null }
+      }))
     } else {
       setPlayers([])
     }
@@ -205,13 +210,8 @@ export function PlaceCharactersPanel({
                   ) : (
                     <div className="text-[10px] text-slate-500">No character selected</div>
                   )}
-                  <div
-                    className="text-[9px] text-slate-600"
-                    title={p.wallet_address}
-                  >
-                    {p.display_name?.trim()
-                      ? p.display_name.trim()
-                      : `${p.wallet_address.slice(0, 6)}…${p.wallet_address.slice(-4)}`}
+                  <div className="text-[9px] text-slate-600">
+                    {resolveDisplayName({ displayName: p.display_name, username: p.username })}
                   </div>
                 </div>
               </div>

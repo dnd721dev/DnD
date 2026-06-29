@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SubclassEffect, ArmorProf, WeaponProf, SkillKey, Die, SpellListKey } from '@/lib/subclassRules'
+import { useProfileNames } from '@/hooks/useProfileNames'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -116,7 +117,6 @@ function dbToForm(sc: DbSubclass): FormState {
   }
 }
 
-function walletShort(w: string) { return `${w.slice(0, 6)}…${w.slice(-4)}` }
 
 function slugify(s: string) {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
@@ -781,6 +781,8 @@ function SubclassCard({
 }) {
   const featureCount = sc.features?.filter(f => f.name.trim()).length ?? 0
   const effectCount = sc.features?.reduce((sum, f) => sum + (f.effects?.length ?? 0), 0) ?? 0
+  // Credit the creator by profile name, never their wallet.
+  const nameFor = useProfileNames([sc.creator_wallet])
   return (
     <div className={`rounded-xl border transition ${isOwner ? 'border-amber-800/50 bg-amber-950/10' : 'border-slate-800 bg-slate-900/60'}`}>
       <button type="button" onClick={onToggleExpand} className="w-full rounded-t-xl px-4 py-3 text-left">
@@ -796,7 +798,7 @@ function SubclassCard({
               <span>{featureCount} feature{featureCount !== 1 ? 's' : ''}</span>
               {effectCount > 0 && <><span>·</span><span className="text-amber-500/70">{effectCount} effect{effectCount !== 1 ? 's' : ''}</span></>}
               <span>·</span>
-              <span>{walletShort(sc.creator_wallet)}</span>
+              <span>{nameFor(sc.creator_wallet)}</span>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">

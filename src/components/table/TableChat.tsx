@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { SESSION_GATES, type SessionStatus } from '@/lib/sessionGates'
 import { toast } from '@/components/ui/ToastHub'
+import { ANON_NAME } from '@/lib/displayName'
 
 type Message = {
   id: string
@@ -273,8 +274,10 @@ export default function TableChat({ sessionId, senderWallet, senderName = 'Adven
     })
   }
 
-  function shortWallet(w: string) {
-    return w.length > 10 ? `${w.slice(0, 6)}…${w.slice(-4)}` : w
+  // Never render a wallet — fall back to the generic name when no profile/character
+  // name is available for this sender/recipient.
+  function shortWallet(_w: string) {
+    return ANON_NAME
   }
 
   function formatTime(iso: string) {

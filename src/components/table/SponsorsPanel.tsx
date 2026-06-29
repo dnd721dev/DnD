@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useProfileNames } from '@/hooks/useProfileNames'
 
 type Sponsor = {
   id: string
@@ -71,9 +72,8 @@ export default function SponsorsPanel({ sessionId }: Props) {
     if (notesId === id) { setNotesId(null); setNotesDraft('') }
   }
 
-  function shortWallet(w: string) {
-    return w.length > 10 ? `${w.slice(0, 6)}…${w.slice(-4)}` : w
-  }
+  // Resolve sponsor wallets to profile names — wallets are never shown.
+  const nameFor = useProfileNames(sponsors.map((s) => s.sponsor_wallet))
 
   const pending  = sponsors.filter((s) => s.status === 'pending')
   const decided  = sponsors.filter((s) => s.status !== 'pending')
@@ -100,7 +100,7 @@ export default function SponsorsPanel({ sessionId }: Props) {
                     {s.monster_name || <span className="italic text-slate-400">No name — DM discretion</span>}
                   </p>
                   <p className="text-[10px] text-slate-500">
-                    From {shortWallet(s.sponsor_wallet)} · {s.payment_amount} DND721
+                    From {nameFor(s.sponsor_wallet)} · {s.payment_amount} DND721
                   </p>
                 </div>
                 <span className="shrink-0 rounded bg-yellow-900/40 px-1.5 py-0.5 text-[9px] font-semibold text-yellow-300">
@@ -179,7 +179,7 @@ export default function SponsorsPanel({ sessionId }: Props) {
                 <p className="text-[11px] font-semibold text-slate-200 truncate">
                   {s.monster_name || <span className="italic text-slate-500">Unnamed</span>}
                 </p>
-                <p className="text-[9px] text-slate-500">{shortWallet(s.sponsor_wallet)}</p>
+                <p className="text-[9px] text-slate-500">{nameFor(s.sponsor_wallet)}</p>
                 {s.gm_notes && (
                   <p className="text-[10px] text-slate-400 mt-0.5 italic">Note: {s.gm_notes}</p>
                 )}

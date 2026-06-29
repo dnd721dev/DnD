@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useAccount } from 'wagmi'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import { useProfileNames } from '@/hooks/useProfileNames'
 
 type SessionStatus = 'planned' | 'in_progress' | 'completed' | 'cancelled'
 
@@ -33,6 +34,7 @@ export default function SessionsClient({ campaignId }: Props) {
   const { address } = useAccount()
 
   const [campaign, setCampaign] = useState<Campaign | null>(null)
+  const nameFor = useProfileNames([campaign?.gm_wallet])
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -243,9 +245,8 @@ export default function SessionsClient({ campaignId }: Props) {
             <p className="text-xs text-slate-400">
               Campaign GM:{' '}
               {campaign.gm_wallet ? (
-                <span className="font-mono">
-                  {campaign.gm_wallet.slice(0, 6)}…
-                  {campaign.gm_wallet.slice(-4)}
+                <span className="text-slate-200">
+                  {nameFor(campaign.gm_wallet)}
                 </span>
               ) : (
                 'Unknown'

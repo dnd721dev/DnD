@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useAccount } from 'wagmi'
 import { useMounted } from '@/hooks/useMounted'
 import { supabase } from '@/lib/supabase'
+import { resolveDisplayName } from '@/lib/displayName'
 import GMSidebar from '@/components/table/GMSidebar'
 import { PlayerSidebar } from '@/components/table/PlayerSidebar'
 import { MapBuilder } from '@/components/table/MapBuilder'
@@ -58,6 +59,7 @@ type SessionPlayerRow = {
   wallet_address: string
   character_id: string | null
   display_name?: string | null
+  username?: string | null
   vision?: number | null
   race?: string | null
   /** Per-player current map override (null = follow the GM's session map). */
@@ -473,11 +475,11 @@ export default function TableClient({ sessionId }: TableClientProps) {
         const wallets = rows.map((p) => p.wallet_address)
         const { data: profiles } = await supabase
           .from('profiles')
-          .select('wallet_address, display_name')
+          .select('wallet_address, display_name, username')
           .in('wallet_address', wallets)
         if (!mounted) return
         const profileMap = new Map(
-          (profiles ?? []).map((p: any) => [p.wallet_address as string, p.display_name as string | null])
+          (profiles ?? []).map((p: any) => [p.wallet_address as string, p as { display_name: string | null; username: string | null }])
         )
 
         // Batch-fetch character vision + race so GM "View As" uses the correct radius
@@ -496,9 +498,11 @@ export default function TableClient({ sessionId }: TableClientProps) {
         setSessionPlayers(
           rows.map((p) => {
             const ch = p.character_id ? charMap.get(p.character_id) : undefined
+            const prof = profileMap.get(p.wallet_address)
             return {
               ...p,
-              display_name: profileMap.get(p.wallet_address) ?? null,
+              display_name: prof?.display_name ?? null,
+              username: prof?.username ?? null,
               vision: ch?.vision ?? null,
               race: ch?.race ?? null,
             }
@@ -1580,7 +1584,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
         {/* GM "Viewing as <player>" pill — only visible when impersonating a player. */}
         {isGm && gmViewWallet && (() => {
           const viewed = sessionPlayers.find((p) => p.wallet_address === gmViewWallet)
-          const label = viewed?.display_name?.trim() || `${gmViewWallet.slice(0, 6)}…${gmViewWallet.slice(-4)}`
+          const label = resolveDisplayName({ displayName: viewed?.display_name, username: viewed?.username })
           return (
             <button
               type="button"
@@ -1607,7 +1611,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
                 <option value="">GM Free View</option>
                 {sessionPlayers.map((p) => (
                   <option key={p.wallet_address} value={p.wallet_address}>
-                    {p.display_name?.trim() || `${p.wallet_address.slice(0, 6)}…${p.wallet_address.slice(-4)}`}
+                    {resolveDisplayName({ displayName: p.display_name, username: p.username })}
                   </option>
                 ))}
               </select>
@@ -1642,7 +1646,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
                       <div className="mb-1 text-[10px] uppercase tracking-wide text-slate-400">Send player to map</div>
                       <div className="space-y-1.5">
                         {sessionPlayers.map((p) => {
-                          const label = p.display_name?.trim() || `${p.wallet_address.slice(0, 6)}…${p.wallet_address.slice(-4)}`
+                          const label = resolveDisplayName({ displayName: p.display_name, username: p.username })
                           const cur = p.current_map_id ?? currentMapId
                           return (
                             <div key={p.wallet_address} className="flex items-center gap-1.5">

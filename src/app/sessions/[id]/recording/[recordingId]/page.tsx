@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import { resolveDisplayName, ANON_NAME } from '@/lib/displayName'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -134,12 +135,12 @@ export default function RecordingEditorPage() {
     if (wallets.length) {
       const { data: profiles } = await supabase
         .from('profiles')
-        .select('wallet_address, display_name')
+        .select('wallet_address, display_name, username')
         .in('wallet_address', wallets)
       const map: Record<string, string> = {}
       for (const p of profiles ?? []) {
         if (p.wallet_address) {
-          map[p.wallet_address] = p.display_name?.trim() || shortenWallet(p.wallet_address)
+          map[p.wallet_address] = resolveDisplayName({ displayName: p.display_name, username: (p as any).username })
         }
       }
       setNameMap(map)
@@ -946,7 +947,8 @@ export default function RecordingEditorPage() {
   )
 }
 
-function shortenWallet(w: string): string {
-  if (!w || w.length < 10) return w
-  return `${w.slice(0, 6)}…${w.slice(-4)}`
+// Recording track labels never expose a wallet — fall back to the generic name
+// when a participant identity has no profile in the name map.
+function shortenWallet(_w: string): string {
+  return ANON_NAME
 }

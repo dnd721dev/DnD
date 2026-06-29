@@ -1,4 +1,5 @@
 import type { CharacterSummary } from './types'
+import { resolveDisplayName } from '@/lib/displayName'
 
 export function formatDateTime(value: string | null) {
   if (!value) return 'TBD'
@@ -63,23 +64,18 @@ export function getCharacterAC(char: CharacterSummary | null): number | null {
 
 export function buildRollerName(params: {
   selectedCharacter: CharacterSummary | null
-  address: string | undefined
-  /** Profile display_name — preferred over raw wallet when character name is absent */
+  /** Kept for call-site compatibility; intentionally NOT rendered. */
+  address?: string | undefined
+  /** Profile display_name — preferred when character name is absent. */
   displayName?: string | null
+  /** Profile username — used when display_name is absent. */
+  username?: string | null
 }): string {
-  const { selectedCharacter, address, displayName } = params
-  // 1. In-game character name (highest priority)
-  if (
-    selectedCharacter?.name &&
-    String(selectedCharacter.name).trim().length > 0
-  ) {
-    return String(selectedCharacter.name)
-  }
-  // 2. User's display_name from profiles
-  if (displayName?.trim()) return displayName.trim()
-  // 3. Shortened wallet address (last resort)
-  if (address) {
-    return `${address.slice(0, 6)}…${address.slice(-4)}`
-  }
-  return 'Unknown'
+  // character name → display_name → username → "Anonymous Adventurer".
+  // The wallet is never used as a name.
+  return resolveDisplayName({
+    characterName: params.selectedCharacter?.name ? String(params.selectedCharacter.name) : null,
+    displayName: params.displayName,
+    username: params.username,
+  })
 }

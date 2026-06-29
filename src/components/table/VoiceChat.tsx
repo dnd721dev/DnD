@@ -5,6 +5,7 @@ import { Room, RoomEvent } from 'livekit-client'
 import { RoomAudioRenderer } from '@livekit/components-react'
 import '@livekit/components-styles'
 import { supabase } from '@/lib/supabase'
+import { ANON_NAME } from '@/lib/displayName'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -29,9 +30,10 @@ const TOKEN_REFRESH_MS = 7 * 60 * 60 * 1000
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function shortenWallet(w: string): string {
-  if (!w || w.length < 10) return w
-  return `${w.slice(0, 6)}…${w.slice(-4)}`
+// Never render a wallet — when no profile/character name is cached for a voice
+// participant, fall back to the generic name.
+function shortenWallet(_w: string): string {
+  return ANON_NAME
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────

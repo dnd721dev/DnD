@@ -7,6 +7,7 @@ import { SrdSearchOverlay } from '@/components/table/SrdSearchOverlay'
 import type { SessionWithCampaign } from '../types'
 import { formatDateTime } from '../utils'
 import type { SessionStatus } from '@/lib/sessionGates'
+import { ANON_NAME } from '@/lib/displayName'
 
 // memo: prevents VoiceChat (inside this component) from re-rendering on every
 // parent state change (dice rolls, token moves, etc.) when props haven't changed.
@@ -161,13 +162,10 @@ export const TableTopBar = memo(function TableTopBar(props: {
             {session.status}
           </span>
           {address ? (
-            <p
-              className="text-slate-400"
-              title={address}
-            >
+            <p className="text-slate-400">
               You:{' '}
-              <span className={displayName?.trim() ? 'text-slate-200' : 'font-mono'}>
-                {displayName?.trim() || `${address.slice(0, 6)}…${address.slice(-4)}`}
+              <span className="text-slate-200">
+                {displayName?.trim() || ANON_NAME}
               </span>{' '}
               {isGm && <span className="text-emerald-400">(GM)</span>}
             </p>
