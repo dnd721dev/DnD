@@ -100,6 +100,11 @@ export default function CharacterSheetPage() {
   // Rename + delete state
   const [showDeleteModal, setShowDeleteModal] = useState(false)
 
+  // Convert-to-CAYA (one-way) state
+  const [showConvertModal, setShowConvertModal] = useState(false)
+  const [converting, setConverting] = useState(false)
+  const [convertError, setConvertError] = useState<string | null>(null)
+
   // ✅ Attack crit tracking
   const [lastAttackWasCrit, setLastAttackWasCrit] = useState(false)
 
@@ -647,6 +652,32 @@ export default function CharacterSheetPage() {
     }
   }
 
+  // ── Convert to CAYA (one-way; resets to level 1) ──────────────────────────────
+  async function handleConvertToCaya() {
+    if (!c) return
+    setConverting(true)
+    setConvertError(null)
+    const wallet = (typeof window !== 'undefined' ? localStorage.getItem('dnd721_wallet') : '') ?? ''
+    try {
+      const res = await fetch(`/api/characters/${c.id}/convert-caya`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setConvertError(body?.error ?? 'Conversion failed')
+        setConverting(false)
+        return
+      }
+      // Full reload so every derived stat (level, slots, HP, XP bar) re-derives cleanly.
+      window.location.reload()
+    } catch (e: any) {
+      setConvertError(e?.message ?? 'Network error')
+      setConverting(false)
+    }
+  }
+
   if (loading) return <div className="p-4 text-slate-300">Loading character...</div>
   if (!c || !d) return <div className="p-4 text-red-300">Character not found.</div>
 
@@ -989,6 +1020,64 @@ export default function CharacterSheetPage() {
         </div>
 
       </div>
+
+      {/* ── Game Type / Convert to CAYA ────────────────────────────────────── */}
+      <div className="mx-auto mt-6 max-w-3xl px-4">
+        <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4">
+          <h3 className="text-sm font-semibold text-slate-200">Game Type</h3>
+          {isCaya ? (
+            <p className="mt-1 text-xs text-amber-300">
+              <span className="rounded border border-amber-600/40 bg-amber-600/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">CAYA</span>{' '}
+              Come As You Are — this character levels up by earning XP in play.
+            </p>
+          ) : (
+            <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-slate-400">
+                Free-Level character. Convert to CAYA to play in Come-As-You-Are games — this
+                resets the character to level 1 and <span className="font-semibold text-amber-300">cannot be undone</span>.
+              </p>
+              <button
+                onClick={() => { setConvertError(null); setShowConvertModal(true) }}
+                className="shrink-0 rounded-lg border border-amber-700/50 bg-amber-600/20 px-3 py-1.5 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-600/30"
+              >
+                Convert to CAYA
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Convert-to-CAYA confirmation modal ─────────────────────────────── */}
+      {showConvertModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="w-80 space-y-4 rounded-xl border border-slate-600 bg-slate-800 p-6 text-white shadow-2xl">
+            <h2 className="text-lg font-bold text-amber-400">Convert to CAYA?</h2>
+            <p className="text-sm text-slate-300">
+              <span className="font-semibold text-white">{c?.name ?? 'This character'}</span> will be reset to{' '}
+              <span className="font-semibold">level 1</span> with 0 XP, and any multiclass will be dropped.
+              CAYA characters level up by earning XP in play.{' '}
+              <span className="font-semibold text-amber-300">This cannot be undone.</span>
+            </p>
+            {convertError && <p className="text-xs text-red-400">{convertError}</p>}
+            <div className="flex justify-end gap-3">
+              <button
+                disabled={converting}
+                onClick={() => setShowConvertModal(false)}
+                className="rounded-lg bg-slate-700 px-4 py-2 text-sm transition-colors hover:bg-slate-600 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={converting}
+                onClick={handleConvertToCaya}
+                className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold transition-colors hover:bg-amber-500 disabled:opacity-50"
+              >
+                {converting ? 'Converting…' : 'Convert'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Delete confirmation modal ──────────────────────────────────────── */}
       {showDeleteModal && (

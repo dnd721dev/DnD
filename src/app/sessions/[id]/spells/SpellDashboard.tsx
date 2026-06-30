@@ -621,6 +621,138 @@ function HealingSpellCard({
   )
 }
 
+// ── Support / buff / control spell card ──────────────────────────────────────────
+// For spells that aren't damage or healing (Guidance, Shield, Shield of Faith,
+// Bless, Hold Person, …). Pure buffs get a "Cast" button (log + spend slot);
+// save-based control spells reuse the normal save-roll handler.
+
+function SupportSpellCard({
+  spell,
+  slots,
+  targets,
+  spellSaveDC,
+  isDomain,
+  onRoll,
+  onSupportCast,
+}: {
+  spell: SrdSpell
+  slots: SpellSlotData
+  targets: Token[]
+  spellSaveDC: number
+  isDomain: boolean
+  onRoll: (spell: SrdSpell, slotLevel: number, targetId: string, rollType: 'save') => void
+  onSupportCast: (spell: SrdSpell, slotLevel: number, targetId: string) => void
+}) {
+  const isCantrip = spell.level === 0
+  const [selectedTarget, setSelectedTarget] = useState(targets[0]?.id ?? '')
+  const [selectedSlot, setSelectedSlot] = useState(spell.level)
+
+  const slotsAtLevel = slots[String(selectedSlot)]
+  const hasSlots = isCantrip || (slotsAtLevel ? slotsAtLevel.used < slotsAtLevel.max : false)
+
+  const isConc = spell.duration.toLowerCase().includes('concentration')
+  const isBonusAction = spell.castingTime.toLowerCase().includes('bonus')
+  const isRitual = spell.castingTime.toLowerCase().includes('ritual')
+  const hasSave = !!spell.saveAbility
+
+  useEffect(() => {
+    if (targets.length > 0 && !targets.find(t => t.id === selectedTarget)) {
+      setSelectedTarget(targets[0].id)
+    }
+  }, [targets, selectedTarget])
+
+  return (
+    <div
+      className={`rounded-lg border p-3 transition-opacity ${
+        !hasSlots && !isCantrip
+          ? 'opacity-40 border-slate-800 bg-slate-900/30'
+          : 'border-slate-700 bg-slate-900'
+      }`}
+    >
+      {/* Header */}
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="flex items-center flex-wrap gap-1 min-w-0">
+          <span className="text-sm font-semibold text-slate-100 truncate">{spell.name}</span>
+          <span className={`text-[10px] px-1.5 py-0.5 rounded ${isCantrip ? 'bg-slate-800 text-slate-400' : 'bg-indigo-950/60 text-indigo-400'}`}>
+            {isCantrip ? 'Cantrip' : `L${spell.level}`}
+          </span>
+          {isBonusAction && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-400">BA</span>}
+          {isConc && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-400">Conc.</span>}
+          {isRitual && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-500">Ritual</span>}
+          {isDomain && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/40 border border-amber-700/40 text-amber-300"
+              title="Always prepared — domain/oath/circle spell"
+            >
+              Domain
+            </span>
+          )}
+        </div>
+
+        {/* Upcast selector (leveled spells) */}
+        {!isCantrip && Object.keys(slots).some(l => parseInt(l) >= spell.level) && (
+          <select
+            value={selectedSlot}
+            onChange={e => setSelectedSlot(parseInt(e.target.value))}
+            className="shrink-0 text-[10px] bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-indigo-400"
+          >
+            {Object.entries(slots)
+              .filter(([l]) => parseInt(l) >= spell.level)
+              .map(([l, s]) => (
+                <option key={l} value={l} disabled={s.used >= s.max}>
+                  L{l}{s.used >= s.max ? ' ✗' : ''}
+                </option>
+              ))}
+          </select>
+        )}
+      </div>
+
+      {/* Info row */}
+      <div className="text-[10px] text-slate-500 mb-2.5">
+        {hasSave ? `${spell.saveAbility!.toUpperCase()} save DC ${spellSaveDC}` : 'Buff — no roll'}
+        {spell.range ? ` · ${spell.range}` : ''}
+        {spell.duration ? ` · ${spell.duration}` : ''}
+      </div>
+
+      {/* Target + action */}
+      <div className="flex gap-1.5 items-center">
+        <select
+          value={selectedTarget}
+          onChange={e => setSelectedTarget(e.target.value)}
+          className="flex-1 min-w-0 text-[10px] bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-slate-300"
+        >
+          {targets.map(t => (
+            <option key={t.id} value={t.id}>
+              {t.label}{t.ac != null ? ` (AC ${t.ac})` : ''}
+            </option>
+          ))}
+          {targets.length === 0 && <option value="">No tokens on map</option>}
+        </select>
+
+        {hasSave ? (
+          <button
+            type="button"
+            onClick={() => onRoll(spell, selectedSlot, selectedTarget, 'save')}
+            disabled={!hasSlots || !selectedTarget}
+            className="shrink-0 text-[10px] px-2.5 py-1.5 bg-red-950/60 border border-red-500/30 text-red-400 rounded hover:bg-red-900/60 disabled:opacity-40 whitespace-nowrap"
+          >
+            DC {spellSaveDC}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onSupportCast(spell, selectedSlot, selectedTarget)}
+            disabled={!hasSlots}
+            className="shrink-0 text-[10px] px-2.5 py-1.5 bg-indigo-950/60 border border-indigo-500/30 text-indigo-300 rounded hover:bg-indigo-900/60 disabled:opacity-40 whitespace-nowrap"
+          >
+            Cast
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
 
 export function SpellDashboard({ sessionId }: { sessionId: string }) {
@@ -636,6 +768,7 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
   const [pending, setPending] = useState<PendingRoll | null>(null)
   const [combatFilter, setCombatFilter] = useState<string>('all')
   const [healFilter, setHealFilter] = useState<string>('all')
+  const [supportFilter, setSupportFilter] = useState<string>('all')
 
   const wallet = useMemo(() => {
     if (typeof window === 'undefined') return null
@@ -917,6 +1050,14 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
     [preparedSpells],
   )
 
+  // Support / buff / control spells — everything that isn't damage or healing
+  // (Guidance, Shield, Shield of Faith, Bless, Hold Person, …). Previously these
+  // categorized as 'utility' and were never rendered anywhere.
+  const supportSpells = useMemo(
+    () => preparedSpells.filter(s => categorizeSpell(s) === 'utility'),
+    [preparedSpells],
+  )
+
   const filteredCombat = useMemo(
     () => combatFilter === 'all' ? combatSpells : combatSpells.filter(s => String(s.level) === combatFilter),
     [combatSpells, combatFilter],
@@ -925,6 +1066,11 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
   const filteredHeal = useMemo(
     () => healFilter === 'all' ? healingSpells : healingSpells.filter(s => String(s.level) === healFilter),
     [healingSpells, healFilter],
+  )
+
+  const filteredSupport = useMemo(
+    () => supportFilter === 'all' ? supportSpells : supportSpells.filter(s => String(s.level) === supportFilter),
+    [supportSpells, supportFilter],
   )
 
   // ── Derived caster stats ──────────────────────────────────────────────────────
@@ -1146,6 +1292,39 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
       if (newSlots) setSlots(newSlots)
     }
   }, [myChar, sessionId, wallet, requireConcentrationConfirmation, getSpellStats, hasAgonizingBlast, chaMod])
+
+  // Cast a pure support/buff spell (Guidance, Shield, Shield of Faith, Bless, …):
+  // no damage/heal roll — log the cast and spend a slot (cantrips are free).
+  const handleSupportCast = useCallback(async (
+    spell: SrdSpell,
+    slotLevel: number,
+    targetId: string,
+  ) => {
+    if (!myChar) return
+    // Concentration tracking (Bless / Shield of Faith / Guidance are concentration).
+    if (!requireConcentrationConfirmation(spell)) return
+
+    const targetLabel = tokens.find(t => t.id === targetId)?.label
+    const label = targetLabel
+      ? `✦ ${myChar.name} casts ${spell.name} on ${targetLabel}`
+      : `✦ ${myChar.name} casts ${spell.name}`
+
+    await supabase.from('session_rolls').insert({
+      session_id: sessionId,
+      roll_type: 'custom',
+      label,
+      formula: '—',
+      result_total: 0,
+      roller_name: myChar.name,
+      roller_wallet: wallet,
+    })
+
+    // Cantrips (Guidance) cost no slot; leveled buffs spend the chosen slot.
+    if (spell.level > 0) {
+      const newSlots = await expendSlot(supabase, myChar.id, slotLevel)
+      if (newSlots) setSlots(newSlots)
+    }
+  }, [myChar, sessionId, wallet, tokens, requireConcentrationConfirmation])
 
   const handleApply = useCallback(async () => {
     if (!pending) return
@@ -1724,6 +1903,51 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
                 {preparedNames.size === 0
                   ? 'No spells prepared. Prepare spells on your character sheet.'
                   : 'No healing spells prepared at this level.'}
+              </p>
+            )}
+          </div>
+        </main>
+
+        {/* Far right: Support / buff / control spells */}
+        <main className="flex flex-1 flex-col overflow-y-auto border-l border-slate-800 bg-gray-950 p-3">
+          <div className="mb-3 flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-indigo-400/80">
+              🛡 Support Spells
+            </span>
+            <select
+              value={supportFilter}
+              onChange={e => setSupportFilter(e.target.value)}
+              className="text-[10px] bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-300"
+            >
+              <option value="all">All levels</option>
+              <option value="0">Cantrips</option>
+              {slotLevels.map(l => (
+                <option key={l} value={l}>Level {l}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-3">
+            {filteredSupport.map(spell => {
+              const stats = getSpellStats(spell)
+              return (
+                <SupportSpellCard
+                  key={spell.name}
+                  spell={spell}
+                  slots={slots}
+                  targets={allTargets}
+                  spellSaveDC={stats.dc}
+                  isDomain={domainSet.has(spell.name)}
+                  onRoll={handleRoll}
+                  onSupportCast={handleSupportCast}
+                />
+              )
+            })}
+            {filteredSupport.length === 0 && (
+              <p className="py-8 text-center text-[11px] text-slate-600 italic">
+                {preparedNames.size === 0
+                  ? 'No spells prepared. Prepare spells on your character sheet.'
+                  : 'No support spells prepared at this level.'}
               </p>
             )}
           </div>
