@@ -246,6 +246,24 @@ export function MonsterStatPanel({
     ? m.attacks
     : []
 
+  // Split into Actions vs Bonus Actions. Monster data has no structured
+  // bonus-action field, so detect bonus-action language in the name/description;
+  // a structured `bonus_actions`/`bonusActions` field (if present) wins.
+  const actionText = (a: any) => `${a?.name ?? ''} ${a?.description ?? a?.desc ?? ''}`.toLowerCase()
+  const looksBonus = (a: any) => /bonus action/.test(actionText(a))
+  const structuredBonus: any[] | null = Array.isArray(m.bonus_actions)
+    ? m.bonus_actions
+    : Array.isArray(m.bonusActions)
+    ? m.bonusActions
+    : null
+  const bonusActions: any[] = structuredBonus ?? actions.filter(looksBonus)
+  const mainActions: any[] = structuredBonus ? actions : actions.filter((a: any) => !looksBonus(a))
+  const legendaryActions: any[] = Array.isArray(m.legendary_actions)
+    ? m.legendary_actions
+    : Array.isArray(m.legendaryActions)
+    ? m.legendaryActions
+    : []
+
   // ---- Rolling helpers ----
   function rollFormula(formula: string): number {
     try {
@@ -614,54 +632,58 @@ export function MonsterStatPanel({
         )}
       </div>
 
-      {/* Actions */}
-      {actions.length > 0 && (
-        <div className="space-y-1">
-          <p className="text-[11px] font-semibold text-slate-100">
-            Actions
-          </p>
-          <div className="space-y-1.5">
-            {actions.map((a: any, idx: number) => (
-              <div
-                key={idx}
-                className="rounded-md border border-slate-700 bg-slate-950/60 p-1.5"
-              >
-                <p className="text-[11px] font-semibold text-slate-50">
-                  {a.name || 'Action'}
-                </p>
-                {a.desc && (
-                  <p className="text-[11px] text-slate-300">
-                    {a.desc}
+      {/* Actions / Bonus Actions / Legendary Actions */}
+      {([
+        ['Actions', mainActions],
+        ['Bonus Actions', bonusActions],
+        ['Legendary Actions', legendaryActions],
+      ] as [string, any[]][]).map(([heading, list]) =>
+        list.length > 0 ? (
+          <div key={heading} className="space-y-1">
+            <p className="text-[11px] font-semibold text-slate-100">{heading}</p>
+            <div className="space-y-1.5">
+              {list.map((a: any, idx: number) => (
+                <div
+                  key={idx}
+                  className="rounded-md border border-slate-700 bg-slate-950/60 p-1.5"
+                >
+                  <p className="text-[11px] font-semibold text-slate-50">
+                    {a.name || heading.replace(/s$/, '')}
                   </p>
-                )}
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {(a.to_hit ?? a.toHit ?? a.attack_bonus ?? a.attackBonus) != null && (
-                    <button
-                      type="button"
-                      onClick={() => handleAttackRoll(a)}
-                      className="rounded-md bg-sky-600 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-sky-500"
-                    >
-                      Roll Attack
-                    </button>
+                  {(a.desc ?? a.description) && (
+                    <p className="text-[11px] text-slate-300">
+                      {a.desc ?? a.description}
+                    </p>
                   )}
-                  {(a.damage_dice ||
-                    a.damage ||
-                    a.damage_formula ||
-                    (Array.isArray(a.damage) &&
-                      a.damage[0]?.damage_dice)) && (
-                    <button
-                      type="button"
-                      onClick={() => handleDamageRoll(a)}
-                      className="rounded-md bg-rose-600 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-rose-500"
-                    >
-                      Roll Damage
-                    </button>
-                  )}
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {(a.to_hit ?? a.toHit ?? a.attack_bonus ?? a.attackBonus) != null && (
+                      <button
+                        type="button"
+                        onClick={() => handleAttackRoll(a)}
+                        className="rounded-md bg-sky-600 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-sky-500"
+                      >
+                        Roll Attack
+                      </button>
+                    )}
+                    {(a.damage_dice ||
+                      a.damage ||
+                      a.damage_formula ||
+                      (Array.isArray(a.damage) &&
+                        a.damage[0]?.damage_dice)) && (
+                      <button
+                        type="button"
+                        onClick={() => handleDamageRoll(a)}
+                        className="rounded-md bg-rose-600 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-rose-500"
+                      >
+                        Roll Damage
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
+        ) : null,
       )}
 
       {!monster && (

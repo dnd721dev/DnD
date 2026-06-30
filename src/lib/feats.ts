@@ -356,3 +356,29 @@ export const DEFENSIVE_FEATS = FEAT_LIST.filter((f) => f.category === 'defensive
 export function getFeat(key: string): Feat | undefined {
   return FEATS[key]
 }
+
+// ── Half-feat ability bonuses ─────────────────────────────────────────────────
+// Feats that also grant +1 to an ability score. `abilities` lists the allowed
+// abilities — one entry means it's fixed; multiple means the player chooses.
+export type AbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
+
+export const FEAT_ABILITY_BONUS: Record<string, { amount: number; abilities: AbilityKey[] }> = {
+  athlete:          { amount: 1, abilities: ['str', 'dex'] },
+  actor:            { amount: 1, abilities: ['cha'] },
+  durable:          { amount: 1, abilities: ['con'] },
+  heavilyArmored:   { amount: 1, abilities: ['str'] },
+  heavyArmorMaster: { amount: 1, abilities: ['str'] },
+  keenMind:         { amount: 1, abilities: ['int'] },
+  lightlyArmored:   { amount: 1, abilities: ['str', 'dex'] },
+  linguist:         { amount: 1, abilities: ['int'] },
+  moderatelyArmored:{ amount: 1, abilities: ['str', 'dex'] },
+  observant:        { amount: 1, abilities: ['int', 'wis'] },
+  // Resilient: +1 to the chosen ability AND proficiency in its saving throw.
+  resilient:        { amount: 1, abilities: ['str', 'dex', 'con', 'int', 'wis', 'cha'] },
+  tavernBrawler:    { amount: 1, abilities: ['str', 'con'] },
+  weaponMaster:     { amount: 1, abilities: ['str', 'dex'] },
+}
+
+export function getFeatAbilityBonus(key: string) {
+  return FEAT_ABILITY_BONUS[key]
+}

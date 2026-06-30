@@ -9,6 +9,10 @@ import { GmNotesPanel } from './GmNotesPanel'
 import { PrivateRollsPanel, type PrivateRollPlayer } from './PrivateRollsPanel'
 import { RecordingsPanel } from './RecordingsPanel'
 import { PartySlotsPanel } from '@/components/spells/PartySlotsPanel'
+import InitiativeTracker from '@/components/table/InitiativeTracker'
+import { BattleConsole } from './BattleConsole'
+import { useSessionRolls } from '@/components/table/tableclient/hooks/useSessionRolls'
+import type { SessionStatus } from '@/lib/sessionGates'
 import type { ConditionKey } from '@/lib/conditions'
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -59,7 +63,7 @@ type TokenRow = {
   ac: number | null
 }
 
-type DashboardTab = 'notes' | 'xp' | 'private-rolls' | 'recordings' | 'party-slots'
+type DashboardTab = 'battle' | 'notes' | 'xp' | 'private-rolls' | 'recordings' | 'party-slots'
 
 function formatClassLabel(
   mainJob: string | null,
@@ -93,6 +97,9 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
   const [tokensByChar, setTokensByChar] = useState<Record<string, TokenRow>>({})
   const [activeTab, setActiveTab] = useState<DashboardTab>('notes')
   const [liveDot, setLiveDot] = useState(false)
+
+  // Dice log (Battle tab) — realtime feed of session_rolls.
+  const { diceLog } = useSessionRolls({ sessionId, hasMounted: true })
 
   // ── Initial load ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -443,7 +450,7 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
         {/* Center panel — tab switcher (Waves 2 + 4) */}
         <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
           <nav className="mb-3 flex flex-wrap gap-2">
-            {(['notes', 'xp', 'private-rolls', 'recordings', 'party-slots'] as DashboardTab[]).map((t) => (
+            {(['battle', 'notes', 'xp', 'private-rolls', 'recordings', 'party-slots'] as DashboardTab[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setActiveTab(t)}
@@ -453,20 +460,61 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
                     : 'bg-slate-900/60 text-slate-300 hover:bg-slate-900'
                 }`}
               >
-                {t === 'notes'
-                  ? '📝 Notes'
-                  : t === 'xp'
-                    ? '✨ XP Award'
-                    : t === 'private-rolls'
-                      ? '🎲 Private Rolls'
-                      : t === 'recordings'
-                        ? '🎙️ Recordings'
-                        : '✦ Party Slots'}
+                {t === 'battle'
+                  ? '⚔ Battle'
+                  : t === 'notes'
+                    ? '📝 Notes'
+                    : t === 'xp'
+                      ? '✨ XP Award'
+                      : t === 'private-rolls'
+                        ? '🎲 Private Rolls'
+                        : t === 'recordings'
+                          ? '🎙️ Recordings'
+                          : '✦ Party Slots'}
               </button>
             ))}
           </nav>
 
           <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-6">
+            {activeTab === 'battle' && (
+              <div className="grid gap-3 lg:grid-cols-3">
+                {/* Combat order */}
+                <div className="min-w-0 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/50 p-2">
+                  <InitiativeTracker
+                    encounterId={encounterId}
+                    sessionId={sessionId}
+                    currentMapId={null}
+                    sessionStatus={(sessionStatus ?? null) as SessionStatus | null}
+                  />
+                </div>
+                {/* Active monster's turn */}
+                <div className="min-w-0 overflow-y-auto">
+                  <BattleConsole sessionId={sessionId} encounterId={encounterId} gmWallet={wallet} />
+                </div>
+                {/* Dice log */}
+                <div className="min-w-0 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/50 p-2">
+                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">🎲 Dice Log</p>
+                  {diceLog.length === 0 ? (
+                    <p className="px-1 py-3 text-center text-[11px] text-slate-500">No rolls yet.</p>
+                  ) : (
+                    <ul className="space-y-1">
+                      {diceLog.map((d) => (
+                        <li key={d.id} className="rounded-md border border-slate-800 bg-slate-900/60 px-2 py-1 text-[11px]">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-slate-200">{d.label || d.formula}</span>
+                            <span className="shrink-0 font-bold text-amber-300">{d.result}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 text-[10px] text-slate-500">
+                            <span className="truncate">{d.roller}{d.formula ? ` · ${d.formula}` : ''}</span>
+                            {d.outcome && <span className="shrink-0 text-slate-400">{d.outcome}</span>}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
             {activeTab === 'notes' && (
               <GmNotesPanel sessionId={sessionId} />
             )}

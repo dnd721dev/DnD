@@ -9,6 +9,8 @@ import type { CharacterSheetData } from '@/components/character-sheet/types'
 
 import { CharacterHeader } from '@/components/character-sheet/CharacterHeader'
 import { MulticlassLevelUpModal } from '@/components/character-sheet/MulticlassLevelUpModal'
+import { LevelUpAsiModal } from '@/components/character-sheet/LevelUpAsiModal'
+import { LevelUpSubclassModal } from '@/components/character-sheet/LevelUpSubclassModal'
 import { WarlockInvocationsPanel } from '@/components/character-sheet/WarlockInvocationsPanel'
 import { getRacialResources } from '@/lib/racialResources'
 import { getMysticArcanumLevels } from '@/lib/spellcastingProgression'
@@ -104,6 +106,9 @@ export default function CharacterSheetPage() {
   const [showConvertModal, setShowConvertModal] = useState(false)
   const [converting, setConverting] = useState(false)
   const [convertError, setConvertError] = useState<string | null>(null)
+
+  // CAYA level-up (click the gold XP bar) state
+  const [startingLevelUp, setStartingLevelUp] = useState(false)
 
   // ✅ Attack crit tracking
   const [lastAttackWasCrit, setLastAttackWasCrit] = useState(false)
@@ -678,6 +683,56 @@ export default function CharacterSheetPage() {
     }
   }
 
+  // Re-fetch the character after a level-up step (class pick or ASI) so level,
+  // HP, slots, abilities, feats, and any remaining pending choice all refresh.
+  async function refetchCharacter() {
+    const { data } = await supabase
+      .from('characters')
+      .select('*')
+      .eq('id', id)
+      .limit(1)
+      .maybeSingle()
+    if (data) {
+      setC(data as any)
+      const rs = (data as any)?.resource_state ?? {}
+      const as = (data as any)?.action_state ?? {}
+      setResourceValues(typeof rs === 'object' && rs ? rs : {})
+      setActionState(typeof as === 'object' && as ? as : {})
+    }
+  }
+
+  // ── Start a level-up from the gold XP bar ─────────────────────────────────────
+  // Sets the pending class-pick choice (the same flag award-xp sets), which makes
+  // the already-rendered MulticlassLevelUpModal appear. The modal → take-class-level
+  // applies one level at a time (recomputing HP/slots/DC/subclass spells) and keeps
+  // prompting until the whole XP gap (to_level) is assigned.
+  async function handleStartLevelUp(fromLevel: number, toLevel: number) {
+    if (!c || startingLevelUp) return
+    setStartingLevelUp(true)
+    try {
+      const nextActionState = {
+        ...actionState,
+        pending_choices: {
+          ...((actionState as any)?.pending_choices ?? {}),
+          levelup_class_pick: {
+            from_level: fromLevel,
+            to_level: toLevel,
+            created_at: new Date().toISOString(),
+          },
+        },
+      }
+      // Persist (owner RLS allows the player's own character) and reflect locally so
+      // the modal (which reads c.action_state) shows immediately.
+      await supabase.from('characters').update({ action_state: nextActionState }).eq('id', id)
+      setActionState(nextActionState)
+      setC((prev) => (prev ? ({ ...prev, action_state: nextActionState } as any) : prev))
+    } catch (e) {
+      console.error('[level-up] failed to open level-up', e)
+    } finally {
+      setStartingLevelUp(false)
+    }
+  }
+
   if (loading) return <div className="p-4 text-slate-300">Loading character...</div>
   if (!c || !d) return <div className="p-4 text-red-300">Character not found.</div>
 
@@ -693,32 +748,34 @@ export default function CharacterSheetPage() {
     ? Math.min(100, Math.round(((xp - xpForCurrentLevel) / (xpForNextLevel - xpForCurrentLevel)) * 100))
     : 100
 
+  // Level-up readiness: enough XP for a higher level. `levelUpPending` is true once
+  // the class-pick modal has been opened (don't flash the bar while it's showing).
+  const canLevelUp = isCaya && earnedLevel !== null && earnedLevel > currentLevel
+  const levelUpPending = Boolean(
+    (c.action_state as any)?.pending_choices?.levelup_class_pick ||
+    (c.action_state as any)?.pending_choices?.levelup_asi ||
+    (c.action_state as any)?.pending_choices?.levelup_subclass,
+  )
+
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4 px-3 pb-16 md:px-6">
       <CharacterHeader c={c} d={d} onRename={handleRename} onDelete={() => setShowDeleteModal(true)} />
 
-      {/* Wave 6I: Multiclass level-up prompt — appears when XP crossed a
-          threshold AND the character has a secondary class. Single-class
-          characters auto-level via award-xp and never see this. */}
-      <MulticlassLevelUpModal
-        c={c}
-        onApplied={async () => {
-          // Re-fetch the character to pick up the new level / slots / HP.
-          const { data } = await supabase
-            .from('characters')
-            .select('*')
-            .eq('id', id)
-            .limit(1)
-            .maybeSingle()
-          if (data) {
-            setC(data as any)
-            const rs = (data as any)?.resource_state ?? {}
-            const as = (data as any)?.action_state ?? {}
-            setResourceValues(typeof rs === 'object' && rs ? rs : {})
-            setActionState(typeof as === 'object' && as ? as : {})
-          }
-        }}
-      />
+      {/* Level-up choices resolve in order: subclass (L3) → ASI/feat → class pick. */}
+      {(() => {
+        const pc = (c.action_state as any)?.pending_choices ?? {}
+        const subclassPending = Boolean(pc.levelup_subclass)
+        const asiPending = Boolean(pc.levelup_asi)
+        return (
+          <>
+            <LevelUpSubclassModal c={c} onApplied={refetchCharacter} />
+            {!subclassPending && <LevelUpAsiModal c={c} onApplied={refetchCharacter} />}
+            {!subclassPending && !asiPending && (
+              <MulticlassLevelUpModal c={c} onApplied={refetchCharacter} />
+            )}
+          </>
+        )
+      })()}
 
       {/* Level-up banner */}
       {isCaya && earnedLevel !== null && earnedLevel > currentLevel && (() => {
@@ -731,7 +788,7 @@ export default function CharacterSheetPage() {
           <div className="rounded-lg border border-amber-500 bg-amber-950/40 px-4 py-3 text-sm text-amber-200 space-y-2">
             <div>
               <span className="font-bold text-amber-300">Level Up!</span> You&apos;ve earned enough XP to reach level {earnedLevel}.
-              Update your character sheet to reflect your new abilities, spells, and features.
+              Click the gold XP bar below to level up.
             </div>
             {newFeatures.length > 0 && (
               <div className="rounded border border-amber-700/40 bg-amber-950/30 p-2">
@@ -756,7 +813,31 @@ export default function CharacterSheetPage() {
       })()}
 
       {/* XP progress bar (CAYA only) */}
-      {isCaya && (
+      {isCaya && canLevelUp && !levelUpPending ? (
+        // Ready to level up — solid gold, flashing, clickable.
+        <button
+          type="button"
+          onClick={() => handleStartLevelUp(currentLevel, earnedLevel!)}
+          disabled={startingLevelUp}
+          className="w-full rounded-xl border-2 border-amber-400 bg-amber-950/40 px-4 py-3 text-left ring-2 ring-amber-400/60 transition hover:bg-amber-900/40 disabled:opacity-60 animate-pulse"
+        >
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold text-amber-200">⬆ Click to Level Up!</span>
+            <span className="font-semibold text-amber-200">
+              Level {currentLevel} → {earnedLevel}
+            </span>
+          </div>
+          <div className="mt-1.5 h-2 w-full rounded-full bg-amber-900/50 overflow-hidden">
+            <div
+              className="h-full w-full rounded-full"
+              style={{ background: 'linear-gradient(90deg, #fbbf24, #f59e0b)' }}
+            />
+          </div>
+          <p className="mt-1 text-[10px] text-amber-300/80">
+            {startingLevelUp ? 'Opening level-up…' : `${xp.toLocaleString()} XP — choose your class to level up`}
+          </p>
+        </button>
+      ) : isCaya ? (
         <div className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3 space-y-1.5">
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold text-amber-300">CAYA — Experience Points</span>
@@ -776,10 +857,12 @@ export default function CharacterSheetPage() {
             />
           </div>
           <p className="text-[10px] text-slate-500">
-            Level {currentLevel}{currentLevel < 20 ? ` → ${currentLevel + 1}` : ' (max)'}
+            {levelUpPending
+              ? 'Leveling up — finish your choices above ⬆'
+              : `Level ${currentLevel}${currentLevel < 20 ? ` → ${currentLevel + 1}` : ' (max)'}`}
           </p>
         </div>
-      )}
+      ) : null}
 
       {/* Tabs */}
       <div className="flex flex-wrap gap-2 rounded-xl border border-slate-800 bg-slate-950/60 p-2">

@@ -34,6 +34,7 @@ import {
 } from '@/lib/spellCategories'
 import type { ClassKey } from '@/lib/subclasses'
 import { calcMaxHpMulticlass } from '@/lib/hitPoints'
+import { asiSlotsForClassLevel } from '@/lib/rules'
 
 type Body = {
   wallet?: string
@@ -229,7 +230,25 @@ export async function POST(
     patch.spells_known = Array.from(new Set([...known, ...additions]))
   }
 
-  // ── Clear the pending choice ────────────────────────────────────────────────
+  // ── Did this class level grant an ASI / feat? ───────────────────────────────
+  // ASI breakpoints are per-CLASS level (Fighter & Rogue get extras). Compare the
+  // chosen class's old vs new class level.
+  let asiClassKey = primaryClassKey as string
+  let asiOldLevel = primaryLevel
+  let asiNewLevel = primaryLevel + 1
+  if (pickClass === 'secondary') {
+    asiClassKey = String(secondaryClassKey)
+    asiOldLevel = secondaryLevel
+    asiNewLevel = secondaryLevel + 1
+  } else if (pickClass === 'new') {
+    asiClassKey = String(body.newClassKey ?? '').toLowerCase()
+    asiOldLevel = 0
+    asiNewLevel = 1
+  }
+  const asiDelta =
+    asiSlotsForClassLevel(asiClassKey, asiNewLevel) - asiSlotsForClassLevel(asiClassKey, asiOldLevel)
+
+  // ── Update the pending choices ──────────────────────────────────────────────
   const nextPending = { ...pending }
   // If the player still has more levels to assign (multi-level XP award),
   // update the choice's from_level instead of clearing it.
@@ -240,6 +259,22 @@ export async function POST(
     }
   } else {
     delete nextPending.levelup_class_pick
+  }
+  // Queue an ASI/feat choice if this level granted one. The sheet shows the
+  // ASI picker (priority) before any remaining class pick.
+  if (asiDelta > 0) {
+    nextPending.levelup_asi = {
+      class: asiClassKey,
+      at_total_level: targetTotalLevel,
+      count: asiDelta,
+    }
+  }
+
+  // Subclass selection at level 3 (2024 rules) if not yet chosen for this slot.
+  if (pickClass === 'primary' && primaryLevel + 1 === 3 && !char.subclass) {
+    nextPending.levelup_subclass = { class: primaryClassKey, slot: 'primary', at_total_level: targetTotalLevel }
+  } else if (pickClass === 'secondary' && secondaryLevel + 1 === 3 && !char.secondary_subclass) {
+    nextPending.levelup_subclass = { class: String(secondaryClassKey), slot: 'secondary', at_total_level: targetTotalLevel }
   }
   patch.action_state = {
     ...actionState,
