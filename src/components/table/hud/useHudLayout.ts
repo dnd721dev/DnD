@@ -122,7 +122,11 @@ export function useHudLayout(wallet: string | null, role: HudRole): UseHudLayout
   }, [layout, wallet, role])
 
   const setDockedHeight = useCallback((h: number) => {
-    setLayout((p) => ({ ...p, dockedHeight: Math.min(Math.max(120, Math.round(h)), 900) }))
+    // Cap to the viewport (leaving a little room at the top) so the bottom sheet
+    // can be pulled nearly full-screen on phones without running off the top.
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 900
+    const maxH = Math.min(900, Math.max(200, vh - 56))
+    setLayout((p) => ({ ...p, dockedHeight: Math.min(Math.max(120, Math.round(h)), maxH) }))
   }, [])
   const setFloatingRect = useCallback((r: HudRect) => {
     setLayout((p) => ({ ...p, floatingRect: clampRectToViewport(r) }))

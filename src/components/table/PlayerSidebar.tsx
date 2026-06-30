@@ -1084,8 +1084,8 @@ export function PlayerSidebar({
     })()}
 
     <aside className={chromeless
-      ? 'flex h-full flex-col text-xs'
-      : 'pointer-events-auto flex flex-col rounded-t-xl border border-b-0 border-yellow-800/40 bg-slate-950/90 backdrop-blur-md text-xs'}>
+      ? 'dnd721-player-panel flex h-full flex-col text-xs'
+      : 'dnd721-player-panel pointer-events-auto flex flex-col rounded-t-xl border border-b-0 border-yellow-800/40 bg-slate-950/90 backdrop-blur-md text-xs'}>
 
       {/* Session status banner */}
       {sessionStatus && (() => {

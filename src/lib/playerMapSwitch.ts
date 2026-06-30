@@ -1,10 +1,16 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+// Token x/y are stored in PIXEL space (a token on tile T sits at its center,
+// T*GRID_SIZE + GRID_SIZE/2), matching the MapBoard/MapBoardView renderer which
+// uses gridSize=50. Landing positions come in as TILE indices, so convert.
+const GRID_SIZE = 50
+const tileToPixel = (tile: number) => tile * GRID_SIZE + GRID_SIZE / 2
+
 /**
  * Move one player onto a different map within a session.
  *  1. Sets session_players.current_map_id (the per-player "current map" override).
  *  2. Moves that player's PC token(s) onto the new map (so they actually appear
- *     on it), optionally to a specific landing tile.
+ *     on it), optionally to a specific landing TILE (x/y are tile indices).
  *
  * Used by both the GM "Party Maps" assignment route and the portal auto-switch.
  * Caller is responsible for auth.
@@ -33,8 +39,9 @@ export async function switchPlayerMap(
 
   if (encIds.length > 0) {
     const patch: Record<string, unknown> = { map_id: params.mapId }
-    if (typeof params.x === 'number') patch.x = params.x
-    if (typeof params.y === 'number') patch.y = params.y
+    // x/y arrive as TILE indices; tokens are stored at the tile's pixel center.
+    if (typeof params.x === 'number') patch.x = tileToPixel(params.x)
+    if (typeof params.y === 'number') patch.y = tileToPixel(params.y)
     const { error: tokErr } = await db
       .from('tokens')
       .update(patch)

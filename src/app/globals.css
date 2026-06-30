@@ -13,3 +13,12 @@ body.map-fullscreen nav {
 body.map-fullscreen main {
   padding: 0 !important;
 }
+/* ── Mobile readability: enlarge the tiny text tiers inside the player ───── */
+/* panel so the on-table character sheet is legible on phones. Scoped to the  */
+/* panel + small screens so desktop and other surfaces are unaffected.        */
+@media (max-width: 640px) {
+  .dnd721-player-panel { font-size: 0.875rem; }
+  .dnd721-player-panel [class*="text-[10px]"] { font-size: 0.75rem !important;  line-height: 1rem !important; }
+  .dnd721-player-panel [class*="text-[11px]"] { font-size: 0.8125rem !important; line-height: 1.1rem !important; }
+  .dnd721-player-panel [class*="text-xs"]     { font-size: 0.8125rem !important; line-height: 1.15rem !important; }
+}

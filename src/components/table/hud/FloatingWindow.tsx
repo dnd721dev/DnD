@@ -229,17 +229,20 @@ export function FloatingWindow({
           ? { left: floatingRect.x, top: floatingRect.y, width: floatingRect.w, height: collapsed ? undefined : floatingRect.h }
           : undefined}
       >
-        {/* Dock resize handle slot — null when floating/mobile/collapsed */}
-        {!floating && !isMobile && !collapsed ? (
+        {/* Dock resize handle slot — null when floating/collapsed. Shown on
+            mobile too (touchAction:none makes the drag work for touch) so the
+            bottom sheet can be pulled up; the grip is taller on mobile for an
+            easier touch target. */}
+        {!floating && !collapsed ? (
           <div
             onPointerDown={onDockHandleDown}
             onPointerMove={onDockHandleMove}
             onPointerUp={onDockHandleUp}
-            className="flex h-3 shrink-0 cursor-ns-resize items-center justify-center"
+            className={`flex shrink-0 cursor-ns-resize items-center justify-center ${isMobile ? 'h-6' : 'h-3'}`}
             style={{ touchAction: 'none' }}
             title="Drag to resize"
           >
-            <div className="h-1.5 w-12 rounded-full bg-slate-600 hover:bg-yellow-500/60" />
+            <div className={`rounded-full bg-slate-500 hover:bg-yellow-500/70 ${isMobile ? 'h-2 w-16' : 'h-1.5 w-12'}`} />
           </div>
         ) : null}
 
