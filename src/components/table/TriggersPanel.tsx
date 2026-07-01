@@ -306,6 +306,11 @@ export function TriggersPanel({
             sessionId,
             gmWallet,
             isActive:         triggers.find(t => t.id === editingId)?.is_active ?? true,
+            // Keep visibility in sync with type: portals are open doorways
+            // (visible), everything else is a hidden trap. Prevents a portal
+            // edited into a trap from staying visible to players. Per-player
+            // "spotted" state lives in revealed_to and is untouched by this.
+            isHidden:         form.triggerType !== 'portal',
             name:             form.name.trim(),
             saveType:         form.saveType,
             dc:               form.dc,

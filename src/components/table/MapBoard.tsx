@@ -114,6 +114,10 @@ const MapBoard: React.FC<MapBoardProps> = ({
   const [isPanning, setIsPanning] = useState(false);
   const panStartRef = useRef<Point | null>(null);
   const panTranslateStartRef = useRef<Point | null>(null);
+  // Trigger / portal-endpoint placement is deferred to pointer-up so a drag can
+  // pan the map (to bring an off-screen target tile into view) while a tap
+  // still places. Holds the mode + press point until release decides tap vs pan.
+  const pendingPlaceRef = useRef<{ mode: 'trigger' | 'endpoint'; screen: Point } | null>(null);
 
   // Measurement tool
   const [rulerActive, setRulerActive] = useState(false);
@@ -327,8 +331,8 @@ const MapBoard: React.FC<MapBoardProps> = ({
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (fogToolActive) { setFogToolActive(false); isFogPaintingRef.current = false; }
-        if (triggerMode) { setTriggerMode(false); setHoveredTile(null); }
-        if (endpointMode) { setEndpointMode(false); setHoveredTile(null); window.dispatchEvent(new CustomEvent('dnd721-portal-endpoint-cancel')); }
+        if (triggerMode) { setTriggerMode(false); setHoveredTile(null); pendingPlaceRef.current = null; }
+        if (endpointMode) { setEndpointMode(false); setHoveredTile(null); pendingPlaceRef.current = null; window.dispatchEvent(new CustomEvent('dnd721-portal-endpoint-cancel')); }
         if (placementPending) { setPlacementPending(null); setGhostPos(null); }
         if (rulerActive) { setRulerActive(false); setMeasureStart(null); setMeasureEnd(null); setMeasureFrozen(false); }
       }
@@ -924,30 +928,15 @@ const MapBoard: React.FC<MapBoardProps> = ({
     // Skip non-primary pointer buttons on mouse (right-click, middle-click)
     if (e.button !== 0) return;
 
-    // Trigger placement mode — click/tap a tile to place or edit a trigger
-    if (triggerMode) {
-      const world = getWorldPoint(e);
-      const tileX = Math.floor(world.x / gridSize);
-      const tileY = Math.floor(world.y / gridSize);
-      const existing = mapTriggers.find((t) => t.tile_x === tileX && t.tile_y === tileY);
-      if (existing) {
-        window.dispatchEvent(new CustomEvent('dnd721-trigger-edit', { detail: { trigger: existing } }));
-      } else {
-        window.dispatchEvent(new CustomEvent('dnd721-trigger-tile-selected', { detail: { tileX, tileY } }));
-      }
-      setTriggerMode(false);
-      setHoveredTile(null);
-      return;
-    }
-
-    // Portal endpoint-pick mode — click/tap a tile to report the landing point
-    if (endpointMode) {
-      const world = getWorldPoint(e);
-      const tileX = Math.floor(world.x / gridSize);
-      const tileY = Math.floor(world.y / gridSize);
-      window.dispatchEvent(new CustomEvent('dnd721-portal-endpoint-picked', { detail: { tileX, tileY } }));
-      setEndpointMode(false);
-      setHoveredTile(null);
+    // Trigger placement & portal endpoint-pick modes — defer the actual placement
+    // to pointer-up so a DRAG pans the map (letting the GM bring an off-screen
+    // target tile into view) while a TAP places / edits. See onUp.
+    if (triggerMode || endpointMode) {
+      const screen = getScreenPoint(e);
+      pendingPlaceRef.current = { mode: triggerMode ? 'trigger' : 'endpoint', screen };
+      panStartRef.current = screen;
+      panTranslateStartRef.current = { ...translate };
+      setIsPanning(true);
       return;
     }
 
@@ -984,30 +973,75 @@ const MapBoard: React.FC<MapBoardProps> = ({
       const tokenType = payload.type ?? 'pc';
       const isMonsterPlacement = tokenType === 'monster';
 
-      const insertPayload: Record<string, unknown> = {
-        encounter_id:    encounterId,
-        type:            tokenType,
-        label:           payload.label,
-        x,
-        y,
-        owner_wallet:    payload.ownerWallet,
-        hp:              payload.hp,
-        current_hp:      payload.hp,
-        ac:              payload.ac,
-        map_id:          mapId ?? null,
-        character_id:    payload.characterId    ?? null,
-        token_image_url: payload.tokenImageUrl  ?? null,
-      };
-      if (isMonsterPlacement) {
-        insertPayload.name = payload.label;
-        insertPayload.monster_id = payload.monster_id ?? null;
-        if (payload.homebrew_monster_id) {
-          insertPayload.homebrew_monster_id = payload.homebrew_monster_id;
+      // Auto-name duplicate monsters "<Name> A/B/C…" so spell/attack targeting can
+      // tell them apart when the GM doesn't rename them. The first of a kind stays
+      // unsuffixed; when a second is placed, the first becomes "<Name> A" and the
+      // new one "<Name> B" (then C, D, …).
+      const resolveMonsterLabel = async (base: string): Promise<{ label: string; renameId?: string; renameTo?: string }> => {
+        const { data: rows } = await supabase
+          .from('tokens')
+          .select('id,label')
+          .eq('encounter_id', encounterId)
+          .eq('type', 'monster');
+        const list = rows ?? [];
+        const baseLc = base.toLowerCase();
+        const letterRe = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} ([A-Z])$`, 'i');
+        const bare = list.find((r: any) => String(r.label ?? '').toLowerCase() === baseLc) ?? null;
+        const used = new Set<string>();
+        for (const r of list) {
+          const m = String((r as any).label ?? '').match(letterRe);
+          if (m) used.add(m[1].toUpperCase());
         }
-      }
+        const nextLetter = () => {
+          for (let i = 0; i < 26; i++) { const L = String.fromCharCode(65 + i); if (!used.has(L)) return L; }
+          return '+';
+        };
+        if (!bare && used.size === 0) return { label: base };
+        let renameId: string | undefined; let renameTo: string | undefined;
+        if (bare) { const a = nextLetter(); used.add(a); renameId = (bare as any).id; renameTo = `${base} ${a}`; }
+        const b = nextLetter(); used.add(b);
+        return { label: `${base} ${b}`, renameId, renameTo };
+      };
 
-      supabase.from('tokens').insert(insertPayload).select('id').then(async ({ data: insertedRows, error }) => {
+      void (async () => {
+        let finalLabel = payload.label;
+        let renameId: string | undefined; let renameTo: string | undefined;
+        if (isMonsterPlacement) {
+          const r = await resolveMonsterLabel(payload.label);
+          finalLabel = r.label; renameId = r.renameId; renameTo = r.renameTo;
+        }
+
+        const insertPayload: Record<string, unknown> = {
+          encounter_id:    encounterId,
+          type:            tokenType,
+          label:           finalLabel,
+          x,
+          y,
+          owner_wallet:    payload.ownerWallet,
+          hp:              payload.hp,
+          current_hp:      payload.hp,
+          ac:              payload.ac,
+          map_id:          mapId ?? null,
+          character_id:    payload.characterId    ?? null,
+          token_image_url: payload.tokenImageUrl  ?? null,
+        };
+        if (isMonsterPlacement) {
+          insertPayload.name = finalLabel;
+          insertPayload.monster_id = payload.monster_id ?? null;
+          if (payload.homebrew_monster_id) {
+            insertPayload.homebrew_monster_id = payload.homebrew_monster_id;
+          }
+        }
+
+        const { data: insertedRows, error } = await supabase.from('tokens').insert(insertPayload).select('id');
         if (error) { console.error('Failed to place token', error); return; }
+
+        // Retroactively letter the first-placed monster of this kind (+ its
+        // initiative entry) so the set reads A, B, C…
+        if (renameId && renameTo) {
+          await supabase.from('tokens').update({ label: renameTo, name: renameTo }).eq('id', renameId);
+          await supabase.from('initiative_entries').update({ name: renameTo }).eq('token_id', renameId);
+        }
 
         // Prefer the id returned by INSERT to avoid a races with realtime;
         // fall back to a SELECT match for legacy callers.
@@ -1017,7 +1051,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
             .from('tokens')
             .select('id')
             .eq('encounter_id', encounterId)
-            .eq('label', payload.label)
+            .eq('label', finalLabel)
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle();
@@ -1033,7 +1067,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
             const { error: initErr } = await supabase.from('initiative_entries').insert({
               encounter_id:   encounterId,
               map_id:         mapId ?? null,
-              name:           payload.label,
+              name:           finalLabel,
               init:           initVal,
               hp:             payload.hp,
               is_pc:          false,
@@ -1090,7 +1124,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
         // Realtime subscription in MapBoardView will pick up the new token and
         // trigger revealAround automatically — no window event needed.
         window.dispatchEvent(new CustomEvent('dnd721-tokens-updated', { detail: { source: 'gm-place' } }));
-      });
+      })();
       return;
     }
 
@@ -1136,11 +1170,12 @@ const MapBoard: React.FC<MapBoardProps> = ({
       return;
     }
 
-    // In trigger / endpoint mode, track which tile the cursor is over for the highlight overlay
+    // In trigger / endpoint mode, track which tile the cursor is over for the
+    // highlight overlay. Don't return — fall through so a press-drag still pans
+    // the map (the pan block below runs when isPanning is set).
     if (triggerMode || endpointMode) {
       const world = getWorldPoint(e);
       setHoveredTile({ x: Math.floor(world.x / gridSize), y: Math.floor(world.y / gridSize) });
-      return;
     }
 
     if (fogToolActive && isFogPaintingRef.current) {
@@ -1177,6 +1212,36 @@ const MapBoard: React.FC<MapBoardProps> = ({
   const onUp = async (e: React.PointerEvent) => {
     activePointersRef.current.delete(e.pointerId);
     if (activePointersRef.current.size < 2) pinchStartDistRef.current = null;
+
+    // Trigger / portal-endpoint placement: a tap places, a drag was a pan.
+    if (pendingPlaceRef.current) {
+      const pending = pendingPlaceRef.current;
+      pendingPlaceRef.current = null;
+      setIsPanning(false);
+      const up = getScreenPoint(e);
+      const moved = Math.hypot(up.x - pending.screen.x, up.y - pending.screen.y);
+      if (moved <= 6) {
+        // A tap (not a pan) → place at the tapped tile.
+        const world = getWorldPoint(e);
+        const tileX = Math.floor(world.x / gridSize);
+        const tileY = Math.floor(world.y / gridSize);
+        if (pending.mode === 'trigger') {
+          const existing = mapTriggers.find((t) => t.tile_x === tileX && t.tile_y === tileY);
+          if (existing) {
+            window.dispatchEvent(new CustomEvent('dnd721-trigger-edit', { detail: { trigger: existing } }));
+          } else {
+            window.dispatchEvent(new CustomEvent('dnd721-trigger-tile-selected', { detail: { tileX, tileY } }));
+          }
+          setTriggerMode(false);
+        } else {
+          window.dispatchEvent(new CustomEvent('dnd721-portal-endpoint-picked', { detail: { tileX, tileY } }));
+          setEndpointMode(false);
+        }
+        setHoveredTile(null);
+      }
+      return;
+    }
+
     if (fogToolActive) { isFogPaintingRef.current = false; return; }
     if (rulerActive && measureStart && measureEnd) {
       setMeasureFrozen(true);
@@ -1474,7 +1539,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
       {/* Portal endpoint-pick banner */}
       {endpointMode && (
         <div className="pointer-events-auto absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-indigo-500/60 bg-slate-950/90 px-3 py-1.5 text-xs text-indigo-200 shadow-lg">
-          <span>📍 Tap a tile to set the portal&apos;s landing point</span>
+          <span>📍 Tap a tile to set the landing point · drag to pan · scroll to zoom</span>
           <button
             type="button"
             onClick={() => { setEndpointMode(false); setHoveredTile(null); window.dispatchEvent(new CustomEvent('dnd721-portal-endpoint-cancel')); }}
@@ -1488,7 +1553,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
       {/* Trigger placement mode banner */}
       {triggerMode && (
         <div className="pointer-events-auto absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-orange-600/60 bg-slate-950/90 px-3 py-1.5 text-xs text-orange-200 shadow-lg">
-          <span>☠ Tap a tile to place a trigger</span>
+          <span>☠ Tap a tile to place a trigger · drag to pan · scroll to zoom</span>
           <button
             type="button"
             onClick={() => { setTriggerMode(false); setHoveredTile(null); }}

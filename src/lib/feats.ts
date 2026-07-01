@@ -382,3 +382,20 @@ export const FEAT_ABILITY_BONUS: Record<string, { amount: number; abilities: Abi
 export function getFeatAbilityBonus(key: string) {
   return FEAT_ABILITY_BONUS[key]
 }
+
+// ── Feats that grant extra spells known ───────────────────────────────────────
+// Magic Initiate (and its class variants): learn 2 cantrips + 1 first-level spell
+// from the chosen class. Spell Sniper: learn 1 attack-roll cantrip. These raise
+// the cantrip / leveled "known" caps so the player can actually add the spells.
+const MAGIC_INITIATE_KEYS = ['magicInitiate', 'magicInitiateCleric', 'magicInitiateWizard', 'magicInitiateDruid']
+
+export function getFeatSpellBonus(feats: string[] | null | undefined): { cantrips: number; leveled: number } {
+  const owned = new Set((feats ?? []).map((f) => String(f)))
+  let cantrips = 0
+  let leveled = 0
+  for (const k of MAGIC_INITIATE_KEYS) {
+    if (owned.has(k)) { cantrips += 2; leveled += 1 }
+  }
+  if (owned.has('spellSniper')) cantrips += 1
+  return { cantrips, leveled }
+}

@@ -831,6 +831,15 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     // Draw traps this player can see (spotted via Perception, or GM-revealed).
     // Only show on tiles the player has uncovered (fog-gated like tokens).
     playerTriggers.forEach((trig: any) => {
+      // Defense-in-depth: never draw a hidden trap the API shouldn't have sent.
+      // Players only ever see portals (open doorways), triggers explicitly marked
+      // visible, or hidden traps they personally spotted / were revealed to.
+      const isPortal = trig.trigger_type === 'portal'
+      const revealedToMe = Array.isArray(trig.revealed_to)
+        && ownerLower
+        && trig.revealed_to.map((w: string) => String(w).toLowerCase()).includes(ownerLower)
+      if (trig.is_hidden && !isPortal && !revealedToMe) return
+
       const tx = Number(trig.tile_x ?? 0)
       const ty = Number(trig.tile_y ?? 0)
       if (!revealSet.has(keyTile(tx, ty))) return
@@ -850,7 +859,6 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
         ctx.restore()
       }
       // Marker — portals are a 🚪 doorway, traps a red "!".
-      const isPortal = trig.trigger_type === 'portal'
       const iconR = Math.max(6, gridSize * 0.16)
       ctx.save()
       ctx.beginPath()

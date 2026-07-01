@@ -6,6 +6,7 @@ import { SRD_SPELLS, type SrdSpell, isConcentration, isRitual, getCantripDice, f
 import { formatMod } from './utils'
 import { supabase } from '@/lib/supabase'
 import { getPreparedSpellCount } from '@/lib/classes'
+import { getFeatSpellBonus } from '@/lib/feats'
 import {
   getDomainSpells,
   getMaxLeveledSpellsKnown,
@@ -413,8 +414,9 @@ export function SpellsPanel({
   // removal — that's the player's call after rebalancing their build).
   const maxLeveledKnown = useMemo(() => {
     const cls = String(c.main_job ?? '').toLowerCase()
-    return getMaxLeveledSpellsKnown(cls, Number(c.level ?? 1))
-  }, [c.main_job, c.level])
+    // Magic Initiate adds a 1st-level spell on top of the class allowance.
+    return (getMaxLeveledSpellsKnown(cls, Number(c.level ?? 1)) ?? 0) + getFeatSpellBonus(c.feats).leveled
+  }, [c.main_job, c.level, c.feats])
 
   // Current leveled-spell count from spells_known (cantrips excluded).
   const currentLeveledKnown = useMemo(() => {
@@ -426,8 +428,9 @@ export function SpellsPanel({
 
   const maxCantrips = useMemo(() => {
     const cls = String(c.main_job ?? '').toLowerCase() as any
-    return getCantripsKnown(cls, Number(c.level ?? 1))
-  }, [c.main_job, c.level])
+    // Magic Initiate (+2) / Spell Sniper (+1) grant extra cantrips beyond the class allowance.
+    return getCantripsKnown(cls, Number(c.level ?? 1)) + getFeatSpellBonus(c.feats).cantrips
+  }, [c.main_job, c.level, c.feats])
 
   const currentCantrips = useMemo(() => {
     return knownList.filter(name => {
