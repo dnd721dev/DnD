@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { xpToLevel } from '@/lib/dnd5e'
-import { buildLevelUpPatch, MAX_XP_PER_AWARD } from '@/lib/levelUpRefresh'
+import { MAX_XP_PER_AWARD } from '@/lib/levelUpRefresh'
 
 /** POST /api/sessions/award-xp-mid
  *  Awards XP to all CAYA characters assigned to an **active** session.
@@ -112,9 +112,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No CAYA characters found for session players' }, { status: 400 })
   }
 
-  // Award XP — and if the character crosses a level threshold, also apply
-  // the level-up patch (spell slots, save DC, attack bonus, HP recalc,
-  // domain spells). Same helper as award-xp uses at end-of-session.
+  // Bank XP only — never auto-level. Crossing a threshold makes the gold
+  // "Click to Level Up" bar appear on the player's sheet, which runs the
+  // manual class-pick → ASI/subclass → HP flow (take-class-level). Auto-leveling
+  // here skipped that flow entirely, so we only advance XP.
   const levelUps: { characterId: string; oldLevel: number; newLevel: number }[] = []
   const updates = await Promise.all(
     characters.map((char: any) => {
@@ -122,13 +123,8 @@ export async function POST(req: NextRequest) {
       const newXp = oldXp + xp_amount
       const oldLevel = Number(char.level ?? 1)
       const newLevel = xpToLevel(newXp)
-
-      const patch: Record<string, any> = { experience_points: newXp }
-      if (newLevel > oldLevel) {
-        Object.assign(patch, buildLevelUpPatch(char, newLevel))
-        levelUps.push({ characterId: char.id, oldLevel, newLevel })
-      }
-      return db.from('characters').update(patch).eq('id', char.id)
+      if (newLevel > oldLevel) levelUps.push({ characterId: char.id, oldLevel, newLevel })
+      return db.from('characters').update({ experience_points: newXp }).eq('id', char.id)
     }),
   )
 

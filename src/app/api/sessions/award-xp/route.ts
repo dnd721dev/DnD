@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { xpToLevel } from '@/lib/dnd5e'
-import {
-  canMulticlassInto,
-  MULTICLASS_PREREQS,
-} from '@/lib/spellcastingProgression'
-import { buildLevelUpPatch, MAX_XP_PER_AWARD } from '@/lib/levelUpRefresh'
+import { MAX_XP_PER_AWARD } from '@/lib/levelUpRefresh'
 
 /** POST /api/sessions/award-xp
  *  Awards XP equally to all CAYA participants in a completed CAYA session.
@@ -108,75 +104,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No CAYA characters found for participants' }, { status: 400 })
   }
 
-  // BUG-05 fix: Update each CAYA character's XP AND level up if threshold crossed.
-  //
-  // Magic audit section A: when a level-up occurs we must also recompute
-  // spell_slots / spell_save_dc / spell_attack_bonus, reset spent slots
-  // (matching a long rest), and union any newly-available domain/oath/circle
-  // spells into spells_prepared. Without this, a level-up leaves all spell
-  // mechanics stale until the player manually edits their sheet.
+  // Bank XP only — never auto-level. When a character crosses a level
+  // threshold the player applies it manually from the gold "Click to Level Up"
+  // bar on their sheet, which runs the class-pick → ASI/subclass → HP flow via
+  // POST /api/characters/[id]/take-class-level. Auto-leveling here skipped that
+  // flow entirely (the bar never appeared), so we only advance XP.
   const levelUps: { characterId: string; oldLevel: number; newLevel: number }[] = []
 
   const updates = await Promise.all(
-    characters.map(async (char: any) => {
+    characters.map((char: any) => {
       const oldXp = char.experience_points ?? 0
       const newXp = oldXp + xp_amount
       const oldLevel = char.level ?? 1
       const newLevel = xpToLevel(newXp)
-
-      const patch: Record<string, any> = { experience_points: newXp }
-
-      if (newLevel > oldLevel) {
-        // Wave 6I: when the character already has a secondary class OR could
-        // multiclass into at least one new class (ability prereqs met), surface
-        // a pending choice instead of auto-leveling the primary class. A
-        // separate endpoint (POST /api/characters/[id]/take-class-level)
-        // commits the player's choice.
-        //
-        // Characters with NO multiclass options (e.g. low INT Wizard who can't
-        // qualify for anything else) still auto-level so they don't get stuck
-        // in a useless prompt.
-        const hasSecondaryClass = !!String(char.secondary_class ?? '').trim()
-        const primaryKey = String(char.main_job ?? '').toLowerCase()
-        const abilitiesForCheck = (char.abilities ?? {}) as Record<string, number>
-        const canMulticlassIntoAny = Object.keys(MULTICLASS_PREREQS).some(k => {
-          if (k === primaryKey) return false
-          if (hasSecondaryClass && k === String(char.secondary_class).toLowerCase()) return false
-          return canMulticlassInto(k as any, abilitiesForCheck as any, primaryKey as any).ok
-        })
-        const shouldPromptForClassPick = hasSecondaryClass || canMulticlassIntoAny
-
-        if (shouldPromptForClassPick) {
-          const actionState: Record<string, any> = char.action_state ?? {}
-          const prevPending: Record<string, any> = actionState.pending_choices ?? {}
-          patch.action_state = {
-            ...actionState,
-            pending_choices: {
-              ...prevPending,
-              levelup_class_pick: {
-                from_level: oldLevel,
-                to_level: newLevel,
-                created_at: new Date().toISOString(),
-              },
-            },
-          }
-          levelUps.push({ characterId: char.id, oldLevel, newLevel })
-          // Do NOT advance level here — the sheet UI will call the take-class-level
-          // endpoint which decides which class gets the level(s).
-          return db.from('characters').update(patch).eq('id', char.id)
-        }
-
-        // Audit Wave 2C: spell slots, save DC, attack bonus, HP recalc and
-        // subclass-spell unions are computed by the shared helper so that
-        // award-xp-mid produces an identical result when it level-ups.
-        const levelUpPatch = buildLevelUpPatch(char, newLevel)
-        Object.assign(patch, levelUpPatch)
-        levelUps.push({ characterId: char.id, oldLevel, newLevel })
-      }
-
+      if (newLevel > oldLevel) levelUps.push({ characterId: char.id, oldLevel, newLevel })
       return db
         .from('characters')
-        .update(patch)
+        .update({ experience_points: newXp })
         .eq('id', char.id)
     })
   )
