@@ -34,6 +34,7 @@ type SessionRow = {
   // src/app/api/sessions/award-xp/route.ts. Earlier typo caused
   // "column sessions.xp_awarded does not exist" and 500'd the whole dashboard.
   xp_award: number | null
+  current_map_id: string | null
 }
 
 type SessionPlayerRow = {
@@ -93,6 +94,7 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
   const [sessionType, setSessionType] = useState<'set_level' | 'caya' | null>(null)
   const [xpAwardedAlready, setXpAwardedAlready] = useState<number | null>(null)
   const [encounterId, setEncounterId] = useState<string | null>(null)
+  const [currentMapId, setCurrentMapId] = useState<string | null>(null)
   const [players, setPlayers] = useState<SessionPlayerRow[]>([])
   const [tokensByChar, setTokensByChar] = useState<Record<string, TokenRow>>({})
   const [activeTab, setActiveTab] = useState<DashboardTab>('notes')
@@ -115,7 +117,7 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
       // Session + GM gate
       const { data: session, error: sessErr } = await supabase
         .from('sessions')
-        .select('title, gm_wallet, status, session_type, xp_award')
+        .select('title, gm_wallet, status, session_type, xp_award, current_map_id')
         .eq('id', sessionId)
         .maybeSingle<SessionRow>()
       if (sessErr) throw sessErr
@@ -124,6 +126,7 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
       setSessionStatus(session.status ?? null)
       setSessionType(session.session_type ?? null)
       setXpAwardedAlready(session.xp_award ?? null)
+      setCurrentMapId(session.current_map_id ?? null)
       const gm = (session.gm_wallet ?? '').toLowerCase() === wallet
       setIsGm(gm)
       if (!gm) { setLoading(false); return }
@@ -178,6 +181,22 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
     }
     setTokensByChar(next)
   }, [])
+
+  // ── Realtime: session (current map changes) ────────────────────────────────
+  // Keep the Battle tab's combat scope in sync with the map the DM is viewing
+  // in the table window, so "+ Monsters from map" and the combat list track it.
+  useEffect(() => {
+    if (!isGm) return
+    const ch = supabase
+      .channel(`dm-dash-session-${sessionId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'sessions', filter: `id=eq.${sessionId}` },
+        (payload: any) => { setCurrentMapId(payload.new?.current_map_id ?? null) },
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [isGm, sessionId])
 
   // ── Realtime: session_players (join/leave) ──────────────────────────────────
   useEffect(() => {
@@ -502,7 +521,7 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
                   <InitiativeTracker
                     encounterId={encounterId}
                     sessionId={sessionId}
-                    currentMapId={null}
+                    currentMapId={currentMapId}
                     sessionStatus={(sessionStatus ?? null) as SessionStatus | null}
                   />
                 </div>

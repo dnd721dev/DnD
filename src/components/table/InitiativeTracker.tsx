@@ -617,6 +617,71 @@ export default function InitiativeTracker({ encounterId, sessionId, currentMapId
     }
   }
 
+  // Add the party's player characters to initiative (one-click). Links each to
+  // its wallet so that when the entry becomes the active turn, the encounter's
+  // active_wallet drives the "it's your turn" cue on that player's panel. Also
+  // links a live token (if placed on the current map) for HP display. Players
+  // roll their own initiative (init starts at 0 → "waiting…").
+  async function addPartyPcs() {
+    if (!encounterId || !sessionId) return;
+    setLoading(true);
+    try {
+      const { data: rows, error: spErr } = await supabase
+        .from('session_players')
+        .select('wallet_address, character_id, characters ( id, name, hit_points_max, hit_points_current )')
+        .eq('session_id', sessionId)
+        .eq('role', 'player');
+      if (spErr) { console.error('addPartyPcs load error', spErr); return; }
+
+      const roster = (rows ?? []) as any[];
+      if (roster.length === 0) return;
+
+      // Existing PC entries by character_id, so we don't double-add.
+      const existingCharIds = new Set(
+        (entries || []).map((e) => e.character_id).filter(Boolean).map(String)
+      );
+
+      // Find each PC's token on this encounter (prefer the current map) for HP + linkage.
+      const { data: toks } = await supabase
+        .from('tokens')
+        .select('id, character_id, current_hp, hp, map_id')
+        .eq('encounter_id', encounterId)
+        .eq('type', 'pc');
+      const tokenByChar: Record<string, any> = {};
+      for (const t of (toks ?? []) as any[]) {
+        if (!t.character_id) continue;
+        const prev = tokenByChar[t.character_id];
+        // Prefer a token on the current map if one exists.
+        if (!prev || (currentMapId && t.map_id === currentMapId)) tokenByChar[t.character_id] = t;
+      }
+
+      const inserts = roster
+        .map((r) => ({ wallet: r.wallet_address as string | null, c: r.characters as any }))
+        .filter((x) => x.c?.id && !existingCharIds.has(String(x.c.id)))
+        .map((x) => {
+          const tok = tokenByChar[x.c.id];
+          return {
+            encounter_id: encounterId,
+            map_id: currentMapId ?? null,
+            name: x.c.name ?? 'Player',
+            init: 0, // players roll their own initiative
+            hp: (tok?.current_hp ?? tok?.hp ?? x.c.hit_points_current ?? x.c.hit_points_max) ?? null,
+            is_pc: true,
+            character_id: x.c.id,
+            token_id: tok?.id ?? null,
+            wallet_address: x.wallet ?? null,
+          };
+        });
+
+      if (inserts.length === 0) return;
+
+      const { error: insErr } = await supabase.from('initiative_entries').insert(inserts);
+      if (insErr) console.error('addPartyPcs insert error', insErr);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function removeEntry(id: string) {
     // Clear active_conditions from character when removing a PC entry
     const entry = entries.find(e => e.id === id);
@@ -1206,15 +1271,26 @@ export default function InitiativeTracker({ encounterId, sessionId, currentMapId
       <div className="flex flex-col gap-2 border-t border-slate-800 pt-2">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[11px] text-slate-400">Add combatant</span>
-          <button
-            type="button"
-            onClick={syncMonsterTokens}
-            disabled={!encounterId || loading}
-            className="rounded bg-slate-900 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
-            title="Add any monster tokens already on the map into initiative"
-          >
-            + Monsters from map
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={addPartyPcs}
+              disabled={!encounterId || !sessionId || loading}
+              className="rounded bg-emerald-950/60 px-2 py-1 text-[11px] text-emerald-200 ring-1 ring-emerald-800/50 hover:bg-emerald-900/60 disabled:opacity-40"
+              title="Add the party's player characters to initiative"
+            >
+              + Players
+            </button>
+            <button
+              type="button"
+              onClick={syncMonsterTokens}
+              disabled={!encounterId || loading}
+              className="rounded bg-slate-900 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800 disabled:opacity-40"
+              title="Add any monster tokens on the current map into initiative"
+            >
+              + Monsters from map
+            </button>
+          </div>
         </div>
         <form onSubmit={addEntry} className="flex flex-col gap-1.5">
           <div className="flex gap-1.5">
