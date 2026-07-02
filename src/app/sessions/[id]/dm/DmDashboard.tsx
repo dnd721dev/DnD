@@ -269,8 +269,14 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
       .map((p) => {
         const c = p.characters!
         const tok = tokensByChar[c.id]
-        const liveHp = tok?.current_hp ?? c.hit_points_current ?? c.hit_points_max ?? 0
-        const liveMax = tok?.hp ?? c.hit_points_max ?? 0
+        // Max HP is authoritative on the character (recomputed on level-up); a
+        // token's `hp` can lag behind after a level-up, so prefer the character.
+        // Current HP stays token-aware so live combat damage shows immediately.
+        const liveMax = c.hit_points_max ?? tok?.hp ?? 0
+        const liveHp = Math.min(
+          liveMax || Infinity,
+          tok?.current_hp ?? c.hit_points_current ?? c.hit_points_max ?? 0,
+        )
         const liveAc = tok?.ac ?? c.ac ?? 10
         const actions = (c.action_state ?? {}) as Record<string, any>
         const conds = Array.isArray(actions.active_conditions) ? (actions.active_conditions as string[]) : []

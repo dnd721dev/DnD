@@ -291,6 +291,33 @@ export async function POST(
     return NextResponse.json({ error: updateErr.message ?? 'Failed to apply level' }, { status: 500 })
   }
 
+  // ── Propagate the new HP to any linked combat token(s) ──────────────────────
+  // PC party cards and the map show the TOKEN's hp/current_hp when a token
+  // exists for the character. Without this the token keeps its pre-level-up
+  // (e.g. level-1) HP and the dashboard shows stale max HP after leveling.
+  if (patch.hit_points_max != null) {
+    try {
+      const newMaxHp = Number(patch.hit_points_max)
+      const { data: toks } = await db
+        .from('tokens')
+        .select('id, hp, current_hp')
+        .eq('character_id', characterId)
+      for (const tk of toks ?? []) {
+        const tokDelta = Math.max(0, newMaxHp - Number((tk as any).hp ?? 0))
+        const tokCur = Number((tk as any).current_hp ?? (tk as any).hp ?? newMaxHp)
+        await db
+          .from('tokens')
+          .update({
+            hp: newMaxHp,
+            current_hp: Math.max(0, Math.min(newMaxHp, tokCur + tokDelta)),
+          })
+          .eq('id', (tk as any).id)
+      }
+    } catch (e) {
+      console.error('take-class-level token HP sync error', e)
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     classes: newEntries.map(e => ({ classKey: e.classKey, level: e.level, subclassKey: e.subclassKey })),
