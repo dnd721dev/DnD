@@ -636,22 +636,40 @@ export default function InitiativeTracker({ encounterId, sessionId, currentMapId
     if (!encounterId || !sessionId) return;
     setLoading(true);
     try {
-      const { data: rows, error: spErr } = await supabase
+      // 1) Roster: player rows for this session (wallet + character_id). No
+      //    embed — a joined `characters(...)` can come back as an array in some
+      //    query contexts, which silently drops everyone. Fetch chars separately.
+      const { data: spRows, error: spErr } = await supabase
         .from('session_players')
-        .select('wallet_address, character_id, characters ( id, name, hit_points_max, hit_points_current )')
+        .select('wallet_address, character_id')
         .eq('session_id', sessionId)
         .eq('role', 'player');
-      if (spErr) { console.error('addPartyPcs load error', spErr); return; }
+      if (spErr) { console.error('addPartyPcs roster error', spErr); alert(`Could not load party: ${spErr.message}`); return; }
 
-      const roster = (rows ?? []) as any[];
-      if (roster.length === 0) return;
+      const roster = (spRows ?? []).filter((r: any) => r.character_id) as any[];
+      if (roster.length === 0) { alert('No players with characters found in this session.'); return; }
 
-      // Existing PC entries by character_id, so we don't double-add.
+      // Skip PCs already in initiative.
       const existingCharIds = new Set(
         (entries || []).map((e) => e.character_id).filter(Boolean).map(String)
       );
+      const walletByChar: Record<string, string | null> = {};
+      const charIds: string[] = [];
+      for (const r of roster) {
+        const cid = String(r.character_id);
+        walletByChar[cid] = r.wallet_address ?? null;
+        if (!existingCharIds.has(cid)) charIds.push(cid);
+      }
+      if (charIds.length === 0) { alert('All party members are already in the combat order.'); return; }
 
-      // Find each PC's token on this encounter (prefer the current map) for HP + linkage.
+      // 2) Character HP + names for the ones we still need to add.
+      const { data: chars, error: chErr } = await supabase
+        .from('characters')
+        .select('id, name, hit_points_max, hit_points_current')
+        .in('id', charIds);
+      if (chErr) { console.error('addPartyPcs characters error', chErr); alert(`Could not load characters: ${chErr.message}`); return; }
+
+      // 3) Link a live PC token (prefer current map) for HP display.
       const { data: toks } = await supabase
         .from('tokens')
         .select('id, character_id, current_hp, hp, map_id')
@@ -661,32 +679,28 @@ export default function InitiativeTracker({ encounterId, sessionId, currentMapId
       for (const t of (toks ?? []) as any[]) {
         if (!t.character_id) continue;
         const prev = tokenByChar[t.character_id];
-        // Prefer a token on the current map if one exists.
         if (!prev || (currentMapId && t.map_id === currentMapId)) tokenByChar[t.character_id] = t;
       }
 
-      const inserts = roster
-        .map((r) => ({ wallet: r.wallet_address as string | null, c: r.characters as any }))
-        .filter((x) => x.c?.id && !existingCharIds.has(String(x.c.id)))
-        .map((x) => {
-          const tok = tokenByChar[x.c.id];
-          return {
-            encounter_id: encounterId,
-            map_id: currentMapId ?? null,
-            name: x.c.name ?? 'Player',
-            init: 0, // players roll their own initiative
-            hp: (tok?.current_hp ?? tok?.hp ?? x.c.hit_points_current ?? x.c.hit_points_max) ?? null,
-            is_pc: true,
-            character_id: x.c.id,
-            token_id: tok?.id ?? null,
-            wallet_address: x.wallet ?? null,
-          };
-        });
+      const inserts = (chars ?? []).map((c: any) => {
+        const tok = tokenByChar[c.id];
+        return {
+          encounter_id: encounterId,
+          map_id: currentMapId ?? null,
+          name: c.name ?? 'Player',
+          init: 0, // players roll their own initiative
+          hp: (tok?.current_hp ?? tok?.hp ?? c.hit_points_current ?? c.hit_points_max) ?? null,
+          is_pc: true,
+          character_id: c.id,
+          token_id: tok?.id ?? null,
+          wallet_address: walletByChar[String(c.id)] ?? null,
+        };
+      });
 
-      if (inserts.length === 0) return;
+      if (inserts.length === 0) { alert('No new party members to add.'); return; }
 
       const { error: insErr } = await supabase.from('initiative_entries').insert(inserts);
-      if (insErr) console.error('addPartyPcs insert error', insErr);
+      if (insErr) { console.error('addPartyPcs insert error', insErr); alert(`Could not add players: ${insErr.message}`); }
     } finally {
       setLoading(false);
     }
@@ -1000,7 +1014,10 @@ export default function InitiativeTracker({ encounterId, sessionId, currentMapId
                 <div className="flex min-w-0 items-center gap-1">
                   <span className="shrink-0 cursor-grab text-[10px] text-slate-600 active:cursor-grabbing" title="Drag to reorder">⠿</span>
                   <div className="flex min-w-0 flex-col">
-                    <span className={`truncate text-[11px] font-semibold ${e.is_pc ? 'text-emerald-200' : 'text-slate-100'}`}>
+                    <span
+                      title={e.name}
+                      className={`text-xs font-semibold leading-tight break-words ${e.is_pc ? 'text-emerald-200' : 'text-slate-100'}`}
+                    >
                       {idx + 1}. {e.name}
                     </span>
                     {/* Init: inline GM manual override. Unrolled PCs show "waiting". */}
