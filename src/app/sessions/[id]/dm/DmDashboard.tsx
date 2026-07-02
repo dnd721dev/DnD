@@ -318,9 +318,16 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
     }))
     const tok = tokensByChar[characterId]
     if (card.hasLiveToken && tok?.id) {
+      // The token's max HP can lag behind the character's after a level-up.
+      // apply_combat_damage clamps healing to the token's max, so a stale token
+      // silently caps the heal (and syncs the character back down). Bump the
+      // token's max to the authoritative character max first so heals land.
+      if (Number(tok.hp ?? 0) < card.hpMax) {
+        await supabase.from('tokens').update({ hp: card.hpMax }).eq('id', tok.id)
+      }
       setTokensByChar((prev) => ({
         ...prev,
-        [characterId]: { ...(prev[characterId] ?? { id: tok.id, character_id: characterId, hp: card.hpMax, ac: card.ac }), current_hp: nextHp },
+        [characterId]: { ...(prev[characterId] ?? { id: tok.id, character_id: characterId, ac: card.ac }), hp: card.hpMax, current_hp: nextHp },
       }))
       // p_amount is damage (positive); a heal is a negative amount.
       const delta = nextHp - card.hpCurrent
