@@ -247,10 +247,12 @@ export default function InitiativeTracker({ encounterId, sessionId, currentMapId
         .from('initiative_entries')
         .select('*')
         .eq('encounter_id', encounterId);
-      // Scope to the current map. NULL map_id rows are legacy / not-yet-placed
-      // entries — show them on every map so nothing silently disappears.
+      // Scope monsters to the current map, but ALWAYS keep player characters
+      // visible — a PC whose token is on another map must never drop out of the
+      // combat order. NULL map_id rows are legacy / not-yet-placed and show
+      // everywhere too.
       if (currentMapId) {
-        query = query.or(`map_id.eq.${currentMapId},map_id.is.null`);
+        query = query.or(`map_id.eq.${currentMapId},map_id.is.null,is_pc.eq.true`);
       }
       const { data, error } = await query.order('init', { ascending: false });
 

@@ -32,6 +32,9 @@ export function MonsterStatPanel({
   const [targetId, setTargetId] = useState<string | null>(null)
   // Track whether the last attack roll was a hit so damage can be auto-applied
   const lastAttackHitRef = useRef<boolean | null>(null)
+  // Most recent roll — shown inline so the GM gets immediate feedback in the panel
+  // (the shared dice log is a separate column and easy to miss).
+  const [lastRoll, setLastRoll] = useState<{ label: string; formula: string; result: number; outcome?: string | null } | null>(null)
 
   // Load the encounter's tokens (excluding the attacker) for the target picker.
   const loadEncounterTokens = useCallback(async () => {
@@ -316,12 +319,14 @@ export function MonsterStatPanel({
     lastAttackHitRef.current = hit
 
     const sign = bonus >= 0 ? '+' : ''
-    onRoll({
+    const payload = {
       label: `${name}: ${action.name || 'Attack'}${target?.label ? ` → ${target.label}` : ''}`,
       formula: `1d20${sign}${bonus}`,
       result: total,
       outcome,
-    } as any)
+    }
+    setLastRoll(payload)
+    onRoll(payload as any)
   }
 
   function handleDamageRoll(action: any) {
@@ -335,11 +340,15 @@ export function MonsterStatPanel({
 
     const result = rollFormula(dmgFormula)
 
-    onRoll({
+    const willApply = lastAttackHitRef.current === true && !!target?.id
+    const payload = {
       label: `${name}: ${action.name || 'Damage'}${target?.label ? ` → ${target.label}` : ''}`,
       formula: dmgFormula,
       result,
-    })
+      outcome: willApply ? `${result} damage applied to ${target?.label ?? 'target'}` : null,
+    }
+    setLastRoll(payload)
+    onRoll(payload)
 
     // If the preceding attack roll hit, apply the damage to the target.
     // Uses a GM-authorized RPC so PC targets also have their character sheet
@@ -631,6 +640,21 @@ export function MonsterStatPanel({
           </p>
         )}
       </div>
+
+      {/* Last roll — immediate in-panel feedback for Roll Attack / Roll Damage */}
+      {lastRoll && (
+        <div className="rounded-md border border-amber-700/50 bg-amber-950/30 px-2 py-1.5 text-[11px]">
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate text-amber-200">{lastRoll.label}</span>
+            <span className="shrink-0 font-mono font-bold text-amber-100">
+              {lastRoll.result} <span className="text-amber-400/70">({lastRoll.formula})</span>
+            </span>
+          </div>
+          {lastRoll.outcome && (
+            <p className="mt-0.5 text-[10px] font-semibold text-amber-300">{lastRoll.outcome}</p>
+          )}
+        </div>
+      )}
 
       {/* Actions / Bonus Actions / Legendary Actions */}
       {([
