@@ -242,6 +242,12 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
               action_state: r.action_state ?? ch.action_state,
               name: r.name ?? ch.name,
               avatar_url: r.avatar_url ?? ch.avatar_url,
+              // Level-up fields — without these the class/level label on the
+              // party card stays stale after a player levels up.
+              level: r.level ?? ch.level,
+              main_job: r.main_job ?? ch.main_job,
+              secondary_class: r.secondary_class ?? ch.secondary_class,
+              secondary_level: r.secondary_level ?? ch.secondary_level,
             }
             return { ...p, characters: nextCharacters }
           }))
