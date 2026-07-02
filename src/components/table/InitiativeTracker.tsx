@@ -67,14 +67,20 @@ type InitiativeTrackerProps = {
   /** Session ID — required for the Roll Initiative button to call /api/roll */
   sessionId?: string | null;
   /** Currently-active map. The tracker only shows combatants on this map so
-   *  combat is per-map instead of spanning every map in the session. */
+   *  combat is per-map instead of spanning every map in the session. Pass null
+   *  (e.g. the DM dashboard) to show every combatant in the encounter. */
   currentMapId?: string | null;
+  /** Optional map to scope the "+ Monsters from map" sync to, independent of
+   *  the display filter. Defaults to currentMapId. Lets the DM dashboard show
+   *  ALL encounter combatants (currentMapId=null) while still adding only the
+   *  monsters on the map the GM is running. */
+  monsterSyncMapId?: string | null;
   onRoundChange?: (round: number) => void;
   /** Current session lifecycle status — gates Start Combat button */
   sessionStatus?: SessionStatus | null;
 };
 
-export default function InitiativeTracker({ encounterId, sessionId, currentMapId, onRoundChange, sessionStatus }: InitiativeTrackerProps) {
+export default function InitiativeTracker({ encounterId, sessionId, currentMapId, monsterSyncMapId, onRoundChange, sessionStatus }: InitiativeTrackerProps) {
   const [entries, setEntries] = useState<InitiativeEntry[]>([]);
   const [turnIdx, setTurnIdx] = useState(0);
   const [round, setRound] = useState(1);
@@ -571,13 +577,17 @@ export default function InitiativeTracker({ encounterId, sessionId, currentMapId
     if (!encounterId) return;
     setLoading(true);
     try {
+      // Scope the sync to the map the GM is running (monsterSyncMapId), falling
+      // back to the display map. Include NULL-map tokens (legacy / unscoped)
+      // so nothing silently fails to load, and exclude only tokens explicitly
+      // on a DIFFERENT map. This mirrors the entries-list scoping.
+      const syncMapId = monsterSyncMapId ?? currentMapId ?? null;
       let tokQuery = supabase
         .from('tokens')
         .select('id, name, current_hp, hp')
         .eq('encounter_id', encounterId)
         .eq('type', 'monster');
-      // Only pull monsters on the current map so the sync stays map-specific.
-      if (currentMapId) tokQuery = tokQuery.eq('map_id', currentMapId);
+      if (syncMapId) tokQuery = tokQuery.or(`map_id.eq.${syncMapId},map_id.is.null`);
       const { data: tokens, error: tokErr } = await tokQuery;
 
       if (tokErr) {

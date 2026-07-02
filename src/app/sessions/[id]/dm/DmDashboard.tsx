@@ -521,7 +521,8 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
                   <InitiativeTracker
                     encounterId={encounterId}
                     sessionId={sessionId}
-                    currentMapId={currentMapId}
+                    currentMapId={null}
+                    monsterSyncMapId={currentMapId}
                     sessionStatus={(sessionStatus ?? null) as SessionStatus | null}
                   />
                 </div>
