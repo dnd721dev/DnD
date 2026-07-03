@@ -56,6 +56,24 @@ export function RecordingButton({ sessionId, roomName, sessionStatus }: Props) {
 
   useEffect(() => { fetchStatus() }, [fetchStatus])
 
+  // Bug fix: when the DM's browser drops connection and reconnects (laptop
+  // sleep, network blip, tab backgrounded), this component often stays
+  // mounted showing the last-known 'recording' state instead of re-checking
+  // the DB — so the UI can claim "still recording" even after the room
+  // actually closed and the webhook already flipped the row to 'stopped'.
+  // Re-poll on reconnect signals so the badge self-corrects.
+  useEffect(() => {
+    const onFocus = () => { void fetchStatus() }
+    window.addEventListener('online', onFocus)
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onFocus)
+    return () => {
+      window.removeEventListener('online', onFocus)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onFocus)
+    }
+  }, [fetchStatus])
+
   // Bug 9 fix: subscribe to session_recordings changes so the DM sees
   // status transitions (processing → completed) without a page refresh.
   useEffect(() => {
