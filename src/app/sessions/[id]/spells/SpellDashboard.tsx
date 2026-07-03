@@ -108,6 +108,8 @@ type Token = {
   current_hp: number | null
   ac: number | null
   owner_wallet: string | null
+  map_id: string | null
+  hidden: boolean | null
 }
 
 type PendingRoll = {
@@ -789,13 +791,28 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
       // Session + GM check
       const { data: session } = await supabase
         .from('sessions')
-        .select('title, gm_wallet')
+        .select('title, gm_wallet, current_map_id')
         .eq('id', sessionId)
         .maybeSingle()
 
       if (!session) { setError('Session not found.'); setLoading(false); return }
       setSessionTitle(session.title ?? 'Session')
-      setIsGm((session.gm_wallet ?? '').toLowerCase() === wallet)
+      const gm = (session.gm_wallet ?? '').toLowerCase() === wallet
+      setIsGm(gm)
+
+      // A player may be pinned to a different map than the session default
+      // (see TableClient's "Party Maps" override) — honor that per-player
+      // override so targeting matches what the player actually sees.
+      let effectiveMapId = (session as any).current_map_id ?? null
+      if (!gm) {
+        const { data: sp } = await supabase
+          .from('session_players')
+          .select('current_map_id')
+          .eq('session_id', sessionId)
+          .eq('wallet_address', wallet)
+          .maybeSingle()
+        if ((sp as any)?.current_map_id) effectiveMapId = (sp as any).current_map_id
+      }
 
       // Encounter (tokens live here)
       const { data: enc } = await supabase
@@ -807,13 +824,18 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
       const eid = (enc as any)?.id ?? null
       setEncounterId(eid)
 
-      // Tokens
+      // Tokens — scoped to the map the player is actually on (PC tokens with
+      // map_id null are visible everywhere), and hidden tokens are excluded
+      // for non-GM players so they can't target monsters they can't see.
       if (eid) {
-        const { data: toks } = await supabase
+        let q = supabase
           .from('tokens')
-          .select('id, label, type, hp, current_hp, ac, owner_wallet')
+          .select('id, label, type, hp, current_hp, ac, owner_wallet, map_id, hidden')
           .eq('encounter_id', eid)
-        setTokens((toks ?? []) as Token[])
+        if (effectiveMapId) q = (q as any).or(`map_id.eq.${effectiveMapId},map_id.is.null`)
+        const { data: toks } = await q
+        const visible = gm ? (toks ?? []) : (toks ?? []).filter((t: any) => !t.hidden)
+        setTokens(visible as Token[])
       }
 
       // My character — preferred path is via session_characters which is
