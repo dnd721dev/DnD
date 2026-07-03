@@ -1,11 +1,12 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Room, RoomEvent } from 'livekit-client'
+import { Room, RoomEvent, Track } from 'livekit-client'
 import { RoomAudioRenderer } from '@livekit/components-react'
 import '@livekit/components-styles'
 import { supabase } from '@/lib/supabase'
 import { ANON_NAME } from '@/lib/displayName'
+import { createVoiceFxChain, VOICE_FX_PRESETS, type VoiceFxPreset, type VoiceFxChain } from '@/lib/voiceFx'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -51,6 +52,11 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
   const [isReconnecting, setIsReconnecting] = useState(false)
   // Bug 3: per-participant volume (0-100, default 100)
   const [volumes, setVolumes] = useState<Record<string, number>>({})
+  // DM voice changer — active preset + live Web Audio chain
+  const [fxPreset, setFxPreset] = useState<VoiceFxPreset>('none')
+  const [fxBusy, setFxBusy] = useState(false)
+  const fxChainRef = useRef<VoiceFxChain | null>(null)
+  const fxTrackRef = useRef<MediaStreamTrack | null>(null)
 
   const url      = process.env.NEXT_PUBLIC_LIVEKIT_URL || ''
   const stableId = useRef(identity || `guest-${Math.random().toString(36).slice(2, 8)}`)
@@ -77,7 +83,11 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
   // ── Cleanup on unmount ───────────────────────────────────────────────────────
 
   useEffect(() => {
-    return () => { room?.disconnect() }
+    return () => {
+      fxChainRef.current?.cleanup()
+      fxChainRef.current = null
+      room?.disconnect()
+    }
   }, [room])
 
   // ── Bug 6 fix: beforeunload disconnect — prevents ghost participants ─────────
@@ -252,12 +262,58 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
   // ── Disconnect ───────────────────────────────────────────────────────────────
 
   const handleLeave = () => {
+    fxChainRef.current?.cleanup()
+    fxChainRef.current = null
+    fxTrackRef.current = null
+    setFxPreset('none')
     room?.disconnect()
     setConnected(false)
     setIsReconnecting(false)
     setParticipants([])
     setLocalMuted(false)
     setRoom(null)
+  }
+
+  // ── DM voice changer ─────────────────────────────────────────────────────────
+  // Swaps the published mic for a Web Audio–processed track. Selecting
+  // "Natural voice" restores the plain microphone.
+  const applyVoiceFx = async (preset: VoiceFxPreset) => {
+    if (!room || fxBusy) return
+    setFxBusy(true)
+    try {
+      // Tear down any existing processed chain + its published track.
+      if (fxTrackRef.current) {
+        await room.localParticipant.unpublishTrack(fxTrackRef.current).catch(() => {})
+        fxTrackRef.current = null
+      }
+      fxChainRef.current?.cleanup()
+      fxChainRef.current = null
+      await room.localParticipant.setMicrophoneEnabled(false)
+
+      if (preset === 'none') {
+        await room.localParticipant.setMicrophoneEnabled(true)
+        setFxPreset('none')
+        setLocalMuted(false)
+        return
+      }
+
+      const chain = await createVoiceFxChain(preset)
+      fxChainRef.current = chain
+      fxTrackRef.current = chain.track
+      await room.localParticipant.publishTrack(chain.track, {
+        source: Track.Source.Microphone,
+        name: `voice-fx-${preset}`,
+      })
+      setFxPreset(preset)
+      setLocalMuted(false)
+    } catch (e: any) {
+      console.error('[VoiceChat] voice FX error', e)
+      // Fall back to the plain mic so the DM is never left silent.
+      await room.localParticipant.setMicrophoneEnabled(true).catch(() => {})
+      setFxPreset('none')
+    } finally {
+      setFxBusy(false)
+    }
   }
 
   // Bug 3: per-participant volume — LiveKit accepts 0-1
@@ -270,6 +326,14 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
 
   const toggleMute = async () => {
     if (!room) return
+    // When a voice-FX track is live, mute by disabling the processed track —
+    // setMicrophoneEnabled would republish the raw mic alongside it.
+    if (fxTrackRef.current) {
+      const next = !fxTrackRef.current.enabled
+      fxTrackRef.current.enabled = next
+      setLocalMuted(!next)
+      return
+    }
     const nowEnabled = room.localParticipant.isMicrophoneEnabled
     await room.localParticipant.setMicrophoneEnabled(!nowEnabled)
     setLocalMuted(nowEnabled) // was enabled → now muted
@@ -337,6 +401,25 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
             <span className={`h-2 w-2 rounded-full animate-pulse ${isReconnecting ? 'bg-amber-400' : 'bg-emerald-400'}`} />
             {isReconnecting ? 'Reconnecting…' : `Voice (${participants.length + 1})`}
           </button>
+
+          {/* DM voice changer — GM only */}
+          {isGm && (
+            <select
+              value={fxPreset}
+              disabled={fxBusy}
+              onChange={(e) => void applyVoiceFx(e.target.value as VoiceFxPreset)}
+              title="Voice changer — pick a character voice for NPC dialogue"
+              className={`rounded-md px-1.5 py-1 text-[11px] transition border ${
+                fxPreset !== 'none'
+                  ? 'border-purple-500/60 bg-purple-950/60 text-purple-200'
+                  : 'border-slate-700 bg-slate-800 text-slate-300'
+              } ${fxBusy ? 'opacity-50' : ''}`}
+            >
+              {VOICE_FX_PRESETS.map((p) => (
+                <option key={p.key} value={p.key}>{p.emoji} {p.label}</option>
+              ))}
+            </select>
+          )}
 
           {/* Local mute toggle */}
           <button
