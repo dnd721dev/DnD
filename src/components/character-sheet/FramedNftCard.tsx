@@ -53,14 +53,23 @@ export function FramedNftCard({
       className={`relative aspect-square w-full select-none ${className ?? ''}`}
       style={{ containerType: 'inline-size' }}
     >
-      {/* NFT art fills the frame's transparent window (behind the border). */}
+      {/* NFT art fills the frame's transparent window (behind the border).
+          The NFT itself is a full card (title strip top, portrait left, stat
+          block right), so the window zoom-crops into just the portrait region:
+          the image is enlarged inside a clipped wrapper and offset so the
+          title bar and stat block fall outside the visible window. */}
       {imageUrl ? (
-        <img
-          src={imageUrl}
-          alt={name}
-          className="absolute object-cover"
-          style={{ left: '8%', top: '21%', width: '85%', height: '57.5%', objectPosition: 'left center' }}
-        />
+        <div
+          className="absolute overflow-hidden"
+          style={{ left: '8%', top: '21%', width: '85%', height: '57.5%' }}
+        >
+          <img
+            src={imageUrl}
+            alt={name}
+            className="absolute max-w-none"
+            style={{ width: '160%', left: '-6%', top: '-42%' }}
+          />
+        </div>
       ) : (
         <div
           className="absolute flex items-center justify-center bg-slate-900 text-xs text-slate-500"
