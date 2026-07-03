@@ -4,6 +4,27 @@ import type { SrdSpell } from './types'
 
 export const LEVEL2_SPELLS: SrdSpell[] = [
   {
+    name: 'Searing Orb',
+    level: 2,
+    school: 'Evocation',
+    castingTime: '1 action',
+    range: '90 feet',
+    components: 'V, S',
+    duration: 'Instantaneous',
+    attackRoll: true,
+    damage: '3d6',
+    damageType: 'fire',
+    classes: ['cleric'],
+    concentration: false,
+    ritual: false,
+    targets: 'One creature within range',
+    notes: 'Ranged spell attack, 3d6 fire damage. Half damage to a second creature within 5 ft of the target.',
+    fullDescription:
+      'You hurl a mote of searing flame at a creature within range. Make a ranged spell attack against the target. On a hit, the target takes 3d6 fire damage, and one creature of your choice within 5 feet of the target takes half that damage.',
+    upcastDamage: '1d6',
+    source: 'class-gap',
+  },
+  {
     name: 'Aid',
     level: 2,
     school: 'Abjuration',

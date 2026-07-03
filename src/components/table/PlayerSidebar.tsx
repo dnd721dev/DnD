@@ -299,9 +299,22 @@ export function PlayerSidebar({
       if (d20 === 1) { outcome = `MISS (nat 1) vs AC ${targetAC}`; hit = false }
       else if (d20 === 20) { outcome = `HIT (nat 20) vs AC ${targetAC}`; hit = true }
       else { hit = total >= targetAC; outcome = `${hit ? 'HIT' : 'MISS'} vs AC ${targetAC}` }
+    } else if (d20 === 1) {
+      outcome = 'MISS (nat 1)'
+    } else if (d20 === 20) {
+      outcome = 'HIT (nat 20)'
+      hit = true
     }
     setLastAttackHit(hit)
     setLastAttackCrit(d20 === 20)
+
+    // House rule: a natural 1 on a weapon attack is a fumble — the wielder
+    // takes a small amount of self-inflicted damage (1d4).
+    if (d20 === 1 && /weapon attack/i.test(label)) {
+      const fumbleDmg = Math.floor(Math.random() * 4) + 1
+      outcome = `FUMBLE (nat 1) — ${fumbleDmg} self dmg`
+      updateHP(-fumbleDmg)
+    }
 
     const sign = bonus >= 0 ? '+' : ''
     onRoll?.({
