@@ -564,6 +564,7 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
                 sessionStatus={sessionStatus}
                 sessionType={sessionType}
                 xpAwardedAlready={xpAwardedAlready}
+                players={cards.map((c) => ({ characterId: c.characterId, name: c.name }))}
               />
             )}
             {activeTab === 'private-rolls' && (

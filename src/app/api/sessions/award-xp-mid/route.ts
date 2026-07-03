@@ -4,19 +4,20 @@ import { xpToLevel } from '@/lib/dnd5e'
 import { MAX_XP_PER_AWARD } from '@/lib/levelUpRefresh'
 
 /** POST /api/sessions/award-xp-mid
- *  Awards XP to all CAYA characters assigned to an **active** session.
+ *  Awards XP to all CAYA characters assigned to an **active** session, or to
+ *  a single character when `character_id` is provided.
  *  Unlike /award-xp, this does NOT require session status to be 'completed'.
- *  Body: { session_id: string, xp_amount: number, gm_wallet: string }
+ *  Body: { session_id: string, xp_amount: number, gm_wallet: string, character_id?: string }
  */
 export async function POST(req: NextRequest) {
-  let body: { session_id?: string; xp_amount?: number; gm_wallet?: string }
+  let body: { session_id?: string; xp_amount?: number; gm_wallet?: string; character_id?: string }
   try {
     body = await req.json()
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { session_id, xp_amount, gm_wallet } = body
+  const { session_id, xp_amount, gm_wallet, character_id } = body
 
   if (!session_id || typeof session_id !== 'string') {
     return NextResponse.json({ error: 'session_id required' }, { status: 400 })
@@ -68,9 +69,18 @@ export async function POST(req: NextRequest) {
   }
 
   // Gather character IDs (some slots may be null if player hasn't picked a char yet)
-  const characterIds = players
+  let characterIds = players
     .map((p: any) => p.character_id as string | null)
     .filter((id): id is string => !!id)
+
+  // Single-character award: restrict to just the requested character (must
+  // still belong to a seated session player — enforced below too).
+  if (character_id) {
+    if (!characterIds.includes(character_id)) {
+      return NextResponse.json({ error: 'Character is not seated in this session' }, { status: 400 })
+    }
+    characterIds = [character_id]
+  }
 
   if (!characterIds.length) {
     return NextResponse.json({ error: 'No characters assigned to session players yet' }, { status: 400 })

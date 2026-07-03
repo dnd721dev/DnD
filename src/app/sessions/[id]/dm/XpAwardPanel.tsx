@@ -19,14 +19,17 @@ type Props = {
   sessionStatus: string | null
   sessionType: 'set_level' | 'caya' | null
   xpAwardedAlready: number | null
+  players?: { characterId: string; name: string }[]
 }
 
-export function XpAwardPanel({ sessionId, gmWallet, sessionStatus, sessionType, xpAwardedAlready }: Props) {
+export function XpAwardPanel({ sessionId, gmWallet, sessionStatus, sessionType, xpAwardedAlready, players = [] }: Props) {
   // Mid-session XP
   const [midXp, setMidXp] = useState('')
   const [midBusy, setMidBusy] = useState(false)
   const [midError, setMidError] = useState<string | null>(null)
   const [midSuccess, setMidSuccess] = useState<number | null>(null)
+  // '' = award to whole party; otherwise a single characterId
+  const [midTargetChar, setMidTargetChar] = useState('')
 
   // End-of-session XP
   const [endXp, setEndXp] = useState('')
@@ -44,7 +47,12 @@ export function XpAwardPanel({ sessionId, gmWallet, sessionStatus, sessionType, 
       const res = await fetch('/api/sessions/award-xp-mid', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, xp_amount: xp, gm_wallet: gmWallet }),
+        body: JSON.stringify({
+          session_id: sessionId,
+          xp_amount: xp,
+          gm_wallet: gmWallet,
+          character_id: midTargetChar || undefined,
+        }),
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) setMidError(json.error ?? 'Failed to award XP')
@@ -100,8 +108,24 @@ export function XpAwardPanel({ sessionId, gmWallet, sessionStatus, sessionType, 
         <section className="rounded-lg border border-violet-700/50 bg-violet-950/20 p-4">
           <h3 className="mb-1 text-sm font-bold text-violet-200">Mid-Session XP</h3>
           <p className="mb-3 text-xs text-slate-400">
-            Grants XP to all CAYA characters seated at this session.
+            Grants XP to all CAYA characters seated at this session, or to a single player.
           </p>
+
+          {players.length > 0 && (
+            <div className="mb-3">
+              <label className="mb-1 block text-[11px] font-semibold text-slate-400">Award to</label>
+              <select
+                value={midTargetChar}
+                onChange={(e) => setMidTargetChar(e.target.value)}
+                className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-100 outline-none focus:border-violet-500"
+              >
+                <option value="">Whole party</option>
+                {players.map((p) => (
+                  <option key={p.characterId} value={p.characterId}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="mb-3 flex flex-wrap gap-2">
             {[25, 50, 100, 200, 500].map((amt) => (
@@ -139,7 +163,7 @@ export function XpAwardPanel({ sessionId, gmWallet, sessionStatus, sessionType, 
 
           {midSuccess != null && (
             <p className="mt-2 text-xs font-semibold text-emerald-300">
-              ✓ {midSuccess} XP awarded to all CAYA players.
+              ✓ {midSuccess} XP awarded to {midTargetChar ? (players.find(p => p.characterId === midTargetChar)?.name ?? 'the selected player') : 'all CAYA players'}.
             </p>
           )}
           {midError && <p className="mt-2 text-xs text-red-400">{midError}</p>}
