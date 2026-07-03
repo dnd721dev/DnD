@@ -67,7 +67,7 @@ export function FramedNftCard({
             src={imageUrl}
             alt={name}
             className="absolute max-w-none"
-            style={{ width: '160%', left: '-6%', top: '-42%' }}
+            style={{ width: '150%', left: '-5%', top: '-34%' }}
           />
         </div>
       ) : (
