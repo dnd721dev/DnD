@@ -252,6 +252,7 @@ export function PlayerSidebar({
   }, [addressLower, activeWalletLower])
 
   const [lastAttackHit, setLastAttackHit] = useState<boolean | null>(null)
+  const [lastAttackCrit, setLastAttackCrit] = useState<boolean>(false)
 
   // Custom roll picker state
   const [customSides, setCustomSides] = useState<DieSides>(20)
@@ -300,6 +301,7 @@ export function PlayerSidebar({
       else { hit = total >= targetAC; outcome = `${hit ? 'HIT' : 'MISS'} vs AC ${targetAC}` }
     }
     setLastAttackHit(hit)
+    setLastAttackCrit(d20 === 20)
 
     const sign = bonus >= 0 ? '+' : ''
     onRoll?.({
@@ -383,20 +385,24 @@ export function PlayerSidebar({
     const damageDice = opts?.damageDice ?? '1d8'
     // Parse dice string e.g. "1d8", "2d6"
     const diceMatch = damageDice.match(/^(\d+)d(\d+)$/)
-    const dCount = diceMatch ? Number(diceMatch[1]) : 1
+    const baseCount = diceMatch ? Number(diceMatch[1]) : 1
     const dSides = diceMatch ? Number(diceMatch[2]) : 8
+    // Critical hit: double the number of damage dice (not the modifier).
+    const isCrit = lastAttackCrit
+    const dCount = isCrit ? baseCount * 2 : baseCount
     const rolls = Array.from({ length: dCount }, () => Math.floor(Math.random() * dSides) + 1)
     const total = rolls.reduce((a, b) => a + b, 0) + mod
     const sign = mod >= 0 ? '+' : ''
     const dieKey = `d${dSides}`
     const finalResult = Math.max(1, total)
     onRoll?.({
-      label: opts?.label ?? `Weapon Damage${(target as any)?.label ? ` → ${(target as any).label}` : ''}`,
-      formula: `${damageDice}${sign}${mod}`,
+      label: `${opts?.label ?? 'Weapon Damage'}${isCrit ? ' (CRIT!)' : ''}${(target as any)?.label ? ` → ${(target as any).label}` : ''}`,
+      formula: `${dCount}d${dSides}${sign}${mod}`,
       result: finalResult,
-      outcome: null,
+      outcome: isCrit ? 'CRITICAL HIT' : null,
       individual_dice: rolls.map(v => ({ die: dieKey, value: v })),
     })
+    setLastAttackCrit(false)
     // BUG-10 fix: auto-apply damage to targeted token when preceding attack roll hit.
     //
     // Audit Wave 3B: capture and consume `lastAttackHit` into a local BEFORE
