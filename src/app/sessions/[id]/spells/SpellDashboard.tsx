@@ -257,6 +257,7 @@ function CombatSpellCard({
   pending,
   onApply,
   onClearPending,
+  onApplyExtra,
 }: {
   spell: SrdSpell
   slots: SpellSlotData
@@ -275,10 +276,18 @@ function CombatSpellCard({
   pending: PendingRoll | null
   onApply: () => void
   onClearPending: () => void
+  /** Apply the same pending damage amount to additional targets beyond the
+   *  primary one — for AOE / multi-target spells (Fireball, Magic Missile, …). */
+  onApplyExtra: (tokenIds: string[], amount: number) => void
 }) {
   const isCantrip = spell.level === 0
   const [selectedTarget, setSelectedTarget] = useState(targets[0]?.id ?? '')
   const [selectedSlot, setSelectedSlot] = useState(spell.level)
+  // Multi-target spells (AOE saves, Magic Missile, Scorching Ray, …) — extra
+  // targets checked here get the same pending damage applied alongside the
+  // primary target when "Apply Dmg" is clicked.
+  const isMultiTarget = /\bcreatures\b|\btargets\b|\beach\b/i.test(spell.targets ?? '') || /^(two|three|four|five)\b/i.test(spell.targets ?? '')
+  const [extraTargets, setExtraTargets] = useState<Set<string>>(new Set())
 
   const slotsAtLevel = slots[String(selectedSlot)]
   const hasSlots = isCantrip || (slotsAtLevel ? slotsAtLevel.used < slotsAtLevel.max : false)
@@ -406,6 +415,34 @@ function CombatSpellCard({
         </button>
       </div>
 
+      {/* Multi-target: also apply the same damage to other tokens caught in the AOE / spread */}
+      {isMultiTarget && targets.length > 1 && (
+        <div className="mt-2 rounded border border-slate-800 bg-slate-950/50 p-1.5">
+          <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-slate-500">Also hit</p>
+          <div className="flex flex-wrap gap-1.5">
+            {targets.filter(t => t.id !== selectedTarget).map(t => {
+              const checked = extraTargets.has(t.id)
+              return (
+                <label key={t.id} className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${checked ? 'bg-red-900/40 text-red-200' : 'bg-slate-800 text-slate-400'}`}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => {
+                      setExtraTargets(prev => {
+                        const next = new Set(prev)
+                        if (next.has(t.id)) next.delete(t.id); else next.add(t.id)
+                        return next
+                      })
+                    }}
+                  />
+                  {t.label}
+                </label>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Magic audit section G: ritual cast — skips slot cost, +10 min cast time.
           Only shown when the spell is a ritual AND the caster's class supports
           ritual casting (Bard / Cleric / Druid / Wizard in V1). */}
@@ -433,10 +470,14 @@ function CombatSpellCard({
           </span>
           <div className="flex gap-1">
             <button
-              onClick={onApply}
+              onClick={() => {
+                onApply()
+                if (extraTargets.size > 0) onApplyExtra(Array.from(extraTargets), pending.result)
+                setExtraTargets(new Set())
+              }}
               className="text-[10px] px-2 py-1 bg-red-800/80 text-red-200 rounded hover:bg-red-700 whitespace-nowrap"
             >
-              Apply Dmg
+              Apply Dmg{extraTargets.size > 0 ? ` (+${extraTargets.size})` : ''}
             </button>
             <button
               onClick={onClearPending}
@@ -1551,6 +1592,22 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
     setPending(null)
   }, [pending, tokens, sessionId, myChar, wallet])
 
+  // Multi-target: apply the same rolled damage amount to a batch of extra
+  // tokens caught in an AOE / multi-beam spell (Fireball, Magic Missile, …).
+  const handleApplyExtra = useCallback(async (tokenIds: string[], amount: number) => {
+    for (const id of tokenIds) {
+      const { error } = await supabase.rpc('apply_combat_damage', { p_token_id: id, p_amount: amount })
+      if (error) {
+        console.error('[SpellDashboard] apply_combat_damage (extra target) failed', error)
+        const token = tokens.find(t => t.id === id)
+        if (token) {
+          const cur = token.current_hp ?? token.hp ?? 0
+          await supabase.from('tokens').update({ current_hp: Math.max(0, cur - amount) }).eq('id', id)
+        }
+      }
+    }
+  }, [tokens])
+
   const handleSpend = useCallback(async (level: string) => {
     if (!myChar) return
     const newSlots = await expendSlot(supabase, myChar.id, parseInt(level))
@@ -1952,6 +2009,7 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
                 pending={pending?.spellName === spell.name ? pending : null}
                 onApply={handleApply}
                 onClearPending={() => setPending(null)}
+                onApplyExtra={handleApplyExtra}
               />
               )
             })}
