@@ -158,6 +158,35 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
   // Bug 16: tap-selected token for tap-to-move (mobile-friendly)
   const [tapSelectTokenId, setTapSelectTokenId] = useState<string | null>(null)
 
+  // Ping — click-to-place transient marker visible to everyone on this map.
+  const [pingMode, setPingMode] = useState(false)
+  const [pings, setPings] = useState<{ id: string; x: number; y: number; ts: number }[]>([])
+  const pingChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+
+  useEffect(() => {
+    const ch = supabase
+      .channel(`ping-${encounterId}-${mapId ?? 'all'}`)
+      .on('broadcast', { event: 'ping' }, ({ payload }) => {
+        const p = payload as { id: string; x: number; y: number }
+        setPings((prev) => [...prev, { ...p, ts: Date.now() }])
+        window.setTimeout(() => {
+          setPings((prev) => prev.filter((ping) => ping.id !== p.id))
+        }, 2000)
+      })
+      .subscribe()
+    pingChannelRef.current = ch
+    return () => { supabase.removeChannel(ch) }
+  }, [encounterId, mapId])
+
+  function sendPing(x: number, y: number) {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    pingChannelRef.current?.send({ type: 'broadcast', event: 'ping', payload: { id, x, y } })
+    setPings((prev) => [...prev, { id, x, y, ts: Date.now() }])
+    window.setTimeout(() => {
+      setPings((prev) => prev.filter((ping) => ping.id !== id))
+    }, 2000)
+  }
+
   const [zoom, setZoom] = useState(1)
   const [translate, setTranslate] = useState<Point>({ x: 0, y: 0 })
 
@@ -1129,6 +1158,12 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     const screen = getScreenPoint(e)
     const world = screenToWorld(screen)
 
+    if (pingMode) {
+      sendPing(world.x, world.y)
+      setPingMode(false)
+      return
+    }
+
     const hit = tokens.find((t) => Math.hypot(t.x - world.x, t.y - world.y) < gridSize * 0.5)
 
     if (hit) {
@@ -1377,7 +1412,31 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
           ref={fogCanvasRef}
           className={`pointer-events-none absolute left-0 top-0 transition-opacity duration-300 ${fogsLoaded ? 'opacity-100' : 'opacity-0'}`}
         />
+        {pings.map((p) => (
+          <div
+            key={p.id}
+            className="pointer-events-none absolute z-20"
+            style={{ left: p.x - 24, top: p.y - 24, width: 48, height: 48 }}
+          >
+            <div className="h-full w-full animate-ping rounded-full border-4 border-amber-400/90" />
+            <div className="absolute inset-0 m-auto h-2.5 w-2.5 rounded-full bg-amber-300 shadow-[0_0_12px_rgba(251,191,36,0.9)]" />
+          </div>
+        ))}
       </div>
+
+      {/* Ping toggle — click to arm, then click anywhere on the map to ping it */}
+      <button
+        type="button"
+        onClick={() => setPingMode((v) => !v)}
+        className={`pointer-events-auto absolute left-3 top-3 z-10 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold shadow transition ${
+          pingMode
+            ? 'border-amber-400 bg-amber-500/20 text-amber-200'
+            : 'border-slate-700/60 bg-slate-950/80 text-slate-300 hover:border-amber-500/60 hover:text-amber-300'
+        }`}
+        title="Ping a location on the map for everyone here"
+      >
+        📍 {pingMode ? 'Click map to ping…' : 'Ping'}
+      </button>
 
       {/* GM fog toolbar — shown when viewing as a player (View As mode) */}
       {isGm && (
