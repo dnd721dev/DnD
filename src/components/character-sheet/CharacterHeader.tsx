@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { CharacterSheetData } from './types'
 import type { DerivedStats } from './calc'
 import { getAllClasses, isMulticlassed } from '@/lib/multiclass'
+import { FramedNftCard } from './FramedNftCard'
 
 function HpPill({ current, max }: { current: number; max: number }) {
   const pct = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0
@@ -62,19 +63,13 @@ export function CharacterHeader({
   }
 
   return (
-    <header className="flex flex-col gap-4 rounded-xl border border-indigo-900/40 bg-gradient-to-r from-indigo-950/40 via-slate-950 to-slate-950 px-4 py-4 md:flex-row md:items-center md:justify-between">
+    <header className="flex flex-col gap-4 rounded-xl border border-amber-900/50 bg-gradient-to-r from-stone-950 via-slate-950 to-black px-4 py-4 shadow-[0_0_24px_rgba(0,0,0,0.6)] md:flex-row md:items-center md:justify-between">
       <div className="flex items-center gap-4">
-        {c.avatar_url ? (
-          <img
-            src={String(c.avatar_url)}
-            alt={name}
-            className="h-24 w-24 rounded-xl object-cover shadow-lg ring-2 ring-indigo-500/50 shadow-[0_0_18px_rgba(99,102,241,0.3)]"
-          />
-        ) : (
-          <div className="flex h-24 w-24 items-center justify-center rounded-xl bg-slate-800 text-xs text-slate-500 ring-2 ring-indigo-500/30 shadow-[0_0_12px_rgba(99,102,241,0.15)]">
-            No NFT
-          </div>
-        )}
+        {/* DND721 gothic card — NFT art framed in the skull border with the
+            character name engraved into the top nameplate. */}
+        <div className="w-40 shrink-0 sm:w-48 md:w-56">
+          <FramedNftCard imageUrl={c.avatar_url ? String(c.avatar_url) : null} name={name} />
+        </div>
 
         <div className="flex flex-col gap-1.5">
           {/* Inline rename — click the pencil to edit */}
@@ -89,7 +84,7 @@ export function CharacterHeader({
                   if (e.key === 'Enter') { e.preventDefault(); save() }
                   if (e.key === 'Escape') { e.preventDefault(); cancel() }
                 }}
-                className="text-2xl font-bold tracking-tight text-white leading-tight bg-transparent border-b border-indigo-400 outline-none w-full max-w-xs"
+                className="text-2xl font-bold tracking-tight text-white leading-tight bg-transparent border-b border-amber-400 outline-none w-full max-w-xs"
               />
             ) : (
               <h1 className="text-2xl font-bold tracking-tight text-white leading-tight">{name}</h1>
@@ -98,7 +93,7 @@ export function CharacterHeader({
               <button
                 onClick={startEdit}
                 title="Rename character"
-                className="shrink-0 text-slate-500 hover:text-indigo-300 transition-colors"
+                className="shrink-0 text-slate-500 hover:text-amber-300 transition-colors"
               >
                 {/* pencil icon */}
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
@@ -142,13 +137,13 @@ export function CharacterHeader({
               Lv {d.level}
             </span>
 
-            {/* AC shield badge — indigo brand */}
-            <span className="inline-flex items-center gap-1 rounded-md bg-indigo-900/30 px-2 py-0.5 text-[11px] font-semibold text-indigo-200 ring-1 ring-indigo-700/50">
+            {/* AC shield badge — bronze gothic */}
+            <span className="inline-flex items-center gap-1 rounded-md bg-amber-950/40 px-2 py-0.5 text-[11px] font-semibold text-amber-200 ring-1 ring-amber-800/60">
               <svg viewBox="0 0 14 16" fill="none" className="h-3 w-3 shrink-0">
                 <path
                   d="M7 1L1.5 3v5.5c0 3.5 2.5 6.5 5.5 7.5 3-1 5.5-4 5.5-7.5V3L7 1z"
-                  fill="rgba(99,102,241,0.3)"
-                  stroke="rgba(165,180,252,0.7)"
+                  fill="rgba(217,158,43,0.25)"
+                  stroke="rgba(240,199,94,0.7)"
                   strokeWidth="1"
                 />
               </svg>
@@ -166,7 +161,7 @@ export function CharacterHeader({
       <div className="text-xs text-slate-500 space-y-1">
         <div><span className="text-slate-400">Alignment:</span> {c.alignment ?? '—'}</div>
         <div><span className="text-slate-400">Background:</span> {c.background ?? '—'}</div>
-        <div className="font-mono text-[10px] truncate max-w-[200px] bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700 text-indigo-300">
+        <div className="font-mono text-[10px] truncate max-w-[200px] bg-slate-800/80 px-2 py-0.5 rounded-md border border-amber-900/50 text-amber-300/80">
           {c.wallet_address ?? '—'}
         </div>
       </div>

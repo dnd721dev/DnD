@@ -879,7 +879,7 @@ export default function CharacterSheetPage() {
             onClick={() => setActiveTab(t)}
             className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
               activeTab === t
-                ? 'bg-indigo-600/30 text-indigo-100 ring-1 ring-indigo-500/50'
+                ? 'bg-amber-600/30 text-amber-100 ring-1 ring-amber-500/50'
                 : 'bg-slate-900/40 text-slate-300 hover:bg-slate-900'
             }`}
           >
@@ -898,7 +898,7 @@ export default function CharacterSheetPage() {
             onClick={() => setActiveTab('magic')}
             className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
               activeTab === 'magic'
-                ? 'bg-indigo-600/30 text-indigo-100 ring-1 ring-indigo-500/50'
+                ? 'bg-amber-600/30 text-amber-100 ring-1 ring-amber-500/50'
                 : 'bg-slate-900/40 text-slate-300 hover:bg-slate-900'
             }`}
           >

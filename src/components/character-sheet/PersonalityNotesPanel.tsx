@@ -180,7 +180,7 @@ export function PersonalityNotesPanel({ c }: { c: CharacterSheetData }) {
               value={personalityValues[f.key]}
               onChange={(e) => handlePersonalityChange(f.key, e.target.value)}
               placeholder={`Enter ${f.label.toLowerCase()}…`}
-              className="w-full resize-none rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[12px] text-slate-100 placeholder-slate-600 focus:border-indigo-600 focus:outline-none"
+              className="w-full resize-none rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[12px] text-slate-100 placeholder-slate-600 focus:border-amber-600 focus:outline-none"
             />
           </div>
         ))}
@@ -194,7 +194,7 @@ export function PersonalityNotesPanel({ c }: { c: CharacterSheetData }) {
             onClick={() => handleCampaignSwitch('general')}
             className={`rounded-md px-2.5 py-1 text-[10px] font-semibold transition ${
               selectedCampaignId === 'general'
-                ? 'bg-indigo-600/30 text-indigo-200 ring-1 ring-indigo-500/50'
+                ? 'bg-amber-600/30 text-amber-200 ring-1 ring-amber-500/50'
                 : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
             }`}
           >
@@ -206,7 +206,7 @@ export function PersonalityNotesPanel({ c }: { c: CharacterSheetData }) {
               onClick={() => handleCampaignSwitch(camp.id)}
               className={`rounded-md px-2.5 py-1 text-[10px] font-semibold transition ${
                 selectedCampaignId === camp.id
-                  ? 'bg-indigo-600/30 text-indigo-200 ring-1 ring-indigo-500/50'
+                  ? 'bg-amber-600/30 text-amber-200 ring-1 ring-amber-500/50'
                   : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
               }`}
             >
@@ -224,7 +224,7 @@ export function PersonalityNotesPanel({ c }: { c: CharacterSheetData }) {
           onChange={(e) => handleNotesDraftChange(e.target.value)}
           onBlur={handleNotesBlur}
           placeholder="Session notes, reminders, character history…"
-          className="w-full resize-none rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[12px] text-slate-100 placeholder-slate-600 focus:border-indigo-600 focus:outline-none"
+          className="w-full resize-none rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[12px] text-slate-100 placeholder-slate-600 focus:border-amber-600 focus:outline-none"
         />
 
         {/* Save button + dirty indicator */}
@@ -235,7 +235,7 @@ export function PersonalityNotesPanel({ c }: { c: CharacterSheetData }) {
           <button
             onClick={() => void saveNotes()}
             disabled={!notesDirty || notesSaving}
-            className="rounded-md bg-indigo-600 px-3 py-1 text-[10px] font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-40"
+            className="rounded-md bg-amber-600 px-3 py-1 text-[10px] font-semibold text-white transition hover:bg-amber-500 disabled:opacity-40"
           >
             {notesSaving ? 'Saving…' : 'Save notes'}
           </button>

@@ -136,7 +136,7 @@ export function CombatStatsPanel({
               value={hpInput}
               onChange={(e) => setHpInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') applyHeal() }}
-              className="w-20 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-100 placeholder-slate-500 focus:border-indigo-600 focus:outline-none"
+              className="w-20 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-100 placeholder-slate-500 focus:border-amber-600 focus:outline-none"
             />
             <button
               type="button"

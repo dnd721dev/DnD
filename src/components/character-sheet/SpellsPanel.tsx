@@ -167,9 +167,9 @@ function SpellDetailModal({
 
         {/* At Higher Levels callout (leveled spells) */}
         {spell.higherLevels && (
-          <div className="mb-2 rounded-lg bg-indigo-950/40 border border-indigo-800/40 p-2">
-            <div className="text-[10px] font-semibold uppercase text-indigo-300">At Higher Levels</div>
-            <div className="whitespace-pre-wrap text-[11px] text-indigo-100">{spell.higherLevels}</div>
+          <div className="mb-2 rounded-lg bg-amber-950/40 border border-amber-800/40 p-2">
+            <div className="text-[10px] font-semibold uppercase text-amber-300">At Higher Levels</div>
+            <div className="whitespace-pre-wrap text-[11px] text-amber-100">{spell.higherLevels}</div>
           </div>
         )}
 

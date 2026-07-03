@@ -100,7 +100,7 @@ function buildEquipmentItems(nextShieldEquipped: boolean): string[] | null {
 }
 
 const SELECT_CLS =
-  'w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-[12px] text-slate-100 focus:border-indigo-600 focus:outline-none'
+  'w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-[12px] text-slate-100 focus:border-amber-600 focus:outline-none'
 
 export function EquipmentPanel({
   c,
@@ -375,9 +375,9 @@ export function EquipmentPanel({
   const shieldLabel = useMemo(() => ((GEAR as any)?.shield?.name as string) ?? 'Shield', [])
 
   return (
-    <section className="rounded-xl border border-indigo-900/40 bg-slate-950/60 p-3">
+    <section className="rounded-xl border border-amber-900/40 bg-slate-950/60 p-3">
       <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-indigo-400">Equipment</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-amber-400">Equipment</h2>
         <div className="text-[11px] text-slate-500">{status}</div>
       </div>
 
@@ -413,12 +413,12 @@ export function EquipmentPanel({
         {/* Shield */}
         <label className={`flex items-center gap-2 rounded-md px-2 py-2 border transition ${
           shieldEquipped
-            ? 'border-indigo-700/50 bg-indigo-950/20'
+            ? 'border-amber-700/50 bg-amber-950/20'
             : 'border-slate-800 bg-slate-900/60'
         }`}>
           <input
             type="checkbox"
-            className="h-4 w-4 accent-indigo-500"
+            className="h-4 w-4 accent-amber-500"
             checked={shieldEquipped}
             disabled={!shieldOwned}
             onChange={(e) => onToggleShield(e.target.checked)}
@@ -430,7 +430,7 @@ export function EquipmentPanel({
         {/* Inventory Manager */}
         <div className="mt-3 border-t border-slate-800 pt-3">
           <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-[10px] font-semibold uppercase text-indigo-400">Inventory</h3>
+            <h3 className="text-[10px] font-semibold uppercase text-amber-400">Inventory</h3>
             <div className="text-[10px] text-slate-500">Owned items drive equip dropdowns</div>
           </div>
 
@@ -461,7 +461,7 @@ export function EquipmentPanel({
                   value={customName}
                   onChange={(e) => setCustomName(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') addCustomItem() }}
-                  className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-[12px] text-slate-100 placeholder-slate-500 focus:border-indigo-600 focus:outline-none"
+                  className="w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-[12px] text-slate-100 placeholder-slate-500 focus:border-amber-600 focus:outline-none"
                 />
               )}
 
@@ -475,7 +475,7 @@ export function EquipmentPanel({
                     upsertInventoryItem(addKey, 1, nameOverride)
                   }
                 }}
-                className="rounded-md bg-indigo-600/30 px-3 py-2 text-[12px] font-semibold text-indigo-100 hover:bg-indigo-600/50 transition"
+                className="rounded-md bg-amber-600/30 px-3 py-2 text-[12px] font-semibold text-amber-100 hover:bg-amber-600/50 transition"
               >
                 + Add
               </button>
@@ -526,7 +526,7 @@ export function EquipmentPanel({
                     key={String(it.key)}
                     className={`flex items-center gap-2 rounded-md border px-2 py-2 transition ${
                       isEquipped
-                        ? 'border-indigo-700/50 bg-indigo-950/20'
+                        ? 'border-amber-700/50 bg-amber-950/20'
                         : 'border-slate-800 bg-slate-900/40'
                     }`}
                   >
@@ -534,7 +534,7 @@ export function EquipmentPanel({
                       <div className="truncate text-[12px] text-slate-100">
                         {String(it.name || getNiceNameForKey(it.key))}
                         {isEquipped && (
-                          <span className="ml-1.5 text-[10px] text-indigo-400">equipped</span>
+                          <span className="ml-1.5 text-[10px] text-amber-400">equipped</span>
                         )}
                         {isAttuned && (
                           <span className="ml-1.5 text-[10px] text-amber-300">attuned</span>
