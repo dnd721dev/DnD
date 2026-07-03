@@ -1161,6 +1161,18 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
     () => tokens.filter(t => !(wallet && t.owner_wallet?.toLowerCase() === wallet)),
     [tokens, wallet],
   )
+  const myToken = useMemo(
+    () => tokens.find(t => wallet && t.owner_wallet?.toLowerCase() === wallet) ?? null,
+    [tokens, wallet],
+  )
+  // Self-only buffs (Blade Ward, Shield, Mage Armor, …) target the caster's
+  // own token, which allTargets deliberately excludes — bug: self-targeting
+  // support spells had no valid option in the target dropdown.
+  const supportTargetsFor = useCallback((spell: SrdSpell) => {
+    const isSelfOnly = spell.range?.toLowerCase() === 'self' || spell.targets?.toLowerCase().includes('self')
+    if (isSelfOnly) return myToken ? [myToken] : []
+    return allTargets
+  }, [allTargets, myToken])
 
   // ── Wave 5: Concentration tracking ───────────────────────────────────────
   // Declared BEFORE handleRoll so the useCallback dep array can reference
@@ -2028,7 +2040,7 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
                   key={spell.name}
                   spell={spell}
                   slots={slots}
-                  targets={allTargets}
+                  targets={supportTargetsFor(spell)}
                   spellSaveDC={stats.dc}
                   isDomain={domainSet.has(spell.name)}
                   onRoll={handleRoll}
