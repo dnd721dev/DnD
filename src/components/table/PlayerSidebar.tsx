@@ -886,6 +886,11 @@ export function PlayerSidebar({
       .update(updatePayload)
       .eq('id', selectedCharacterId)
 
+    // Bug: healing/damage taken from the player sidebar wasn't reflected on
+    // the character's live combat token, so the map/DM view looked stale.
+    // Sync the token's current_hp too when one exists for this character.
+    await supabase.from('tokens').update({ current_hp: next }).eq('character_id', selectedCharacterId)
+
     setHpSaving(false)
     if (error) {
       console.error('PlayerSidebar HP update error', error)
