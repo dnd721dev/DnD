@@ -187,6 +187,36 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
     }, 2000)
   }
 
+  // Map overlay props — DM-placed decorations (campfire, treasure chest, …)
+  // stored as regular tokens with type='prop' so they persist, sync via the
+  // existing tokens realtime channel, and respect fog-of-war like NPC tokens.
+  const PROP_OPTIONS: { emoji: string; label: string }[] = [
+    { emoji: '🔥', label: 'Campfire' },
+    { emoji: '💰', label: 'Treasure' },
+    { emoji: '📦', label: 'Chest' },
+    { emoji: '🕯️', label: 'Torch' },
+    { emoji: '💀', label: 'Skull' },
+    { emoji: '🚪', label: 'Door' },
+  ]
+  const [propPicker, setPropPicker] = useState(false)
+  const [armedProp, setArmedProp] = useState<{ emoji: string; label: string } | null>(null)
+
+  async function placeProp(x: number, y: number) {
+    if (!armedProp) return
+    await supabase.from('tokens').insert({
+      encounter_id: encounterId,
+      map_id: mapId ?? null,
+      label: armedProp.emoji,
+      type: 'prop',
+      x, y,
+      hp: null,
+      ac: null,
+      owner_wallet: ownerLower,
+      character_id: null,
+    })
+    setArmedProp(null)
+  }
+
   const [zoom, setZoom] = useState(1)
   const [translate, setTranslate] = useState<Point>({ x: 0, y: 0 })
 
@@ -1164,6 +1194,11 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       return
     }
 
+    if (armedProp) {
+      void placeProp(snapToGrid(world.x), snapToGrid(world.y))
+      return
+    }
+
     const hit = tokens.find((t) => Math.hypot(t.x - world.x, t.y - world.y) < gridSize * 0.5)
 
     if (hit) {
@@ -1437,6 +1472,38 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
       >
         📍 {pingMode ? 'Click map to ping…' : 'Ping'}
       </button>
+
+      {/* Map props — DM-only decorations (campfire, treasure chest, …) */}
+      {isGm && (
+        <div className="pointer-events-auto absolute left-3 top-12 z-10">
+          <button
+            type="button"
+            onClick={() => setPropPicker((v) => !v)}
+            className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold shadow transition ${
+              armedProp
+                ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                : 'border-slate-700/60 bg-slate-950/80 text-slate-300 hover:border-emerald-500/60 hover:text-emerald-300'
+            }`}
+            title="Place a decorative prop on the map"
+          >
+            {armedProp ? `${armedProp.emoji} Click map to place…` : '🪵 Props'}
+          </button>
+          {propPicker && (
+            <div className="mt-1 flex flex-col gap-1 rounded-lg border border-slate-700/60 bg-slate-950/95 p-1.5 shadow-xl">
+              {PROP_OPTIONS.map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => { setArmedProp(p); setPropPicker(false) }}
+                  className="flex items-center gap-1.5 rounded px-2 py-1 text-left text-[11px] text-slate-200 hover:bg-slate-800"
+                >
+                  <span>{p.emoji}</span>{p.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* GM fog toolbar — shown when viewing as a player (View As mode) */}
       {isGm && (
