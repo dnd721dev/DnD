@@ -845,7 +845,7 @@ export default function CharacterSheetPage() {
           </p>
         </button>
       ) : isCaya ? (
-        <div className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3 space-y-1.5">
+        <div className="rounded-xl border border-amber-900/40 bg-gradient-to-b from-stone-950/80 to-slate-950/90 px-4 py-3 space-y-1.5">
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold text-amber-300">CAYA — Experience Points</span>
             <span className="text-slate-400">
@@ -872,7 +872,7 @@ export default function CharacterSheetPage() {
       ) : null}
 
       {/* Tabs */}
-      <div className="flex flex-wrap gap-2 rounded-xl border border-slate-800 bg-slate-950/60 p-2">
+      <div className="flex flex-wrap gap-2 rounded-xl border border-amber-900/50 bg-gradient-to-r from-stone-950 via-slate-950 to-black p-2">
         {(['overview', 'skills_traits', 'gear', 'notes'] as const).map((t) => (
           <button
             key={t}
@@ -1113,7 +1113,7 @@ export default function CharacterSheetPage() {
 
       {/* ── Game Type / Convert to CAYA ────────────────────────────────────── */}
       <div className="mx-auto mt-6 max-w-3xl px-4">
-        <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4">
+        <div className="rounded-xl border border-amber-900/40 bg-gradient-to-b from-stone-950/80 to-slate-950/90 p-4">
           <h3 className="text-sm font-semibold text-slate-200">Game Type</h3>
           {isCaya ? (
             <p className="mt-1 text-xs text-amber-300">

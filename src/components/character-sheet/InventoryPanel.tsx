@@ -222,7 +222,7 @@ export function InventoryPanel({
   }
 
   return (
-    <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+    <section className="rounded-xl border border-amber-900/40 bg-gradient-to-b from-stone-950/80 to-slate-950/90 p-3">
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Inventory</h2>
         <div className="text-[11px] text-slate-500">{status}</div>

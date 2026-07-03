@@ -653,7 +653,7 @@ export function SpellsPanel({
 
   // ── render ──────────────────────────────────────────────────────────────────
   return (
-    <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-xs">
+    <section className="rounded-xl border border-amber-900/40 bg-gradient-to-b from-stone-950/80 to-slate-950/90 p-3 text-xs">
 
       {/* Header: known/prepared counts + spellcasting stats */}
       <div className="mb-3">

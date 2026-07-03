@@ -159,7 +159,7 @@ export function PersonalityNotesPanel({ c }: { c: CharacterSheetData }) {
       : (campaigns.find((c) => c.id === selectedCampaignId)?.title ?? 'Campaign')
 
   return (
-    <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-200">
+    <section className="rounded-xl border border-amber-900/40 bg-gradient-to-b from-stone-950/80 to-slate-950/90 p-3 text-xs text-slate-200">
       {/* Header */}
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">

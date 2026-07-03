@@ -82,7 +82,7 @@ export function TraitsFeaturesPanel({ c }: { c: CharacterSheetData }) {
     feats.length > 0
 
   return (
-    <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-200">
+    <section className="rounded-xl border border-amber-900/40 bg-gradient-to-b from-stone-950/80 to-slate-950/90 p-3 text-xs text-slate-200">
       <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
         Traits & Features
       </h2>

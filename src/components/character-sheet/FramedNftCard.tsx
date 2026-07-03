@@ -48,7 +48,7 @@ export function FramedNftCard({
           src={imageUrl}
           alt={name}
           className="absolute object-cover"
-          style={{ left: '7%', right: '7%', top: '20.5%', bottom: '21%', width: '86%', height: '58.5%' }}
+          style={{ left: '7%', right: '7%', top: '20.5%', bottom: '21%', width: '86%', height: '58.5%', objectPosition: 'left center' }}
         />
       ) : (
         <div

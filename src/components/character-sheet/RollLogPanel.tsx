@@ -2,7 +2,7 @@ import type { RollEntry } from './types'
 
 export function RollLogPanel({ rollLog }: { rollLog: RollEntry[] }) {
   return (
-    <section className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-xs">
+    <section className="rounded-xl border border-amber-900/40 bg-gradient-to-b from-stone-950/80 to-slate-950/90 p-3 text-xs">
       <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
         Recent Rolls
       </h2>

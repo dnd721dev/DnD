@@ -74,7 +74,7 @@ export function ActionsPanel({
   const isRogue = normalizedClass === 'rogue'
 
   return (
-    <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+    <div className="space-y-3 rounded-xl border border-amber-900/40 bg-gradient-to-b from-stone-950/80 to-slate-950/90 p-3">
       <div className="flex items-center justify-between">
         <div className="text-sm font-semibold text-slate-100">Actions</div>
         {isRogue && onToggleSneakArm && (
