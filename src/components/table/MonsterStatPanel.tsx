@@ -453,6 +453,7 @@ export function MonsterStatPanel({
             'Stunned',
             'Unconscious',
             'Invisible',
+            'Flying',
           ].map(cond => {
             const active = conditions.includes(cond)
             return (

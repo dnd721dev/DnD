@@ -213,6 +213,18 @@ export default function TableClient({ sessionId }: TableClientProps) {
         if (triggers.length === 0) return
         const trig = triggers[0]
 
+        // Flying tokens pass over ground traps (they aren't touching the
+        // floor) but still use map-transition portals normally.
+        if (trig.trigger_type !== 'portal' && tokenId) {
+          const { data: tokRow } = await supabase
+            .from('tokens')
+            .select('conditions')
+            .eq('id', tokenId)
+            .maybeSingle()
+          const tokConditions: string[] = Array.isArray((tokRow as any)?.conditions) ? (tokRow as any).conditions : []
+          if (tokConditions.some((c) => String(c).toLowerCase() === 'flying')) return
+        }
+
         // Map-transition portal: switch the token's owner to the destination
         // map at the landing tile instead of firing a save prompt.
         if (trig.trigger_type === 'portal' && trig.target_map_id) {
