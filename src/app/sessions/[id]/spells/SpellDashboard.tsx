@@ -67,6 +67,12 @@ import {
   type RacialResource,
 } from '@/lib/racialResources'
 
+// Heuristic: SRD doesn't tag spells with a "summon" category, so match on the
+// common summon-spell naming patterns (Conjure X, Summon X, Find Familiar/Steed).
+function isSummonSpell(spell: SrdSpell): boolean {
+  return /^(conjure|summon)\b/i.test(spell.name) || /^find (familiar|steed|greater steed)$/i.test(spell.name)
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 type CharRow = {
@@ -110,6 +116,8 @@ type Token = {
   owner_wallet: string | null
   map_id: string | null
   hidden: boolean | null
+  x: number | null
+  y: number | null
 }
 
 type PendingRoll = {
@@ -830,7 +838,7 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
       if (eid) {
         let q = supabase
           .from('tokens')
-          .select('id, label, type, hp, current_hp, ac, owner_wallet, map_id, hidden')
+          .select('id, label, type, hp, current_hp, ac, owner_wallet, map_id, hidden, x, y')
           .eq('encounter_id', eid)
         if (effectiveMapId) q = (q as any).or(`map_id.eq.${effectiveMapId},map_id.is.null`)
         const { data: toks } = await q
@@ -1354,7 +1362,62 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
       const newSlots = await expendSlot(supabase, myChar.id, slotLevel)
       if (newSlots) setSlots(newSlots)
     }
-  }, [myChar, sessionId, wallet, tokens, requireConcentrationConfirmation])
+
+    // Summon spells: spawn a token next to the caster and drop it into
+    // initiative right after the caster's turn.
+    if (isSummonSpell(spell) && encounterId) {
+      await summonTokenForSpell(spell)
+    }
+  }, [myChar, sessionId, wallet, tokens, requireConcentrationConfirmation, encounterId])
+
+  const summonTokenForSpell = useCallback(async (spell: SrdSpell) => {
+    if (!myChar || !encounterId) return
+    const myToken = tokens.find(t => t.owner_wallet?.toLowerCase() === wallet)
+
+    const { data: newTok, error: tokErr } = await supabase
+      .from('tokens')
+      .insert({
+        encounter_id: encounterId,
+        map_id: myToken?.map_id ?? null,
+        label: `${spell.name} (Summon)`,
+        type: 'npc',
+        x: (myToken?.x ?? 0) + 40,
+        y: (myToken?.y ?? 0) + 40,
+        hp: 10,
+        current_hp: 10,
+        ac: 12,
+        owner_wallet: wallet,
+        character_id: null,
+      })
+      .select('id, label, hp')
+      .maybeSingle()
+
+    if (tokErr || !newTok) {
+      console.error('[SpellDashboard] summon token create failed', tokErr)
+      return
+    }
+
+    // Find the caster's initiative entry so the summon can share its init —
+    // ties break by created_at ascending, so inserting now naturally places
+    // the summon immediately after the caster in turn order.
+    const { data: casterEntry } = await supabase
+      .from('initiative_entries')
+      .select('init')
+      .eq('encounter_id', encounterId)
+      .eq('character_id', myChar.id)
+      .maybeSingle()
+
+    await supabase.from('initiative_entries').insert({
+      encounter_id: encounterId,
+      character_id: null,
+      token_id: (newTok as any).id,
+      name: (newTok as any).label,
+      init: (casterEntry as any)?.init ?? 10,
+      hp: (newTok as any).hp,
+      is_pc: false,
+      wallet_address: wallet,
+    })
+  }, [myChar, encounterId, tokens, wallet])
 
   const handleApply = useCallback(async () => {
     if (!pending) return
