@@ -1838,15 +1838,24 @@ export function PlayerSidebar({
                       const pb = proficiencyBonus(sheet?.level)
                       const hasSaveProf = Array.isArray(sheet?.saving_throw_profs) && sheet.saving_throw_profs.includes(key)
                       const saveMod = base + (hasSaveProf ? pb : 0)
+                      const saveAutoFail =
+                        (key === 'str' && condMechanics.autoFailStr) ||
+                        (key === 'dex' && condMechanics.autoFailDex)
                       return (
                         <button key={key} type="button"
-                          onClick={() => rollD20WithMode(saveMod, `${key.toUpperCase()} Save`)}
+                          onClick={() => {
+                            if (saveAutoFail) {
+                              onRoll?.({ label: `${key.toUpperCase()} Save — AUTO FAIL`, formula: '0', result: 0, outcome: 'AUTO FAIL' })
+                            } else {
+                              rollD20WithMode(saveMod, `${key.toUpperCase()} Save`)
+                            }
+                          }}
                           className="rounded-md border border-blue-900/30 bg-slate-900 px-1 py-1.5 text-center hover:border-blue-500/50 hover:bg-slate-900/80">
                           <div className="flex items-center justify-center gap-0.5">
                             <span className="text-[10px] font-semibold text-blue-200">{key.toUpperCase()}</span>
                             {hasSaveProf && <span className="text-[8px] text-blue-400 leading-none">●</span>}
                           </div>
-                          <div className="text-[9px] font-mono text-slate-400">{fmtMod(saveMod)}</div>
+                          <div className="text-[9px] font-mono text-slate-400">{saveAutoFail ? 'AUTO FAIL' : fmtMod(saveMod)}</div>
                         </button>
                       )
                     })}

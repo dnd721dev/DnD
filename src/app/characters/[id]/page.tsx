@@ -650,7 +650,14 @@ export default function CharacterSheetPage() {
       body: JSON.stringify({ wallet }),
     })
     if (res.ok) {
-      router.push('/characters')
+      try {
+        const profRes = await fetch(`/api/profiles/by-wallet?wallet=${encodeURIComponent(wallet)}`)
+        const profBody = await profRes.json().catch(() => ({}))
+        const username = profBody?.profile?.username
+        router.push(username ? `/profile/${encodeURIComponent(username)}` : '/characters')
+      } catch {
+        router.push('/characters')
+      }
     } else {
       const body = await res.json().catch(() => ({}))
       console.error('Delete failed', body)

@@ -339,7 +339,7 @@ export const DOMAIN_SPELLS_BY_SUBCLASS: Partial<Record<string, Record<number, st
     5: ['Dominate Person', 'Modify Memory'],
   },
   cleric_war: {
-    1: ['Divine Favor', 'Shield of Faith'],
+    1: ['Guiding Bolt', 'Shield of Faith'],
     2: ['Magic Weapon', 'Spiritual Weapon'],
     3: ["Crusader's Mantle", 'Spirit Guardians'],
     4: ['Freedom of Movement', 'Stoneskin'],

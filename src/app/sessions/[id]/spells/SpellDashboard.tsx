@@ -1233,8 +1233,16 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
         break
       case 'damage': {
         // Magic audit section B: cantrip damage scales with character level, not slot level.
+        // Toll the Dead: 1d12 (scaled) instead of 1d8 if the target is missing any HP.
+        const targetToken = tokens.find(t => t.id === targetId)
+        const targetIsDamaged = !!targetToken
+          && targetToken.hp != null
+          && (targetToken.current_hp ?? targetToken.hp) < targetToken.hp
+        const cantripDamage = (spell.name === 'Toll the Dead' && targetIsDamaged)
+          ? (spell.damage ?? '1d8').replace('d8', 'd12')
+          : (spell.damage ?? '1d6')
         const baseDmg = spell.level === 0
-          ? scaleCantripDamage(spell.damage ?? '1d6', myChar.level ?? 1)
+          ? scaleCantripDamage(cantripDamage, myChar.level ?? 1)
           : scaleDamageForSlot(spell, slotLevel)
         // Effect 1: Agonizing Blast adds CHA per beam to Eldritch Blast.
         notation = (hasAgonizingBlast && spell.name === 'Eldritch Blast')

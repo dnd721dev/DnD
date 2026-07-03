@@ -810,6 +810,27 @@ const MapBoardView: React.FC<MapBoardViewProps> = ({
         ctx.restore()
       }
 
+      // Death ring — thick red/black ring when a token has hit 0 HP
+      if (typeof t.hp === 'number' && t.hp <= 0) {
+        const lw = Math.max(3, gridSize * 0.12)
+        ctx.save()
+        ctx.beginPath()
+        ctx.lineWidth = lw
+        ctx.strokeStyle = 'rgba(220,38,38,0.95)' // red-600
+        ctx.shadowColor = 'rgba(0,0,0,0.8)'
+        ctx.shadowBlur = Math.max(10, gridSize * 0.35)
+        ctx.arc(t.x, t.y, r + lw * 0.7, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.restore()
+        ctx.save()
+        ctx.globalAlpha = 0.5
+        ctx.fillStyle = '#000000'
+        ctx.beginPath()
+        ctx.arc(t.x, t.y, r, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+      }
+
       // Draw portrait image if available, otherwise fall back to text label
       const tokenImg = t.token_image_url ? tokenImgCacheRef.current.get(t.token_image_url) : undefined
       if (tokenImg && tokenImg.complete && tokenImg.naturalWidth > 0) {

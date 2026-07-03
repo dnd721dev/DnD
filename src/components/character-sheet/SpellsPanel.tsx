@@ -408,6 +408,13 @@ export function SpellsPanel({
     return preparedList.filter(n => !domainSpellNames.has(n)).length
   }, [preparedList, domainSpellNames])
 
+  // origin_feat (e.g. Magic Initiate granted by a background) is stored
+  // separately from the ASI feats array, but grants the same spell bonuses.
+  const allFeats = useMemo(() => {
+    const originFeat = (c as any).origin_feat
+    return originFeat ? [...(c.feats ?? []), originFeat] : (c.feats ?? [])
+  }, [c.feats, (c as any).origin_feat])
+
   // Magic audit section F.3: max-leveled-spells-known counter for known-spell
   // casters (Sorcerer / Bard / Warlock / Ranger) and Wizard spellbook size.
   // Existing characters with too many spells see a warning (we don't force a
@@ -415,8 +422,8 @@ export function SpellsPanel({
   const maxLeveledKnown = useMemo(() => {
     const cls = String(c.main_job ?? '').toLowerCase()
     // Magic Initiate adds a 1st-level spell on top of the class allowance.
-    return (getMaxLeveledSpellsKnown(cls, Number(c.level ?? 1)) ?? 0) + getFeatSpellBonus(c.feats).leveled
-  }, [c.main_job, c.level, c.feats])
+    return (getMaxLeveledSpellsKnown(cls, Number(c.level ?? 1)) ?? 0) + getFeatSpellBonus(allFeats).leveled
+  }, [c.main_job, c.level, allFeats])
 
   // Current leveled-spell count from spells_known (cantrips excluded).
   const currentLeveledKnown = useMemo(() => {
@@ -429,8 +436,8 @@ export function SpellsPanel({
   const maxCantrips = useMemo(() => {
     const cls = String(c.main_job ?? '').toLowerCase() as any
     // Magic Initiate (+2) / Spell Sniper (+1) grant extra cantrips beyond the class allowance.
-    return getCantripsKnown(cls, Number(c.level ?? 1)) + getFeatSpellBonus(c.feats).cantrips
-  }, [c.main_job, c.level, c.feats])
+    return getCantripsKnown(cls, Number(c.level ?? 1)) + getFeatSpellBonus(allFeats).cantrips
+  }, [c.main_job, c.level, allFeats])
 
   const currentCantrips = useMemo(() => {
     return knownList.filter(name => {
