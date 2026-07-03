@@ -81,6 +81,16 @@ export const TableTopBar = memo(function TableTopBar(props: {
               ✦ {isGm ? 'Party Slots' : 'Spells'}
             </button>
           )}
+          {!isGm && (
+            <button
+              type="button"
+              onClick={() => window.open(`/sessions/${session.id}/melee`, '_blank', 'noopener,noreferrer')}
+              className="rounded-md bg-red-950 border border-red-500/40 px-2.5 py-1 text-[11px] font-medium text-red-400 hover:bg-red-900 hover:text-red-300 transition-colors"
+              title="Open melee dashboard in new tab"
+            >
+              ⚔ Melee
+            </button>
+          )}
           {isGm && (
             <button
               type="button"
