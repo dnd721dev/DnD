@@ -658,7 +658,7 @@ export function SpellsPanel({
       {/* Header: known/prepared counts + spellcasting stats */}
       <div className="mb-3">
         <div className="flex items-center gap-2 mb-2 flex-wrap">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-amber-300/80">
             Spellbook
           </h2>
           <span className="rounded bg-slate-900/70 px-1.5 py-0.5 text-[10px] text-slate-300">
@@ -668,7 +668,7 @@ export function SpellsPanel({
             className={`rounded px-1.5 py-0.5 text-[10px] ${
               maxPrepared !== null && preparedNonDomainCount >= maxPrepared
                 ? 'bg-amber-900/60 text-amber-300'
-                : 'bg-slate-900/70 text-slate-300'
+                : 'bg-amber-950/40 border border-amber-800/40 text-amber-200'
             }`}
             title={domainSpellNames.size > 0
               ? `${preparedNonDomainCount} count against cap; ${domainSpellNames.size} domain spells always prepared.`
@@ -685,8 +685,8 @@ export function SpellsPanel({
                 currentLeveledKnown > maxLeveledKnown
                   ? 'bg-rose-900/60 text-rose-300'
                   : currentLeveledKnown === maxLeveledKnown
-                    ? 'bg-emerald-900/40 text-emerald-300'
-                    : 'bg-slate-900/70 text-slate-300'
+                    ? 'bg-amber-900/60 text-amber-200'
+                    : 'bg-amber-950/40 border border-amber-800/40 text-amber-200'
               }`}
               title={String(c.main_job).toLowerCase() === 'wizard'
                 ? 'Wizard spellbook size: 6 + 2×(level − 1)'
@@ -702,7 +702,7 @@ export function SpellsPanel({
               className={`rounded px-1.5 py-0.5 text-[10px] ${
                 currentCantrips > maxCantrips
                   ? 'bg-rose-900/60 text-rose-300'
-                  : 'bg-slate-900/70 text-slate-300'
+                  : 'bg-amber-950/40 border border-amber-800/40 text-amber-200'
               }`}
             >
               Cantrips {currentCantrips}/{maxCantrips}
@@ -714,8 +714,8 @@ export function SpellsPanel({
             <span
               className={`rounded px-1.5 py-0.5 text-[10px] ${
                 wildcardList.length === wildcardBudget
-                  ? 'bg-fuchsia-900/40 text-fuchsia-300'
-                  : 'bg-slate-900/70 text-slate-300'
+                  ? 'bg-amber-900/60 text-amber-200'
+                  : 'bg-amber-950/40 border border-amber-800/40 text-amber-200'
               }`}
               title="EK / AT any-school wildcard picks (levels 3, 8, 14, 20)"
             >
@@ -734,13 +734,13 @@ export function SpellsPanel({
         )}
         {c.spellcasting_ability ? (
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 rounded-md bg-violet-900/30 border border-violet-700/40 px-2.5 py-1">
-              <span className="text-[10px] uppercase tracking-wide text-violet-400">Save DC</span>
-              <span className="text-base font-bold text-violet-200">{(derivedSpellSaveDc ?? c.spell_save_dc) ?? '—'}</span>
+            <div className="flex items-center gap-1.5 rounded-md bg-amber-950/40 border border-amber-700/50 px-2.5 py-1">
+              <span className="text-[10px] uppercase tracking-wide text-amber-400">Save DC</span>
+              <span className="text-base font-bold text-amber-200">{(derivedSpellSaveDc ?? c.spell_save_dc) ?? '—'}</span>
             </div>
-            <div className="flex items-center gap-1.5 rounded-md bg-blue-900/30 border border-blue-700/40 px-2.5 py-1">
-              <span className="text-[10px] uppercase tracking-wide text-blue-400">Spell Attack</span>
-              <span className="text-base font-bold text-blue-200">
+            <div className="flex items-center gap-1.5 rounded-md bg-amber-950/40 border border-amber-700/50 px-2.5 py-1">
+              <span className="text-[10px] uppercase tracking-wide text-amber-400">Spell Attack</span>
+              <span className="text-base font-bold text-amber-200">
                 {(derivedSpellAttackBonus ?? c.spell_attack_bonus) != null ? formatMod((derivedSpellAttackBonus ?? c.spell_attack_bonus) as number) : '—'}
               </span>
             </div>

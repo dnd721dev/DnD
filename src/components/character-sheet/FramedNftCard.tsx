@@ -4,7 +4,18 @@ import { Cinzel } from 'next/font/google'
 
 // Premium gothic display serif — closest Google-font match to the engraved
 // DND721 plaque lettering (sharp wedge serifs, condensed Roman caps).
-const cinzel = Cinzel({ subsets: ['latin'], weight: ['700', '900'] })
+// Exported so the sheet header (name / race / class) can share the card face.
+export const cinzel = Cinzel({ subsets: ['latin'], weight: ['700', '900'] })
+
+/** Shared antique-gold engraved text treatment matching the plaque lettering. */
+export const goldTextStyle: React.CSSProperties = {
+  background:
+    'linear-gradient(180deg, #fbe8a6 0%, #f0c75e 22%, #d99e2b 48%, #9c6b1c 72%, #7a4f14 100%)',
+  WebkitBackgroundClip: 'text',
+  backgroundClip: 'text',
+  color: 'transparent',
+  filter: 'drop-shadow(0 1px 0 rgba(255,238,170,0.3)) drop-shadow(0 2px 2px rgba(0,0,0,0.8))',
+}
 
 /**
  * DND721 gothic card: the character's NFT image sits inside the ornate
@@ -48,7 +59,7 @@ export function FramedNftCard({
           src={imageUrl}
           alt={name}
           className="absolute object-cover"
-          style={{ left: '7%', right: '7%', top: '20.5%', bottom: '21%', width: '86%', height: '58.5%', objectPosition: 'left center' }}
+          style={{ left: '8%', top: '21%', width: '85%', height: '57.5%', objectPosition: 'left center' }}
         />
       ) : (
         <div

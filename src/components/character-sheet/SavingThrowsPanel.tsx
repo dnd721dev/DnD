@@ -22,7 +22,7 @@ export function SavingThrowsPanel({
 }) {
   return (
     <section className="rounded-xl border border-amber-900/40 bg-gradient-to-b from-stone-950/80 to-slate-950/90 p-3">
-      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-300/80">
         Saving Throws
       </h2>
       <div className="space-y-1 text-xs">
@@ -38,9 +38,9 @@ export function SavingThrowsPanel({
               className="flex w-full items-center justify-between rounded-md bg-slate-900/80 px-2 py-1 hover:bg-slate-800"
             >
               <span className="flex items-center gap-1">
-                <span className="h-3 w-3 rounded border border-slate-500">
+                <span className="h-3 w-3 rounded border border-amber-700/60">
                   {hasProf && (
-                    <span className="block h-3 w-3 rounded bg-emerald-500/80" />
+                    <span className="block h-3 w-3 rounded bg-amber-500/80" />
                   )}
                 </span>
                 <span className="font-semibold uppercase text-slate-100">{k}</span>

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { CharacterSheetData } from './types'
 import type { DerivedStats } from './calc'
 import { getAllClasses, isMulticlassed } from '@/lib/multiclass'
-import { FramedNftCard } from './FramedNftCard'
+import { FramedNftCard, cinzel, goldTextStyle } from './FramedNftCard'
 
 function HpPill({ current, max }: { current: number; max: number }) {
   const pct = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0
@@ -84,10 +84,15 @@ export function CharacterHeader({
                   if (e.key === 'Enter') { e.preventDefault(); save() }
                   if (e.key === 'Escape') { e.preventDefault(); cancel() }
                 }}
-                className="text-2xl font-bold tracking-tight text-white leading-tight bg-transparent border-b border-amber-400 outline-none w-full max-w-xs"
+                className={`${cinzel.className} text-2xl font-black uppercase tracking-wide text-amber-300 leading-tight bg-transparent border-b border-amber-400 outline-none w-full max-w-xs`}
               />
             ) : (
-              <h1 className="text-2xl font-bold tracking-tight text-white leading-tight">{name}</h1>
+              <h1
+                className={`${cinzel.className} text-2xl font-black uppercase tracking-wide leading-tight`}
+                style={goldTextStyle}
+              >
+                {name}
+              </h1>
             )}
             {!editing && onRename && (
               <button
@@ -114,7 +119,7 @@ export function CharacterHeader({
               </button>
             )}
           </div>
-          <p className="text-sm text-slate-300">
+          <p className={`${cinzel.className} text-sm uppercase tracking-wide`} style={goldTextStyle}>
             {c.race ?? 'Unknown Race'}
             {/* Wave 6: render every class entry with its level so multiclass
                 characters show e.g. "Human • Cleric 5 / Wizard 1" */}
