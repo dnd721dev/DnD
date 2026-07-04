@@ -85,6 +85,32 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
   const { roomName, audioOnly } = parsed.data
 
+  // ── Bot recorder mode (RECORDER_MODE=bot) ─────────────────────────────────
+  // Instead of LiveKit Cloud egress (metered), insert a job row that the
+  // self-hosted recorder worker (recorder-worker/) picks up: it joins the
+  // room as a hidden participant, records, mixes, uploads to Supabase
+  // Storage, and finalizes this row. Uses zero egress minutes.
+  if (process.env.RECORDER_MODE === 'bot') {
+    const db = supabaseAdmin()
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const { data: recording, error: insertError } = await db
+      .from('session_recordings')
+      .insert({
+        session_id: sessionId,
+        room_name:  roomName,
+        egress_id:  null,
+        status:     'requested', // worker flips to 'recording' when connected
+        file_key:   `recordings/${sessionId}/${timestamp}.ogg`,
+        file_url:   null,
+      })
+      .select()
+      .maybeSingle()
+    if (insertError) {
+      return NextResponse.json({ error: insertError.message }, { status: 500 })
+    }
+    return NextResponse.json({ recording, tracks: [], mode: 'bot' }, { status: 201 })
+  }
+
   const bucket    = process.env.RECORDING_S3_BUCKET
   const region    = process.env.RECORDING_S3_REGION
   const accessKey = process.env.RECORDING_S3_ACCESS_KEY
@@ -351,13 +377,27 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     .from('session_recordings')
     .select('*')
     .eq('session_id', sessionId)
-    .eq('status', 'recording')
+    .in('status', ['recording', 'requested']) // 'requested' = bot job not yet picked up
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
 
   if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 })
   if (!row) return NextResponse.json({ error: 'No active recording' }, { status: 404 })
+
+  // ── Bot recorder rows (no egress_id): hand the stop to the worker ─────────
+  // The worker sees status='stopping', disconnects, mixes + uploads the audio
+  // and sets the final status/duration/file_url itself.
+  if (!row.egress_id) {
+    const { data: updated, error: updateError } = await db
+      .from('session_recordings')
+      .update({ status: 'stopping' })
+      .eq('id', recordingId ?? row.id)
+      .select()
+      .maybeSingle()
+    if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 })
+    return NextResponse.json({ recording: updated, mode: 'bot' })
+  }
 
   const client = makeEgressClient()
 

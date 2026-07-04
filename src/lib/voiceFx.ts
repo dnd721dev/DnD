@@ -6,22 +6,75 @@
 // (two crossfaded delay lines whose delay times ramp continuously): cheap,
 // latency-friendly (~100 ms grain), and artifact-acceptable for tabletop
 // character voices.
+//
+// Presets are pure data (FxParams) so adding a new voice — or an A/B variant
+// so two NPCs of the same creature type sound distinct — is one line.
 
-export type VoiceFxPreset =
-  | 'none'
-  | 'demon'      // deep + growl distortion
-  | 'goblin'     // pitched up, nasal
-  | 'ghost'      // airy, echoing
-  | 'giant'      // very deep, muffled boom
-  | 'construct'  // robotic radio band + crunch
+export type VoiceFxPreset = string
 
-export const VOICE_FX_PRESETS: { key: VoiceFxPreset; label: string; emoji: string }[] = [
-  { key: 'none',      label: 'Natural voice', emoji: '🎙' },
-  { key: 'demon',     label: 'Demon',         emoji: '👹' },
-  { key: 'giant',     label: 'Giant',         emoji: '🗿' },
-  { key: 'goblin',    label: 'Goblin',        emoji: '👺' },
-  { key: 'ghost',     label: 'Ghost',         emoji: '👻' },
-  { key: 'construct', label: 'Construct',     emoji: '🤖' },
+type BiquadSpec = {
+  type: BiquadFilterType
+  frequency: number
+  Q?: number
+  gain?: number
+}
+
+type FxParams = {
+  /** Pitch shift in semitones. Negative = deeper. */
+  semitones?: number
+  /** Waveshaper drive; ~10 = grit, ~30 = heavy crunch. */
+  distortion?: number
+  /** Feedback echo. */
+  echo?: { delay: number; feedback: number; wet: number }
+  /** Biquad filter chain applied after pitch/distortion, in order. */
+  filters?: BiquadSpec[]
+  /** Output gain (default 0.9). */
+  gain?: number
+}
+
+const PRESET_PARAMS: Record<string, FxParams> = {
+  none: {},
+
+  // ── Humanoid disguises ──────────────────────────────────────────────────────
+  // Subtle shifts for voicing NPCs of the other sex or different builds.
+  male_deep:   { semitones: -3, filters: [{ type: 'lowshelf', frequency: 250, gain: 5 }] },
+  male_gruff:  { semitones: -2, distortion: 8, filters: [{ type: 'peaking', frequency: 900, Q: 1.2, gain: 3 }] },
+  female_soft: { semitones: 4, filters: [{ type: 'highshelf', frequency: 3000, gain: 4 }, { type: 'highpass', frequency: 120 }] },
+  female_sharp:{ semitones: 6, filters: [{ type: 'peaking', frequency: 2600, Q: 1.5, gain: 6 }, { type: 'highpass', frequency: 150 }] },
+  elder:       { semitones: -1, filters: [{ type: 'peaking', frequency: 1600, Q: 1, gain: -5 }, { type: 'highshelf', frequency: 4000, gain: -4 }] },
+  child:       { semitones: 7, filters: [{ type: 'highpass', frequency: 200 }] },
+
+  // ── Monsters — two variants each so two NPCs of the same type differ ───────
+  demon_a:     { semitones: -5, distortion: 18, filters: [{ type: 'lowshelf', frequency: 300, gain: 6 }] },
+  demon_b:     { semitones: -7, distortion: 26, echo: { delay: 0.09, feedback: 0.2, wet: 0.3 }, filters: [{ type: 'lowshelf', frequency: 250, gain: 7 }] },
+  giant_a:     { semitones: -7, filters: [{ type: 'lowpass', frequency: 1800 }, { type: 'lowshelf', frequency: 200, gain: 8 }] },
+  giant_b:     { semitones: -9, distortion: 6, filters: [{ type: 'lowpass', frequency: 1400 }, { type: 'lowshelf', frequency: 180, gain: 9 }] },
+  goblin_a:    { semitones: 5, filters: [{ type: 'peaking', frequency: 2200, Q: 2, gain: 8 }] },
+  goblin_b:    { semitones: 7, distortion: 10, filters: [{ type: 'peaking', frequency: 2800, Q: 2.5, gain: 7 }, { type: 'highpass', frequency: 250 }] },
+  ghost_a:     { semitones: -2, echo: { delay: 0.22, feedback: 0.35, wet: 0.5 }, filters: [{ type: 'highpass', frequency: 500 }] },
+  ghost_b:     { semitones: -4, echo: { delay: 0.34, feedback: 0.45, wet: 0.6 }, filters: [{ type: 'highpass', frequency: 400 }, { type: 'lowpass', frequency: 3200 }] },
+  construct_a: { distortion: 30, filters: [{ type: 'bandpass', frequency: 1400, Q: 1.2 }] },
+  construct_b: { distortion: 22, echo: { delay: 0.06, feedback: 0.25, wet: 0.35 }, filters: [{ type: 'bandpass', frequency: 1000, Q: 1.6 }] },
+}
+
+export const VOICE_FX_PRESETS: { key: VoiceFxPreset; label: string; emoji: string; group: string }[] = [
+  { key: 'none',         label: 'Natural voice',  emoji: '🎙', group: 'Off' },
+  { key: 'male_deep',    label: 'Male — Deep',    emoji: '🧔', group: 'Humanoid' },
+  { key: 'male_gruff',   label: 'Male — Gruff',   emoji: '🪓', group: 'Humanoid' },
+  { key: 'female_soft',  label: 'Female — Soft',  emoji: '👩', group: 'Humanoid' },
+  { key: 'female_sharp', label: 'Female — Sharp', emoji: '🧝‍♀️', group: 'Humanoid' },
+  { key: 'elder',        label: 'Elder',          emoji: '🧓', group: 'Humanoid' },
+  { key: 'child',        label: 'Child',          emoji: '🧒', group: 'Humanoid' },
+  { key: 'demon_a',      label: 'Demon A',        emoji: '👹', group: 'Monster' },
+  { key: 'demon_b',      label: 'Demon B — Archfiend', emoji: '🔥', group: 'Monster' },
+  { key: 'giant_a',      label: 'Giant A',        emoji: '🗿', group: 'Monster' },
+  { key: 'giant_b',      label: 'Giant B — Mountain', emoji: '⛰', group: 'Monster' },
+  { key: 'goblin_a',     label: 'Goblin A',       emoji: '👺', group: 'Monster' },
+  { key: 'goblin_b',     label: 'Goblin B — Shrieker', emoji: '🗡', group: 'Monster' },
+  { key: 'ghost_a',      label: 'Ghost A',        emoji: '👻', group: 'Monster' },
+  { key: 'ghost_b',      label: 'Ghost B — Wraith', emoji: '💀', group: 'Monster' },
+  { key: 'construct_a',  label: 'Construct A',    emoji: '🤖', group: 'Monster' },
+  { key: 'construct_b',  label: 'Construct B — Ancient', emoji: '⚙️', group: 'Monster' },
 ]
 
 export type VoiceFxChain = {
@@ -126,13 +179,14 @@ function makeDistortionCurve(amount: number): Float32Array {
   return curve
 }
 
-// ── Preset chains ─────────────────────────────────────────────────────────────
+// ── Chain builder ─────────────────────────────────────────────────────────────
 
 /**
  * Builds the full processing chain for a preset. Returns the processed track
  * and a cleanup fn. Caller owns publishing/unpublishing.
  */
 export async function createVoiceFxChain(preset: VoiceFxPreset): Promise<VoiceFxChain> {
+  const params = PRESET_PARAMS[preset] ?? {}
   const raw = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   })
@@ -142,93 +196,48 @@ export async function createVoiceFxChain(preset: VoiceFxPreset): Promise<VoiceFx
 
   // Master output gain (keeps clipping in check after distortion stages)
   const master = ctx.createGain()
-  master.gain.value = 0.9
+  master.gain.value = params.gain ?? 0.9
   master.connect(dest)
 
-  switch (preset) {
-    case 'demon': {
-      // Pitch −5 semitones → growl distortion → low-mid emphasis
-      const mid = ctx.createGain()
-      buildPitchShifter(ctx, source, mid, -5)
-      const shaper = ctx.createWaveShaper()
-      shaper.curve = makeDistortionCurve(18) as any
-      shaper.oversample = '2x'
-      const lowshelf = ctx.createBiquadFilter()
-      lowshelf.type = 'lowshelf'
-      lowshelf.frequency.value = 300
-      lowshelf.gain.value = 6
-      mid.connect(shaper)
-      shaper.connect(lowshelf)
-      lowshelf.connect(master)
-      break
-    }
-    case 'giant': {
-      // Pitch −7 → heavy lowpass boom
-      const mid = ctx.createGain()
-      buildPitchShifter(ctx, source, mid, -7)
-      const lowpass = ctx.createBiquadFilter()
-      lowpass.type = 'lowpass'
-      lowpass.frequency.value = 1800
-      const lowshelf = ctx.createBiquadFilter()
-      lowshelf.type = 'lowshelf'
-      lowshelf.frequency.value = 200
-      lowshelf.gain.value = 8
-      mid.connect(lowpass)
-      lowpass.connect(lowshelf)
-      lowshelf.connect(master)
-      break
-    }
-    case 'goblin': {
-      // Pitch +5 → nasal peak
-      const mid = ctx.createGain()
-      buildPitchShifter(ctx, source, mid, 5)
-      const peak = ctx.createBiquadFilter()
-      peak.type = 'peaking'
-      peak.frequency.value = 2200
-      peak.Q.value = 2
-      peak.gain.value = 8
-      mid.connect(peak)
-      peak.connect(master)
-      break
-    }
-    case 'ghost': {
-      // Pitch −2 → airy highpass + feedback echo
-      const mid = ctx.createGain()
-      buildPitchShifter(ctx, source, mid, -2)
-      const highpass = ctx.createBiquadFilter()
-      highpass.type = 'highpass'
-      highpass.frequency.value = 500
-      const echo = ctx.createDelay(1)
-      echo.delayTime.value = 0.22
-      const feedback = ctx.createGain()
-      feedback.gain.value = 0.35
-      const wet = ctx.createGain()
-      wet.gain.value = 0.5
-      mid.connect(highpass)
-      highpass.connect(master)
-      highpass.connect(echo)
-      echo.connect(feedback)
-      feedback.connect(echo)
-      echo.connect(wet)
-      wet.connect(master)
-      break
-    }
-    case 'construct': {
-      // Radio bandpass + hard crunch, no pitch shift
-      const bandpass = ctx.createBiquadFilter()
-      bandpass.type = 'bandpass'
-      bandpass.frequency.value = 1400
-      bandpass.Q.value = 1.2
-      const shaper = ctx.createWaveShaper()
-      shaper.curve = makeDistortionCurve(30) as any
-      shaper.oversample = '2x'
-      source.connect(bandpass)
-      bandpass.connect(shaper)
-      shaper.connect(master)
-      break
-    }
-    default:
-      source.connect(master)
+  // 1. Pitch shift (or passthrough)
+  const afterPitch = ctx.createGain()
+  buildPitchShifter(ctx, source, afterPitch, params.semitones ?? 0)
+
+  // 2. Distortion
+  let node: AudioNode = afterPitch
+  if (params.distortion) {
+    const shaper = ctx.createWaveShaper()
+    shaper.curve = makeDistortionCurve(params.distortion) as any
+    shaper.oversample = '2x'
+    node.connect(shaper)
+    node = shaper
+  }
+
+  // 3. Filter chain
+  for (const spec of params.filters ?? []) {
+    const f = ctx.createBiquadFilter()
+    f.type = spec.type
+    f.frequency.value = spec.frequency
+    if (spec.Q != null) f.Q.value = spec.Q
+    if (spec.gain != null) f.gain.value = spec.gain
+    node.connect(f)
+    node = f
+  }
+
+  // 4. Dry to master; echo (wet) in parallel
+  node.connect(master)
+  if (params.echo) {
+    const echo = ctx.createDelay(2)
+    echo.delayTime.value = params.echo.delay
+    const feedback = ctx.createGain()
+    feedback.gain.value = params.echo.feedback
+    const wet = ctx.createGain()
+    wet.gain.value = params.echo.wet
+    node.connect(echo)
+    echo.connect(feedback)
+    feedback.connect(echo)
+    echo.connect(wet)
+    wet.connect(master)
   }
 
   const track = dest.stream.getAudioTracks()[0]

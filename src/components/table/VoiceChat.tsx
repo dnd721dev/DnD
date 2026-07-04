@@ -415,8 +415,12 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
                   : 'border-slate-700 bg-slate-800 text-slate-300'
               } ${fxBusy ? 'opacity-50' : ''}`}
             >
-              {VOICE_FX_PRESETS.map((p) => (
-                <option key={p.key} value={p.key}>{p.emoji} {p.label}</option>
+              {[...new Set(VOICE_FX_PRESETS.map((p) => p.group))].map((group) => (
+                <optgroup key={group} label={group}>
+                  {VOICE_FX_PRESETS.filter((p) => p.group === group).map((p) => (
+                    <option key={p.key} value={p.key}>{p.emoji} {p.label}</option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           )}

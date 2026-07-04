@@ -1,0 +1,19 @@
+{
+  "name": "dnd721-recorder-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted session recorder bot for DND721 — joins LiveKit voice rooms as a hidden participant and records audio to Supabase Storage. Replaces LiveKit Cloud egress (no egress minutes used).",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "@livekit/rtc-node": "^0.13.0",
+    "@supabase/supabase-js": "^2.45.0",
+    "livekit-server-sdk": "^2.6.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

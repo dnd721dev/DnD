@@ -6,7 +6,10 @@ import { supabase } from '@/lib/supabase'
 
 type RecordingRow = {
   id: string
-  status: 'recording' | 'stopped' | 'completed' | 'failed'
+  // 'requested'/'stopping' are transient states used by the self-hosted
+  // recorder-bot pipeline (RECORDER_MODE=bot) while the worker picks up
+  // the job / finalizes the audio.
+  status: 'recording' | 'requested' | 'stopping' | 'stopped' | 'completed' | 'failed'
   started_at: string
   stopped_at: string | null
   file_url: string | null
@@ -50,7 +53,7 @@ export function RecordingButton({ sessionId, roomName, sessionStatus }: Props) {
     if (!res.ok) return
     const { recordings: rows } = await res.json() as { recordings: RecordingRow[] }
     setRecordings(rows ?? [])
-    const active = rows.find((r) => r.status === 'recording') ?? null
+    const active = rows.find((r) => ['recording', 'requested', 'stopping'].includes(r.status)) ?? null
     setRecording(active ?? rows[0] ?? null)
   }, [sessionId])
 
@@ -192,6 +195,8 @@ export function RecordingButton({ sessionId, roomName, sessionStatus }: Props) {
 
   function statusBadge(r: RecordingRow) {
     if (r.status === 'recording') return <span className="text-red-400">● REC</span>
+    if (r.status === 'requested') return <span className="text-amber-400 animate-pulse">⏳ Starting…</span>
+    if (r.status === 'stopping')  return <span className="text-amber-400 animate-pulse">⏳ Finishing…</span>
     if (r.status === 'completed') return <span className="text-emerald-400">✓ Done</span>
     if (r.status === 'stopped')   return <span className="text-yellow-400">◼ Stopped</span>
     return <span className="text-slate-500">✗ Failed</span>
@@ -205,8 +210,11 @@ export function RecordingButton({ sessionId, roomName, sessionStatus }: Props) {
     return null
   }
 
-  const isRecording    = recording?.status === 'recording'
-  const pastRecordings = recordings.filter((r) => r.status !== 'recording')
+  const activeStatuses = ['recording', 'requested', 'stopping']
+  const isRecording    = !!recording && activeStatuses.includes(recording.status)
+  const isFinalizing   = recording?.status === 'stopping'
+  const isStarting     = recording?.status === 'requested'
+  const pastRecordings = recordings.filter((r) => !activeStatuses.includes(r.status))
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -214,13 +222,15 @@ export function RecordingButton({ sessionId, roomName, sessionStatus }: Props) {
       {isRecording ? (
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-2">
-            <span className="flex items-center gap-1.5 rounded-md bg-red-900/60 px-2.5 py-1 text-[11px] font-semibold text-red-300">
-              <span className="h-2 w-2 rounded-full bg-red-400 animate-pulse" />
-              REC {fmt(elapsed)}
+            <span className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold ${
+              isStarting || isFinalizing ? 'bg-amber-900/60 text-amber-300' : 'bg-red-900/60 text-red-300'
+            }`}>
+              <span className={`h-2 w-2 rounded-full animate-pulse ${isStarting || isFinalizing ? 'bg-amber-400' : 'bg-red-400'}`} />
+              {isStarting ? 'Starting…' : isFinalizing ? 'Finishing…' : `REC ${fmt(elapsed)}`}
             </span>
             <button
               onClick={stopRecording}
-              disabled={loading}
+              disabled={loading || isFinalizing}
               className="rounded-md bg-slate-800 px-2.5 py-1 text-[11px] text-slate-300 hover:bg-slate-700 disabled:opacity-50"
             >
               Stop
