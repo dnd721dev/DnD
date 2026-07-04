@@ -9,6 +9,7 @@ const NAV_LINKS = [
   { href: '/campaigns', label: 'Games' },
   { href: '/homebrew',  label: 'Homebrew' },
   { href: '/shop',      label: 'Shop'  },
+  { href: '/market',    label: 'Market' },
   { href: '/sponsor',   label: 'Sponsor' },
   { href: '/community', label: 'Community' },
 ]

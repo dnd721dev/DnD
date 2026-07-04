@@ -111,12 +111,20 @@ export function JoinClient({ token }: { token: string }) {
 
   const loadCharacters = useCallback(async () => {
     if (!wallet) return
+    // Own characters PLUS characters actively rented to this wallet via the
+    // marketplace (rented_to_wallet + unexpired rental_ends_at).
     const { data } = await supabase
       .from('characters')
-      .select('id, name, main_job, level, is_caya')
-      .eq('wallet_address', wallet)
+      .select('id, name, main_job, level, is_caya, wallet_address, rented_to_wallet, rental_ends_at')
+      .or(`wallet_address.eq.${wallet},rented_to_wallet.eq.${wallet}`)
       .order('updated_at', { ascending: false })
-    setCharacters((data ?? []) as CharRow[])
+    const now = Date.now()
+    const rows = (data ?? []).filter((c: any) =>
+      String(c.wallet_address).toLowerCase() === wallet ||
+      (String(c.rented_to_wallet ?? '').toLowerCase() === wallet &&
+        c.rental_ends_at && new Date(c.rental_ends_at).getTime() > now)
+    )
+    setCharacters(rows as CharRow[])
   }, [wallet])
 
   async function chooseCharacter(characterId: string) {
