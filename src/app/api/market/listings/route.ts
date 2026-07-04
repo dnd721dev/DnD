@@ -7,24 +7,39 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
+import { verifyNftOwnership, DND721_NFT_CONTRACT } from '@/lib/marketNft'
 
 export const dynamic = 'force-dynamic'
 
-/** Lazily close out rentals whose term has ended: clear the character's
- *  rented_to fields and mark the rental row ended. Called from GET. */
+const BASE_RPC = process.env.NEXT_PUBLIC_BASE_RPC_URL ?? 'https://mainnet.base.org'
+
+/** Lazily close out rentals whose term has ended. Called from GET.
+ *  - legacy character rentals: clear the character's rented_to fields.
+ *  - NFT rentals: release any character the RENTER built on the rented NFT
+ *    (the rent is up — the NFT link and its art come off the sheet). */
 async function expireRentals(db: ReturnType<typeof supabaseAdmin>) {
   const nowIso = new Date().toISOString()
   const { data: expired } = await db
     .from('market_rentals')
-    .select('id, character_id')
+    .select('id, character_id, nft_contract, nft_token_id, renter_wallet')
     .eq('status', 'active')
     .lt('ends_at', nowIso)
   for (const r of expired ?? []) {
-    await db.from('market_rentals').update({ status: 'ended' }).eq('id', (r as any).id)
-    await db.from('characters')
-      .update({ rented_to_wallet: null, rental_ends_at: null })
-      .eq('id', (r as any).character_id)
-      .lt('rental_ends_at', nowIso) // don't clobber a newer re-rent
+    const R = r as any
+    await db.from('market_rentals').update({ status: 'ended' }).eq('id', R.id)
+    if (R.character_id) {
+      await db.from('characters')
+        .update({ rented_to_wallet: null, rental_ends_at: null })
+        .eq('id', R.character_id)
+        .lt('rental_ends_at', nowIso) // don't clobber a newer re-rent
+    }
+    if (R.nft_contract && R.nft_token_id) {
+      await db.from('characters')
+        .update({ nft_contract: null, nft_token_id: null, avatar_url: null })
+        .eq('wallet_address', R.renter_wallet)
+        .eq('nft_contract', R.nft_contract)
+        .eq('nft_token_id', R.nft_token_id)
+    }
   }
 }
 
@@ -38,7 +53,8 @@ export async function GET(req: NextRequest): Promise<Response> {
 
   let q = db.from('market_listings').select('*').order('created_at', { ascending: false })
   if (mine && wallet) q = q.eq('seller_wallet', wallet)
-  else q = q.eq('status', 'active')
+  // Include awaiting_transfer so buyer + seller both see the pending handoff.
+  else q = q.in('status', ['active', 'awaiting_transfer'])
   if (kind) q = q.eq('kind', kind)
 
   const { data: listings, error } = await q
@@ -71,11 +87,13 @@ export async function GET(req: NextRequest): Promise<Response> {
 }
 
 const CreateSchema = z.object({
-  kind: z.enum(['item', 'character_rent', 'map']),
-  // item
-  characterId:  z.string().uuid().optional(),
-  itemKey:      z.string().min(1).optional(),
-  // rental
+  kind: z.enum(['nft', 'nft_rent', 'map']),
+  // nft sale / rental
+  nftContract:  z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  nftTokenId:   z.string().min(1).max(78).optional(),
+  nftName:      z.string().max(120).optional(),
+  nftImage:     z.string().url().max(500).optional(),
+  // rental terms
   rentPerDay:   z.number().positive().optional(),
   rentMaxDays:  z.number().int().min(1).max(365).optional(),
   // map
@@ -110,39 +128,33 @@ export async function POST(req: NextRequest): Promise<Response> {
     price_eth:    b.currency === 'eth'    ? (b.priceEth ?? null)    : null,
   }
 
-  if (b.kind === 'item') {
-    if (!b.characterId || !b.itemKey) return NextResponse.json({ error: 'characterId and itemKey required' }, { status: 400 })
-    if (!row.price_tokens && !row.price_eth) return NextResponse.json({ error: 'Price required' }, { status: 400 })
-    const { data: char } = await db.from('characters')
-      .select('id, wallet_address, inventory_items').eq('id', b.characterId).maybeSingle()
-    if (!char || String((char as any).wallet_address).toLowerCase() !== wallet) {
-      return NextResponse.json({ error: 'Not your character' }, { status: 403 })
+  if (b.kind === 'nft' || b.kind === 'nft_rent') {
+    const contract = (b.nftContract ?? DND721_NFT_CONTRACT).toLowerCase()
+    if (!b.nftTokenId) return NextResponse.json({ error: 'nftTokenId required' }, { status: 400 })
+    if (b.kind === 'nft' && !row.price_tokens && !row.price_eth) {
+      return NextResponse.json({ error: 'Price required' }, { status: 400 })
     }
-    const inv: any[] = Array.isArray((char as any).inventory_items) ? (char as any).inventory_items : []
-    const item = inv.find((i) => i.key === b.itemKey && (i.qty ?? 0) > 0)
-    if (!item) return NextResponse.json({ error: 'Item not in that character\'s inventory' }, { status: 404 })
-    row.item_key = item.key
-    row.item_name = item.name
-    row.source_character_id = b.characterId
-  }
-
-  if (b.kind === 'character_rent') {
-    if (!b.characterId || !b.rentPerDay || !b.rentMaxDays) {
-      return NextResponse.json({ error: 'characterId, rentPerDay, rentMaxDays required' }, { status: 400 })
+    if (b.kind === 'nft_rent') {
+      if (!b.rentPerDay || !b.rentMaxDays) {
+        return NextResponse.json({ error: 'rentPerDay and rentMaxDays required' }, { status: 400 })
+      }
+      row.rent_per_day = b.rentPerDay
+      row.rent_max_days = b.rentMaxDays
+      row.currency = 'dnd721' // rentals settle in DND721
     }
-    const { data: char } = await db.from('characters')
-      .select('id, wallet_address, rented_to_wallet').eq('id', b.characterId).maybeSingle()
-    if (!char || String((char as any).wallet_address).toLowerCase() !== wallet) {
-      return NextResponse.json({ error: 'Not your character' }, { status: 403 })
-    }
-    // one active rental listing per character
+    // On-chain ownership check — the lister must hold the token right now.
+    const owns = await verifyNftOwnership(contract, b.nftTokenId, wallet, BASE_RPC)
+    if (!owns) return NextResponse.json({ error: 'You do not own that NFT' }, { status: 403 })
+    // One active listing per token.
     const { data: dup } = await db.from('market_listings')
-      .select('id').eq('kind', 'character_rent').eq('character_id', b.characterId).eq('status', 'active').maybeSingle()
-    if (dup) return NextResponse.json({ error: 'Character already listed for rent' }, { status: 409 })
-    row.character_id = b.characterId
-    row.rent_per_day = b.rentPerDay
-    row.rent_max_days = b.rentMaxDays
-    row.currency = 'dnd721' // rentals settle in DND721 per spec
+      .select('id').in('kind', ['nft', 'nft_rent'])
+      .eq('nft_contract', contract).eq('nft_token_id', b.nftTokenId)
+      .in('status', ['active', 'awaiting_transfer']).maybeSingle()
+    if (dup) return NextResponse.json({ error: 'That NFT is already listed' }, { status: 409 })
+    row.nft_contract = contract
+    row.nft_token_id = b.nftTokenId
+    row.nft_name = b.nftName ?? `DND721 #${b.nftTokenId}`
+    row.nft_image = b.nftImage ?? null
   }
 
   if (b.kind === 'map') {

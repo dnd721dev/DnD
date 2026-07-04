@@ -36,7 +36,9 @@ export async function POST(req: NextRequest): Promise<Response> {
   const { data: listing } = await db.from('market_listings').select('*').eq('id', listingId).maybeSingle()
   if (!listing) return NextResponse.json({ error: 'Listing not found' }, { status: 404 })
   const L = listing as any
-  if (L.kind !== 'character_rent') return NextResponse.json({ error: 'Bids apply to character rental listings' }, { status: 400 })
+  if (L.kind !== 'character_rent' && L.kind !== 'nft_rent') {
+    return NextResponse.json({ error: 'Bids apply to rental listings' }, { status: 400 })
+  }
   if (String(L.seller_wallet).toLowerCase() === wallet) return NextResponse.json({ error: 'You own this listing' }, { status: 400 })
 
   // Attach the bidder's most recent rental of this character (context for the owner).

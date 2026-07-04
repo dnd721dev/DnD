@@ -132,6 +132,50 @@ export async function GET(req: Request) {
       }),
     )
 
+    // ── Marketplace NFT rentals ─────────────────────────────────────────────
+    // Append NFTs actively RENTED to this wallet so the renter can build a
+    // character with them until the rental ends. Flagged `rented` with the
+    // expiry so the picker can badge them.
+    try {
+      const { supabaseAdmin } = await import('@/lib/supabaseAdmin')
+      const db = supabaseAdmin()
+      const { data: rentals } = await db
+        .from('market_rentals')
+        .select('nft_contract, nft_token_id, ends_at, listing_id')
+        .eq('renter_wallet', owner.toLowerCase())
+        .eq('status', 'active')
+        .gt('ends_at', new Date().toISOString())
+        .not('nft_contract', 'is', null)
+
+      if (rentals && rentals.length > 0) {
+        const listingIds = rentals.map((r: any) => r.listing_id).filter(Boolean)
+        const { data: listings } = listingIds.length
+          ? await db.from('market_listings').select('id, nft_name, nft_image').in('id', listingIds)
+          : { data: [] as any[] }
+        const listingById = Object.fromEntries((listings ?? []).map((l: any) => [l.id, l]))
+
+        for (const r of rentals as any[]) {
+          // Skip if the wallet somehow also owns it outright
+          if (items.some((i: any) => i.contract?.toLowerCase() === r.nft_contract && String(i.tokenId) === String(r.nft_token_id))) continue
+          const meta = listingById[r.listing_id]
+          ;(items as any[]).push({
+            contract: r.nft_contract,
+            tokenId: String(r.nft_token_id),
+            metadata: {
+              name: meta?.nft_name ?? `DND721 #${r.nft_token_id} (rented)`,
+              description: 'Rented via the DND721 marketplace.',
+              image: meta?.nft_image ?? null,
+              attributes: [],
+            },
+            rented: true,
+            rentalEndsAt: r.ends_at,
+          })
+        }
+      }
+    } catch (e) {
+      console.error('[api/nft] rental append failed (non-fatal)', e)
+    }
+
     return NextResponse.json({ items })
   } catch (err) {
     console.error('Unexpected /api/nft error', err)

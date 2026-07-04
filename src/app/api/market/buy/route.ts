@@ -1,11 +1,13 @@
 // POST /api/market/buy
 // Completes a purchase after the buyer paid the SELLER on-chain (DND721 or ETH).
-//   • kind='item' — moves the item from the seller's character inventory to the
-//     buyer's chosen character; listing → sold.
+//   • kind='nft'  — payment verified → listing enters 'awaiting_transfer' with
+//     the buyer recorded; the seller then sends the ERC-721 and confirms via
+//     /api/market/confirm-transfer, which closes the sale.
 //   • kind='map'  — allocates the next numbered edition (1 of {rarity}) to the
 //     buyer; listing → sold once all editions are gone.
-//   • kind='character_rent' + an ACCEPTED buy bid — transfers the character to
-//     the buyer outright (wallet_address changes hands); listing → sold.
+//   • kind='nft_rent' / legacy 'character_rent' + an ACCEPTED buy bid —
+//     NFT rentals enter 'awaiting_transfer' (the NFT changes hands); legacy
+//     character rentals transfer the character row outright.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
@@ -18,9 +20,7 @@ const BASE_RPC = process.env.NEXT_PUBLIC_BASE_RPC_URL ?? 'https://mainnet.base.o
 const Schema = z.object({
   listingId:        z.string().uuid(),
   txHash:           z.string().regex(/^0x[0-9a-fA-F]{64}$/),
-  /** item purchases: which of the buyer's characters receives the item */
-  buyerCharacterId: z.string().uuid().optional(),
-  /** character buyout: the accepted buy bid being completed */
+  /** buyout: the accepted buy bid being completed */
   bidId:            z.string().uuid().optional(),
 })
 
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const parsed = Schema.safeParse(await req.json().catch(() => ({})))
   if (!parsed.success) return NextResponse.json({ error: parsed.error.errors[0]?.message ?? 'Invalid request' }, { status: 400 })
-  const { listingId, txHash, buyerCharacterId, bidId } = parsed.data
+  const { listingId, txHash, bidId } = parsed.data
 
   const db = supabaseAdmin()
 
@@ -57,8 +57,8 @@ export async function POST(req: NextRequest): Promise<Response> {
   let expectedEth: number | null = null
   let bid: any = null
 
-  if (L.kind === 'character_rent') {
-    if (!bidId) return NextResponse.json({ error: 'Character buyout requires an accepted bid' }, { status: 400 })
+  if (L.kind === 'character_rent' || L.kind === 'nft_rent') {
+    if (!bidId) return NextResponse.json({ error: 'Buyout requires an accepted bid' }, { status: 400 })
     const { data } = await db.from('market_bids').select('*').eq('id', bidId).maybeSingle()
     bid = data
     if (!bid || bid.listing_id !== listingId || bid.kind !== 'buy') {
@@ -80,34 +80,14 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (!result.ok) return NextResponse.json({ error: result.reason }, { status: result.status })
 
   // ── Apply effects ───────────────────────────────────────────────────────────
-  if (L.kind === 'item') {
-    if (!buyerCharacterId) return NextResponse.json({ error: 'buyerCharacterId required' }, { status: 400 })
-    const { data: buyerChar } = await db.from('characters')
-      .select('id, wallet_address, inventory_items').eq('id', buyerCharacterId).maybeSingle()
-    if (!buyerChar || String((buyerChar as any).wallet_address).toLowerCase() !== wallet) {
-      return NextResponse.json({ error: 'Not your character' }, { status: 403 })
-    }
-    // Remove one from the seller character's inventory…
-    if (L.source_character_id) {
-      const { data: srcChar } = await db.from('characters')
-        .select('id, inventory_items').eq('id', L.source_character_id).maybeSingle()
-      if (srcChar) {
-        const inv: any[] = Array.isArray((srcChar as any).inventory_items) ? (srcChar as any).inventory_items : []
-        const next = inv
-          .map((i) => i.key === L.item_key ? { ...i, qty: Math.max(0, (i.qty ?? 1) - 1) } : i)
-          .filter((i) => (i.qty ?? 0) > 0)
-        await db.from('characters').update({ inventory_items: next }).eq('id', L.source_character_id)
-      }
-    }
-    // …and give it to the buyer's character.
-    const inv: any[] = Array.isArray((buyerChar as any).inventory_items) ? (buyerChar as any).inventory_items : []
-    const idx = inv.findIndex((i) => i.key === L.item_key)
-    const next = idx >= 0
-      ? inv.map((i, n) => n === idx ? { ...i, qty: (i.qty ?? 0) + 1 } : i)
-      : [{ key: L.item_key, name: L.item_name, qty: 1, kind: 'misc' }, ...inv]
-    await db.from('characters').update({ inventory_items: next }).eq('id', buyerCharacterId)
-    await db.from('market_listings').update({ status: 'sold' }).eq('id', listingId)
-    return NextResponse.json({ ok: true, kind: 'item', itemName: L.item_name })
+  if (L.kind === 'nft') {
+    // Payment received — the seller must now transfer the ERC-721 to the buyer
+    // and confirm via /api/market/confirm-transfer.
+    await db.from('market_listings').update({
+      status: 'awaiting_transfer',
+      buyer_wallet: wallet,
+    }).eq('id', listingId)
+    return NextResponse.json({ ok: true, kind: 'nft', status: 'awaiting_transfer' })
   }
 
   if (L.kind === 'map') {
@@ -126,7 +106,20 @@ export async function POST(req: NextRequest): Promise<Response> {
     return NextResponse.json({ ok: true, kind: 'map', edition: `${editionNo} of ${size}` })
   }
 
-  // character buyout (accepted bid, payment verified above)
+  // Buyout of a rental listing (accepted bid, payment verified above)
+  if (L.kind === 'nft_rent') {
+    // The NFT itself changes hands: enter the same two-step transfer flow.
+    await db.from('market_rentals').update({ status: 'ended' })
+      .eq('listing_id', listingId).eq('status', 'active')
+    await db.from('market_listings').update({
+      status: 'awaiting_transfer',
+      buyer_wallet: wallet,
+    }).eq('id', listingId)
+    await db.from('market_bids').update({ status: 'completed' }).eq('id', bid.id)
+    return NextResponse.json({ ok: true, kind: 'nft_buyout', status: 'awaiting_transfer' })
+  }
+
+  // Legacy character buyout — transfers the character row outright.
   await db.from('characters').update({
     wallet_address: wallet, rented_to_wallet: null, rental_ends_at: null,
   }).eq('id', L.character_id)

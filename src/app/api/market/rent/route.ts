@@ -34,16 +34,22 @@ export async function POST(req: NextRequest): Promise<Response> {
   const { data: listing } = await db.from('market_listings').select('*').eq('id', listingId).maybeSingle()
   if (!listing) return NextResponse.json({ error: 'Listing not found' }, { status: 404 })
   const L = listing as any
-  if (L.kind !== 'character_rent') return NextResponse.json({ error: 'Not a rental listing' }, { status: 400 })
+  const isNftRent = L.kind === 'nft_rent'
+  if (L.kind !== 'character_rent' && !isNftRent) {
+    return NextResponse.json({ error: 'Not a rental listing' }, { status: 400 })
+  }
   if (L.status !== 'active') return NextResponse.json({ error: 'Listing is no longer active' }, { status: 409 })
   const owner = String(L.seller_wallet).toLowerCase()
-  if (owner === wallet) return NextResponse.json({ error: 'You own this character' }, { status: 400 })
+  if (owner === wallet) return NextResponse.json({ error: 'You own this listing' }, { status: 400 })
 
-  // Character must not be in an active rental.
-  const { data: activeRental } = await db.from('market_rentals')
-    .select('id, ends_at').eq('character_id', L.character_id).eq('status', 'active')
-    .gt('ends_at', new Date().toISOString()).maybeSingle()
-  if (activeRental) return NextResponse.json({ error: 'Character is currently rented' }, { status: 409 })
+  // The asset must not be in an active rental.
+  let activeQ = db.from('market_rentals')
+    .select('id, ends_at').eq('status', 'active').gt('ends_at', new Date().toISOString())
+  activeQ = isNftRent
+    ? activeQ.eq('nft_contract', L.nft_contract).eq('nft_token_id', L.nft_token_id)
+    : activeQ.eq('character_id', L.character_id)
+  const { data: activeRental } = await activeQ.maybeSingle()
+  if (activeRental) return NextResponse.json({ error: 'Currently rented to someone else' }, { status: 409 })
 
   // Idempotency
   const { data: used } = await db.from('market_rentals').select('id').eq('tx_hash', txHash).maybeSingle()
@@ -73,7 +79,9 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const { data: rental, error: rentErr } = await db.from('market_rentals').insert({
     listing_id: listingId,
-    character_id: L.character_id,
+    character_id: isNftRent ? null : L.character_id,
+    nft_contract: isNftRent ? L.nft_contract : null,
+    nft_token_id: isNftRent ? L.nft_token_id : null,
     owner_wallet: owner,
     renter_wallet: wallet,
     per_day: perDay,
@@ -86,11 +94,15 @@ export async function POST(req: NextRequest): Promise<Response> {
   }).select().single()
   if (rentErr) return NextResponse.json({ error: rentErr.message }, { status: 500 })
 
-  // Grant the renter play access (RLS lets the renter update while active).
-  await db.from('characters').update({
-    rented_to_wallet: wallet,
-    rental_ends_at: endsAt.toISOString(),
-  }).eq('id', L.character_id)
+  // Legacy character rentals: grant the renter play access on the character.
+  // NFT rentals need no character write — the rented NFT simply appears in
+  // the renter's character-creation picker (via /api/nft) until ends_at.
+  if (!isNftRent) {
+    await db.from('characters').update({
+      rented_to_wallet: wallet,
+      rental_ends_at: endsAt.toISOString(),
+    }).eq('id', L.character_id)
+  }
 
   if (bidId) await db.from('market_bids').update({ status: 'completed' }).eq('id', bidId)
 
