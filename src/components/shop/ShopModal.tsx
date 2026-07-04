@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAccount, useChainId, useSwitchChain, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { supabase } from '@/lib/supabase'
 import { DND721_TOKEN_ADDRESS, DND721_TOKEN_ABI } from '@/lib/dnd721Token'
+import { DND721_ITEMS_NFT_ADDRESS, DND721_ITEMS_NFT_ABI, nftMintingEnabled } from '@/lib/shopNft'
 import { usdToDnd721Tokens, usdToDnd721Wei, formatTokens, formatCountdown, secondsUntilMidnightUTC } from '@/lib/shopPricing'
 import type { ShopItem, ShopTier } from '@/lib/shopData'
 import { SESSION_GATES, type SessionStatus } from '@/lib/sessionGates'
@@ -51,11 +52,11 @@ const TIER_COLOR: Record<ShopTier, string> = {
   E: 'bg-purple-800/60  text-purple-200',
 }
 const TIER_HEADING: Record<ShopTier, string> = {
-  A: 'Tier A — Free once per session',
-  B: 'Tier B — Free once per day',
-  C: 'Tier C — Consumables',
-  D: 'Tier D — Uncommon',
-  E: 'Tier E — Rare',
+  A: 'Tier A — Free once per session (single-use)',
+  B: 'Tier B — Free once per day (single-use)',
+  C: 'Tier C — Consumables (single-use)',
+  D: 'Tier D — Uncommon consumables (single-use)',
+  E: 'Tier E — Permanent items · minted as NFTs',
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -241,6 +242,8 @@ export function ShopModal({ isModal = false, sessionId, onClose, onPurchase, ses
           setActive({ itemId, stage: 'success', errorMsg: null })
           setPurchasedToday((prev) => new Set([...prev, itemId]))
           onPurchase?.(item.name)
+          // Tier E purchases mint a DND721 Item NFT with the generated art.
+          if (item.tier === 'E' && (item as any).nft) void mintItemNft(item)
           setTimeout(() => { setActive(null); setPendingTx(undefined) }, 3000)
         } else {
           setActive({ itemId, stage: 'error', errorMsg: json.error ?? 'Verification failed' })
@@ -291,6 +294,29 @@ export function ShopModal({ isModal = false, sessionId, onClose, onPurchase, ses
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Network error'
       setActive({ itemId: item.id, stage: 'error', errorMsg: msg })
+    }
+  }
+
+  // Mint the purchased tier E item as a DND721 Item NFT (art + metadata served
+  // by /api/shop/nft/[itemId]). Requires NEXT_PUBLIC_DND721_ITEMS_NFT_ADDRESS;
+  // silently skips when the contract isn't deployed yet, and never blocks the
+  // purchase itself — the item is already in the character's inventory.
+  async function mintItemNft(item: ShopItem) {
+    if (!nftMintingEnabled() || !address) return
+    try {
+      const origin = typeof window !== 'undefined' ? window.location.origin : ''
+      const tokenUri = `${origin}/api/shop/nft/${item.id}`
+      await writeContractAsync({
+        address:      DND721_ITEMS_NFT_ADDRESS as `0x${string}`,
+        abi:          DND721_ITEMS_NFT_ABI,
+        functionName: 'safeMint',
+        args:         [address, tokenUri],
+        chainId:      BASE_CHAIN_ID,
+      })
+    } catch (err) {
+      // Mint failures are non-fatal (e.g. contract restricts minting) — the
+      // treasury can mint retroactively from the purchase record.
+      console.warn('[shop] NFT mint skipped/failed:', err)
     }
   }
 
@@ -360,12 +386,28 @@ export function ShopModal({ isModal = false, sessionId, onClose, onPurchase, ses
       ? usdToDnd721Tokens(item.price_usd, tokenPrice)
       : null
 
+    const isNft = item.tier === 'E' && (item as any).nft
+
     return (
       <div className="flex flex-col gap-2 rounded-xl border border-slate-700/60 bg-slate-900/60 p-4">
+        {/* Tier E — full generated artwork preview (this exact art becomes the NFT) */}
+        {isNft && (
+          <img
+            src={`/api/shop/nft/${item.id}/image`}
+            alt={`${item.name} artwork`}
+            loading="lazy"
+            className="w-full aspect-square rounded-lg border border-purple-700/40 object-cover"
+          />
+        )}
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             {item.always && (
               <span className="shrink-0 text-amber-400 text-xs" title="Always available">⚡</span>
+            )}
+            {isNft && (
+              <span className="shrink-0 rounded bg-purple-900/70 px-1.5 py-0.5 text-[9px] font-bold text-purple-200 ring-1 ring-purple-600/50" title="Permanent item — minted as an NFT on purchase">
+                NFT
+              </span>
             )}
             {item.url ? (
               <a
@@ -469,7 +511,7 @@ export function ShopModal({ isModal = false, sessionId, onClose, onPurchase, ses
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
           {TIER_HEADING[tier]}
         </h3>
-        <div className={`grid gap-3 ${tier === 'A' || tier === 'B' ? '' : 'sm:grid-cols-2 lg:grid-cols-3'}`}>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((item) => <ItemCard key={item.id} item={item} />)}
         </div>
       </div>

@@ -1,0 +1,87 @@
+// src/lib/shopItems/tierE.ts
+// Tier E — premium $15–35. PERMANENT items (never consumed) and the only
+// tier whose purchases are minted as DND721 Item NFTs with generated art.
+// Power stays at uncommon/low-rare: useful forever, never game-breaking.
+
+import type { ShopItem } from '../shopData'
+
+function e(id: string, name: string, desc: string, price: number, url: string | null = null): ShopItem {
+  return { id, tier: 'E', name, desc, price_usd: price, category: 'magic-item', url, permanent: true, nft: true }
+}
+
+export const TIER_E_ITEMS: ShopItem[] = [
+  // ── Legacy ids — keep stable ────────────────────────────────────────────────
+  e('bag_of_holding', 'Bag of Holding',
+    'Holds up to 500 lbs in a 64-cubic-foot extradimensional space. Weighs 15 lbs.', 25.00,
+    'https://www.dndbeyond.com/magic-items/4581-bag-of-holding'),
+  e('cloak_elvenkind', 'Cloak of Elvenkind',
+    'Advantage on Stealth checks. Disadvantage on Perception checks to detect you.', 20.00,
+    'https://www.dndbeyond.com/magic-items/4610-cloak-of-elvenkind'),
+  e('pearl_of_power', 'Pearl of Power',
+    'Once per day, recover one expended spell slot of 3rd level or lower.', 15.00),
+  e('necklace_of_fireballs', 'Necklace of Fireballs',
+    'Up to 9 beads — detach and throw to trigger a fireball (DC 15 Dex, 3d6 per bead).', 35.00,
+    'https://www.dndbeyond.com/magic-items/4672-necklace-of-fireballs'),
+  e('cape_of_mountebank', 'Cape of the Mountebank',
+    'Cast Dimension Door once per day (recharges at dawn).', 30.00,
+    'https://www.dndbeyond.com/magic-items/4597-cape-of-the-mountebank'),
+
+  // ── New permanents ──────────────────────────────────────────────────────────
+  e('e_boots_elvenkind', 'Boots of Elvenkind', 'Your steps make no sound; advantage on Stealth checks that rely on moving silently.', 20.00,
+    'https://www.dndbeyond.com/magic-items/4585-boots-of-elvenkind'),
+  e('e_goggles_night', 'Goggles of Night', 'While worn, you have darkvision out to 60 ft (or +60 ft if you already have it).', 18.00,
+    'https://www.dndbeyond.com/magic-items/4644-goggles-of-night'),
+  e('e_ring_jumping', 'Ring of Jumping', 'Cast Jump on yourself at will (bonus action) while wearing the ring.', 16.00),
+  e('e_ring_waterwalk', 'Ring of Water Walking', 'Stand on and move across any liquid surface as if solid ground, at will.', 20.00),
+  e('e_ring_warmth', 'Ring of Warmth', 'Immune to natural cold environments; resistance to cold damage while worn.', 22.00),
+  e('e_ring_swimming', 'Ring of Swimming', 'You have a swimming speed of 40 ft while wearing this coral band.', 16.00),
+  e('e_ring_mindshield', 'Ring of Mind Shielding', 'Your thoughts can\'t be read; you can\'t be magically detected as lying. A refuge for the soul, literally.', 28.00),
+  e('e_amulet_proof_detect', 'Amulet of Proof against Detection', 'While worn, you are hidden from divination magic and scrying sensors.', 30.00),
+  e('e_amulet_health_minor', 'Amulet of Vital Humors', 'While worn, you gain +1 hit point per character level.', 24.00),
+  e('e_brooch_shielding', 'Brooch of Shielding', 'Resistance to force damage; immunity to the magic missile spell.', 22.00),
+  e('e_bracers_archery', 'Bracers of Archery', '+2 damage on longbow and shortbow attacks; proficiency with both.', 24.00),
+  e('e_gauntlets_grip', 'Gauntlets of the Iron Grip', 'Advantage on checks to grapple and to resist being disarmed.', 18.00),
+  e('e_gloves_thievery', 'Gloves of Thievery', 'Invisible while worn on hands: +5 to Sleight of Hand and lock-picking checks.', 26.00),
+  e('e_gloves_swimming_climbing', 'Gloves of Swimming and Climbing', 'Climbing and swimming cost no extra movement; +5 on Athletics checks to climb or swim.', 22.00),
+  e('e_slippers_spiderclimb', 'Slippers of Spider Climbing', 'Walk on walls and ceilings, hands free (not on slippery ice).', 28.00),
+  e('e_boots_striding', 'Boots of Striding and Springing', 'Your speed becomes 30 ft (unless higher) and your jump distance triples.', 24.00),
+  e('e_boots_winter', 'Boots of the Winterlands', 'Ignore difficult terrain from ice/snow; comfortable to -50°F; resistance to cold while worn... eventually saves your toes.', 26.00),
+  e('e_cloak_protection', 'Cloak of Protection', '+1 to AC and saving throws while worn.', 32.00),
+  e('e_cloak_manta', 'Cloak of the Manta Ray', 'Breathe underwater and swim at 60 ft while the hood is up.', 24.00),
+  e('e_cloak_billowing', 'Cloak of Billowing', 'Billows dramatically on command (bonus action). Zero combat value. Infinite style. Once per scene, advantage on one Performance or Intimidation check made while billowing.', 15.00),
+  e('e_hat_disguise', 'Hat of Disguise', 'Cast Disguise Self at will while wearing this dapper accessory.', 26.00),
+  e('e_circlet_blasting', 'Circlet of Blasting', 'Once per day, cast Scorching Ray (+5 to hit) from the gem at its brow.', 22.00),
+  e('e_headband_scholar', 'Scholar\'s Headband', 'While worn, you can read any nonmagical script you touch (comprehend written languages only).', 24.00),
+  e('e_lantern_revealing', 'Lantern of Revealing', 'Burns 6 hours per oil flask: invisible creatures and objects within its 30-ft bright light are visible.', 28.00),
+  e('e_lamp_everburning', 'Everbright Lamp', 'A cold flame that never dies, never burns, never needs fuel. Bright 20 ft / dim 20 ft, on command.', 15.00),
+  e('e_stone_goodluck', 'Stone of Good Luck (Luckstone)', '+1 to ability checks and saving throws while on your person.', 32.00),
+  e('e_figurine_owl', 'Figurine of Wondrous Power: Silver Owl', 'Once per day becomes a real owl for 1 hour — a scout, a messenger, a friend.', 26.00),
+  e('e_instrument_charming', 'Lute of Gentle Persuasion', 'While performing on it, once per day cast Charm Person (DC 13) woven into the song.', 24.00),
+  e('e_quiver_efficient', 'Efficient Quiver', 'Holds 60 arrows, 18 javelins, and 6 bows/staffs in extradimensional comfort — always the right draw.', 26.00),
+  e('e_rope_climbing_perm', 'Rope of Climbing (60 ft)', 'On command it snakes upward, knots itself, and holds 3,000 lbs. A loyal rope.', 24.00),
+  e('e_decanter_water', 'Decanter of Endless Water', '"Stream," "fountain," or "geyser" — pours fresh water forever. Deserts fear it.', 28.00),
+  e('e_alchemy_jug', 'Alchemy Jug', 'Each dawn, produces your chosen liquid: mayonnaise to acid, honey to fine wine. Choose wisely.', 22.00),
+  e('e_cauldron_soup', 'Cauldron of Plenty', 'Once per day fills with hearty stew for eight — a full day\'s nourishment each bowl.', 20.00),
+  e('e_tent_tidy', 'Tidy Pavilion', 'A folded kerchief that unfolds each night into a clean, dry, warded four-person tent. Repacks at dawn.', 30.00),
+  e('e_bedroll_recovery', 'Bedroll of True Rest', 'Its sleeper always counts as resting in comfort: reroll 1s on Hit Dice spent during a long rest in it.', 22.00),
+  e('e_saddle_cavalier', 'Saddle of the Cavalier', 'You can\'t be dismounted against your will; mounting/dismounting costs no movement.', 24.00),
+  e('e_horseshoes_speed', 'Horseshoes of Speed', 'A set of four: the shod mount\'s walking speed increases by 30 ft.', 30.00),
+  e('e_compass_true', 'Wayfarer\'s True Compass', 'Always points true north on any plane; advantage on Survival checks to navigate.', 18.00),
+  e('e_spyglass_farsee', 'Farseer\'s Spyglass', 'Magnifies ×8 with perfect clarity; dim light looks like bright light through its lens.', 20.00),
+  e('e_journal_echo', 'Echo Journal (pair)', 'Two linked books: what\'s written in one appears in the other, anywhere on the same plane. Sold as a pair.', 30.00),
+  e('e_coin_messenger', 'Messenger\'s Coin', 'Once per day, whisper a 25-word message over the coin to a creature whose name you know on the same plane (as sending, one-way).', 32.00),
+  e('e_whetstone_eternal', 'Eternal Whetstone', 'Weapons honed on it each dawn deal +1 damage on the first hit of the day. Never wears out.', 18.00),
+  e('e_shield_expression', 'Heraldic Shield of Faces', 'A shield whose painted crest changes to any design you envision. +0 beyond a normal shield — but ALWAYS on brand.', 15.00),
+  e('e_cape_feather', 'Featherfall Cape', 'When you fall, you drift down 60 ft per round and land without damage. Always on. Very swishy.', 28.00),
+  e('e_belt_returning', 'Belt of the Returning Blade', 'Thrown weapons you throw return to your hand at the end of your turn (if the path is clear).', 26.00),
+  e('e_scabbard_mending', 'Self-Mending Scabbard', 'A sheathed weapon repairs mundane chips and notches overnight; it can\'t rust while stored.', 16.00),
+  e('e_pouch_component', 'Bottomless Component Pouch', 'Always contains the non-costly material components for any spell you cast. Never sorts itself, though.', 24.00),
+  e('e_orb_weather', 'Weatherglass Orb', 'Shows tomorrow\'s natural weather for your location, updated at dusk. Storms lose their surprise.', 18.00),
+  e('e_teacup_calm', 'Teacup of Composure', 'Tea sipped from it once per day steadies the drinker: advantage on the next save vs. fear or charm within the hour.', 16.00),
+  e('e_doorknob_portable', 'Hermit\'s Doorknob', 'Press to any mundane door: it locks as arcane lock for 8 hours, once per day. Your rest, uninterrupted.', 30.00),
+  e('e_candle_holdfast', 'Candle of the Vigil', 'Never fully melts. While lit on watch, sleeping allies within 30 ft wake instantly at danger (as per alarm, audible only).', 26.00),
+  e('e_mask_many', 'Mask of Many Mouths', 'Ventriloquism at will: throw your voice up to 30 ft. The mouth on the mask moves. It\'s unsettling. People talk.', 20.00),
+  e('e_thimble_seamstress', 'Golden Thimble', 'Mends any nonmagical garment or cloth object to new with a minute\'s stitching, at will. Tailors weep.', 15.00),
+  e('e_inkwell_endless', 'Endless Inkwell', 'Never runs dry; the ink can be any color you imagine, including several that don\'t have names.', 16.00),
+  e('e_bookmark_finder', 'Seeker\'s Bookmark', 'Placed in any book, it slides itself to the page containing the topic you name (if the book covers it), once per day per book.', 18.00),
+]

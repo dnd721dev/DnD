@@ -1,0 +1,102 @@
+// src/lib/shopItems/tierD.ts
+// Tier D — paid $4–8. Stronger one-time-use consumables: encounter-shaping
+// but still single-use and bounded (no permanent effects live here).
+// Exactly TWO `always` items + a large rotator pool.
+
+import type { ShopItem } from '../shopData'
+
+function d(id: string, name: string, desc: string, price: number, opts?: { url?: string | null; always?: boolean; category?: ShopItem['category'] }): ShopItem {
+  return {
+    id, tier: 'D', name, desc,
+    price_usd: price,
+    category: opts?.category ?? 'consumable',
+    url: opts?.url ?? null,
+    ...(opts?.always ? { always: true } : {}),
+  }
+}
+
+export const TIER_D_ITEMS: ShopItem[] = [
+  // ── ALWAYS (2) — legacy ids ─────────────────────────────────────────────────
+  d('potion_water_breathing', 'Potion of Water Breathing', 'Breathe underwater for 1 hour.', 5.00,
+    { always: true, url: 'https://www.dndbeyond.com/magic-items/5357-potion-of-water-breathing' }),
+  d('potion_heroism', 'Potion of Heroism', 'Gain 10 temporary HP and the effects of the bless spell for 1 hour.', 4.00,
+    { always: true, url: 'https://www.dndbeyond.com/magic-items/4702-potion-of-heroism' }),
+
+  // ── Rotators — legacy ids ───────────────────────────────────────────────────
+  d('potion_fire_resistance', 'Potion of Fire Resistance', 'Resistance to fire damage for 1 hour.', 4.50),
+  d('philter_of_love', 'Philter of Love', 'The first creature the drinker sees becomes the subject of a charmed condition for 1 hour.', 6.00),
+  d('potion_of_flying', 'Potion of Flying', 'A flying speed of 60 ft for 1 hour.', 8.00,
+    { url: 'https://www.dndbeyond.com/magic-items/4706-potion-of-flying' }),
+  d('potion_of_growth', 'Potion of Growth', 'You grow large for 1d4 hours — larger space, +1d4 to Strength checks, +1d4 damage.', 5.00),
+
+  // ── Rotators — new ──────────────────────────────────────────────────────────
+  d('d_potion_greater_healing', 'Potion of Greater Healing', 'Drink to regain 4d4+4 hit points.', 5.00,
+    { url: 'https://www.dndbeyond.com/magic-items/8961-potion-of-greater-healing' }),
+  d('d_potion_cold_res', 'Potion of Cold Resistance', 'Resistance to cold damage for 1 hour.', 4.50),
+  d('d_potion_acid_res', 'Potion of Acid Resistance', 'Resistance to acid damage for 1 hour.', 4.50),
+  d('d_potion_lightning_res', 'Potion of Lightning Resistance', 'Resistance to lightning damage for 1 hour.', 4.50),
+  d('d_potion_poison_res', 'Potion of Poison Resistance', 'Resistance to poison damage for 1 hour.', 4.50),
+  d('d_potion_necrotic_res', 'Potion of Necrotic Resistance', 'Resistance to necrotic damage for 1 hour.', 5.00),
+  d('d_potion_radiant_res', 'Potion of Radiant Resistance', 'Resistance to radiant damage for 1 hour.', 5.00),
+  d('d_potion_thunder_res', 'Potion of Thunder Resistance', 'Resistance to thunder damage for 1 hour.', 4.50),
+  d('d_potion_hill_strength', 'Potion of Hill Giant Strength', 'Your Strength becomes 21 for 1 hour (no effect if already higher).', 8.00,
+    { url: 'https://www.dndbeyond.com/magic-items/4703-potion-of-giant-strength' }),
+  d('d_potion_swim', 'Potion of the Dolphin', 'Swim speed 40 ft and hold your breath for 10 minutes, for 1 hour.', 4.00),
+  d('d_potion_spider', 'Spiderwalk Draught', 'Walk on walls and ceilings (climb speed = walk speed, hands free) for 10 minutes.', 6.00),
+  d('d_potion_mist', 'Potion of Mist Step', 'As a bonus action within 10 minutes of drinking, teleport 30 ft to a spot you can see. One step.', 6.00),
+  d('d_potion_shield_hide', 'Barkhide Draught', 'Your skin toughens: +1 AC for 1 hour.', 6.00),
+  d('d_potion_deathdoor', 'Last Door Tonic', 'If you drop to 0 HP within the next hour, you instead drop to 1 HP. Then the tonic is spent.', 7.00),
+  d('d_potion_truesee_short', 'Eyes of the Owl', 'Darkvision 60 ft for 8 hours; if you already have darkvision, +60 ft instead.', 5.00),
+  d('d_potion_mind_shield', 'Draught of the Still Mind', 'Advantage on Int, Wis, and Cha saves for 10 minutes.', 7.00),
+  d('d_potion_haste_burst', 'Quicksilver Shot', 'Take one extra action on your next turn. Then you can\'t take reactions until the end of your following turn.', 8.00),
+  d('d_potion_giant_slayer_prep', 'Giantsbane Rub', 'For 1 hour, your weapon hits deal +1d6 damage to Large or larger creatures. One application.', 6.00),
+  d('d_elixir_second_wind', 'Elixir of Second Wind', 'Drink as a bonus action: regain hit points equal to 1d10 + your level.', 5.00),
+  d('d_elixir_restore_slot', 'Glimmer Elixir', 'Recover one expended 1st-level spell slot. Tastes like starlight and regret.', 6.00),
+  d('d_elixir_stone_skin_short', 'Elixir of Stone', 'Resistance to nonmagical bludgeoning, piercing, and slashing for 1 minute.', 8.00),
+  d('d_elixir_free_move', 'Unfettered Elixir', 'For 1 minute, ignore difficult terrain and effects that would reduce your speed; escape one grapple automatically.', 6.00),
+  d('d_bomb_fire_greater', 'Greater Firebomb', 'Thrown (30 ft): 3d6 fire in a 10-ft radius (DC 13 Dex half). Leaves burning ground 1 round (1d4).', 7.00),
+  d('d_bomb_frost_greater', 'Greater Frostbomb', 'Thrown (30 ft): 2d6 cold in a 10-ft radius and speed halved 1 round (DC 13 Con halves damage, negates slow).', 7.00),
+  d('d_bomb_lightning_arc', 'Arc Charge', 'Thrown: 2d8 lightning to one target and 1d8 to one creature within 10 ft of it (DC 13 Dex half).', 7.00),
+  d('d_grenade_holy', 'Consecrated Vial', 'Thrown: 3d6 radiant to undead/fiends in a 5-ft radius (DC 13 Con half). Others feel warm and judged.', 6.00),
+  d('d_grenade_void', 'Gloom Grenade', 'Thrown: a 15-ft-radius sphere of magical darkness for 1 round. Darkvision can\'t see through it.', 7.00),
+  d('d_gas_sleep', 'Slumber Gas Vial', 'Thrown: creatures in a 10-ft cloud with 20 HP or fewer fall asleep 1 minute (DC 13 Con negates; damage wakes).', 8.00),
+  d('d_poison_serpent', 'Serpent Venom (weapon)', 'Coat one weapon: next hit deals +3d6 poison (DC 11 Con half). Dries after 1 minute.', 7.00),
+  d('d_ammo_plus_five', 'Charged Ammunition (5)', 'Five pieces of +1 ammunition (your choice of type at purchase). Mundane after firing.', 6.00, { category: 'gear' }),
+  d('d_arrow_grappling', 'Grapnel Arrow', 'Fires a silk line up to 60 ft and sets: one climber may ascend without a check. Single shot.', 5.00, { category: 'gear' }),
+  d('d_arrow_alarm', 'Sentinel Arrow', 'Plant or fire into ground: for 8 hours it shrieks when a creature passes within 20 ft. One arrow.', 5.00, { category: 'gear' }),
+  d('d_scroll_case_sealed', 'Spellguard Scroll Tube', 'One scroll stored inside can\'t be ruined by fire or water. The tube\'s ward is spent shielding one such event.', 4.00, { category: 'gear' }),
+  d('d_oil_slipperiness_minor', 'Oil of Slipperiness (lesser)', 'Slather on: you escape one grapple or restraint automatically within the next 10 minutes, or pre-empt one.', 6.00),
+  d('d_oil_flametongue_minor', 'Emberkiss Oil', 'Coat one weapon: its hits deal +1d4 fire for 10 minutes. One coating.', 6.00),
+  d('d_oil_frostbrand_minor', 'Rimefrost Oil', 'Coat one weapon: its hits deal +1d4 cold for 10 minutes. One coating.', 6.00),
+  d('d_stone_sending', 'One-Word Sending Stone', 'Crush it: send a 25-word message to a creature you know, anywhere on the plane. The stone is consumed.', 8.00),
+  d('d_candle_rest', 'Candle of the Quiet Camp', 'Burns through one long rest: the camp is warded as if by the alarm spell in a 30-ft radius.', 7.00),
+  d('d_ward_scroll_fire', 'Ward Slip: Fire', 'Stick to your chest (bonus action): the next fire damage you take within 1 hour is reduced by 15. Then it burns away.', 6.00),
+  d('d_ward_scroll_blade', 'Ward Slip: Steel', 'Stick to your chest (bonus action): the next weapon hit against you within 1 hour deals 10 less damage. Then it tears away.', 6.00),
+  d('d_banner_rally', 'Rally Pennant', 'Plant as an action: allies within 30 ft gain 5 temporary HP. The pennant fades at battle\'s end. One planting.', 7.00),
+  d('d_horn_fear', 'Horn of the Wolfpack', 'One mighty blast: beasts and creatures CR 1/2 or lower within 60 ft must save (DC 13 Wis) or be frightened of you 1 minute.', 7.00),
+  d('d_drum_march', 'Drum of the Long March', 'Beat while traveling: your party ignores the first level of exhaustion from a forced march today. One day\'s rhythm.', 5.00),
+  d('d_incense_commune_minor', 'Auger\'s Incense', 'Burn during a short rest and ask one yes/no question of the fates; the GM answers truthfully. Once.', 8.00),
+  d('d_map_dungeon_partial', 'Delver\'s Sketch', 'When you enter a dungeon, the GM sketches the nearest three rooms\' outlines. The parchment then fades.', 6.00),
+  d('d_chalk_passage', 'Passage Chalk', 'Draw a door-sized outline on a mundane, non-load-bearing wall up to 1 ft thick: it crumbles into a rough doorway over 1 minute. One drawing.', 8.00),
+  d('d_spike_anchor', 'Anchor Spike', 'Slam into any surface: an immovable anchor holding 1,000 lbs for 10 minutes, then it shears.', 6.00),
+  d('d_ladder_scroll', 'Scroll-Ladder', 'Unroll against a wall: a sturdy 30-ft ladder for 10 minutes, then it curls back into ash.', 6.00),
+  d('d_bridge_plank', 'Folding Chasm Plank', 'Unfolds to a 15-ft rigid plank bearing 800 lbs. Refolds once; the hinges then give.', 7.00),
+  d('d_bubble_air', 'Bottled Air', 'Uncork underwater or in bad air: a 5-ft bubble of fresh air lasting 10 minutes for those inside.', 5.00),
+  d('d_flare_sun', 'Sunflare Beacon', 'Ignite: sheds sunlight 30 ft bright / 30 ft dim for 1 minute. Vampires hate this one trick.', 8.00),
+  d('d_ointment_regrow', 'Knitting Salve', 'Applied over a short rest: the patient regains +2d4 hit points beyond Hit Dice spent.', 5.00),
+  d('d_antidote_universal', 'Universal Antidote', 'End one poison condition and one disease of CR-appropriate mundane origin on the drinker.', 7.00),
+  d('d_smelling_salts_greater', 'Battlefield Salts', 'An unconscious ally at 0 HP wakes with 1 HP (once). The jolt is memorable.', 8.00),
+  d('d_tonic_memory', 'Mnemonic Tonic', 'Perfect recall of the last 10 minutes you experienced — reconstruct one scene in exact detail for the table.', 5.00),
+  d('d_veil_face', 'Veil of the Stranger', 'For 10 minutes your face is unmemorable: witnesses can\'t describe you afterward (no disguise vs. active scrutiny).', 7.00),
+  d('d_cloak_shadow_10', 'Shadowmilk Draught', 'For 10 minutes you have advantage on Stealth checks made in dim light or darkness.', 6.00),
+  d('d_powder_reveal', 'Revelation Powder', 'Blow across 15 ft: invisible creatures and objects in the cone shimmer visibly for 1 minute.', 8.00),
+  d('d_lens_true_glimpse', 'Lens of the True Glimpse', 'Look through once: see through one illusion you suspect, then the lens cracks.', 8.00),
+  d('d_key_wax_master', 'Mimic-Wax Key', 'Press against one mundane lock for 1 minute: the wax forms its key. Works twice, then crumbles.', 7.00),
+  d('d_glove_retriever', 'Retriever\'s Glove', 'Point at an unattended object up to 10 lbs within 30 ft: it flies to your hand. The glove then unravels.', 6.00),
+  d('d_boots_haste_step', 'Skirmisher\'s Anklets', 'For 1 minute, Dash as a bonus action. The straps snap when the minute ends.', 7.00),
+  d('d_manual_stance', 'Duelist\'s Crib Sheet', 'Study 1 minute before a fight: +2 to your first attack roll and +2 AC vs. the first attack against you.', 5.00),
+  d('d_whetstone_adamant', 'Adamant Whetstone', 'Hone one weapon: for 1 hour its hits count as adamantine (bane of constructs and objects). One honing.', 7.00),
+  d('d_feather_fall_token', 'Feather Token: Gentle Drop', 'Crush when falling: you and one adjacent ally fall slowly, taking no fall damage. One crush.', 6.00),
+  d('d_token_tree', 'Feather Token: Oak', 'Plant on open ground: a mature oak grows in 1 minute — cover, a lookout, or a very fast orchard.', 6.00),
+  d('d_token_boat', 'Feather Token: Skiff', 'Toss into water: a rowboat for six unfolds, lasting 12 hours before dissolving into foam.', 8.00),
+]
