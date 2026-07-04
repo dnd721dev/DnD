@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
-import { verifyNftOwnership, DND721_NFT_CONTRACT } from '@/lib/marketNft'
+import { verifyNftOwnership, verifyEscrowApproval, escrowConfigured, DND721_NFT_CONTRACT } from '@/lib/marketNft'
 
 export const dynamic = 'force-dynamic'
 
@@ -145,6 +145,18 @@ export async function POST(req: NextRequest): Promise<Response> {
     // On-chain ownership check — the lister must hold the token right now.
     const owns = await verifyNftOwnership(contract, b.nftTokenId, wallet, BASE_RPC)
     if (!owns) return NextResponse.json({ error: 'You do not own that NFT' }, { status: 403 })
+    // Sale listings require the escrow operator's approval so the NFT can be
+    // AUTO-DELIVERED the instant a buyer pays (no manual send step). The client
+    // prompts approve() before creating; we verify it landed.
+    if (b.kind === 'nft' && escrowConfigured()) {
+      const approved = await verifyEscrowApproval(contract, b.nftTokenId, wallet, BASE_RPC)
+      if (!approved) {
+        return NextResponse.json(
+          { error: 'Escrow approval missing — approve the marketplace operator first', needsApproval: true },
+          { status: 428 },
+        )
+      }
+    }
     // One active listing per token.
     const { data: dup } = await db.from('market_listings')
       .select('id').in('kind', ['nft', 'nft_rent'])

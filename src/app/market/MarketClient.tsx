@@ -58,6 +58,21 @@ const ERC721_TRANSFER_ABI = [{
   outputs: [],
 }] as const
 
+const ERC721_APPROVE_ABI = [{
+  name: 'approve',
+  type: 'function',
+  stateMutability: 'nonpayable',
+  inputs: [
+    { name: 'to', type: 'address' },
+    { name: 'tokenId', type: 'uint256' },
+  ],
+  outputs: [],
+}] as const
+
+/** Escrow operator: sellers approve this address when listing so the server
+ *  auto-delivers the NFT the moment a buyer pays. Empty = manual fallback. */
+const ESCROW_ADDRESS = (process.env.NEXT_PUBLIC_MARKET_ESCROW_ADDRESS ?? '') as `0x${string}` | ''
+
 /** Whole (possibly fractional) DND721 tokens → wei. */
 function tokensToWei(tokens: number): bigint {
   return BigInt(Math.round(tokens * 1e6)) * 10n ** 12n
@@ -144,7 +159,9 @@ export function MarketClient() {
       })
       const json = await res.json()
       setNotice(json.ok
-        ? json.status === 'awaiting_transfer'
+        ? json.delivered
+          ? '✓ Purchased — the NFT was delivered straight to your wallet!'
+          : json.status === 'awaiting_transfer'
           ? '✓ Payment sent! The seller will now transfer the NFT to your wallet.'
           : `✓ Purchased${json.edition ? ` — edition ${json.edition}` : ''}!`
         : `Purchase failed: ${json.error}`)
@@ -473,6 +490,8 @@ function CreateListingModal({
   onClose: () => void
   onCreated: () => void
 }) {
+  const { writeContractAsync } = useWriteContract()
+  const publicClient = usePublicClient()
   const [kind, setKind] = useState<'nft' | 'nft_rent' | 'map'>('nft')
   const [nfts, setNfts] = useState<WalletNft[]>([])
   const [nftsLoading, setNftsLoading] = useState(false)
@@ -520,6 +539,19 @@ function CreateListingModal({
         body.nftName = picked.metadata?.name
         body.nftImage = picked.metadata?.image ?? undefined
         if (kind === 'nft') {
+          // Approve the escrow operator so the buyer's payment auto-delivers
+          // the NFT — no manual "send" step at sale time. One signature here.
+          if (ESCROW_ADDRESS) {
+            setErr(null)
+            const hash = await writeContractAsync({
+              address: picked.contract as `0x${string}`,
+              abi: ERC721_APPROVE_ABI,
+              functionName: 'approve',
+              args: [ESCROW_ADDRESS, BigInt(picked.tokenId)],
+              chainId: 8453,
+            })
+            await publicClient?.waitForTransactionReceipt({ hash })
+          }
           if (currency === 'dnd721') body.priceTokens = Number(price); else body.priceEth = Number(price)
         } else {
           body.rentPerDay = Number(perDay); body.rentMaxDays = Number(maxDays)
@@ -626,6 +658,13 @@ function CreateListingModal({
               </p>
             </div>
           </>
+        )}
+
+        {kind === 'nft' && ESCROW_ADDRESS && (
+          <p className="text-[10px] text-slate-500">
+            You&apos;ll sign one approval when listing. The NFT stays in your wallet until it sells —
+            then it&apos;s delivered to the buyer automatically the moment they pay.
+          </p>
         )}
 
         {kind !== 'nft_rent' && (

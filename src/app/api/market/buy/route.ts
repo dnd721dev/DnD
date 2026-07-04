@@ -14,6 +14,7 @@ import { z } from 'zod'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 import { verifyDnd721ToSeller, verifyEthToSeller } from '@/lib/marketVerify'
+import { escrowTransferNft, escrowConfigured } from '@/lib/marketNft'
 
 const BASE_RPC = process.env.NEXT_PUBLIC_BASE_RPC_URL ?? 'https://mainnet.base.org'
 
@@ -81,8 +82,20 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   // ── Apply effects ───────────────────────────────────────────────────────────
   if (L.kind === 'nft') {
-    // Payment received — the seller must now transfer the ERC-721 to the buyer
-    // and confirm via /api/market/confirm-transfer.
+    // Payment received — auto-deliver the NFT via the escrow operator (the
+    // seller approved it at list time), so the buyer never waits on a human.
+    if (escrowConfigured() && L.nft_contract && L.nft_token_id) {
+      const xfer = await escrowTransferNft(L.nft_contract, L.nft_token_id, seller, wallet, BASE_RPC)
+      if (xfer.ok) {
+        await db.from('market_listings').update({
+          status: 'sold', buyer_wallet: wallet, transfer_tx: xfer.txHash,
+        }).eq('id', listingId)
+        return NextResponse.json({ ok: true, kind: 'nft', status: 'sold', delivered: true })
+      }
+      console.warn('[market/buy] escrow auto-delivery failed, falling back:', xfer.reason)
+    }
+    // Fallback (escrow unset, or approval revoked): seller must transfer
+    // manually and confirm via /api/market/confirm-transfer.
     await db.from('market_listings').update({
       status: 'awaiting_transfer',
       buyer_wallet: wallet,
@@ -108,14 +121,24 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   // Buyout of a rental listing (accepted bid, payment verified above)
   if (L.kind === 'nft_rent') {
-    // The NFT itself changes hands: enter the same two-step transfer flow.
     await db.from('market_rentals').update({ status: 'ended' })
       .eq('listing_id', listingId).eq('status', 'active')
+    await db.from('market_bids').update({ status: 'completed' }).eq('id', bid.id)
+    // Auto-deliver via escrow when possible; else fall back to manual transfer.
+    if (escrowConfigured() && L.nft_contract && L.nft_token_id) {
+      const xfer = await escrowTransferNft(L.nft_contract, L.nft_token_id, seller, wallet, BASE_RPC)
+      if (xfer.ok) {
+        await db.from('market_listings').update({
+          status: 'sold', buyer_wallet: wallet, transfer_tx: xfer.txHash,
+        }).eq('id', listingId)
+        return NextResponse.json({ ok: true, kind: 'nft_buyout', status: 'sold', delivered: true })
+      }
+      console.warn('[market/buy] buyout escrow delivery failed, falling back:', xfer.reason)
+    }
     await db.from('market_listings').update({
       status: 'awaiting_transfer',
       buyer_wallet: wallet,
     }).eq('id', listingId)
-    await db.from('market_bids').update({ status: 'completed' }).eq('id', bid.id)
     return NextResponse.json({ ok: true, kind: 'nft_buyout', status: 'awaiting_transfer' })
   }
 

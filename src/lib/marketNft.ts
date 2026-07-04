@@ -2,11 +2,23 @@
 // ERC-721 helpers for marketplace NFT listings: ownership checks at list
 // time and transfer verification at settlement time.
 
-import { createPublicClient, http, decodeEventLog } from 'viem'
+import { createPublicClient, createWalletClient, http, decodeEventLog } from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
 import { base } from 'viem/chains'
 
 export const DND721_NFT_CONTRACT =
   (process.env.DND721_CONTRACT_ADDRESS ?? '0xcc734d328ae06a7014eeebe5f214d421aa633eed').toLowerCase()
+
+/** Escrow operator — sellers `approve()` this address at list time so the
+ *  server can auto-deliver the NFT the moment the buyer's payment verifies.
+ *  Public half is safe to expose; the private key is server-only. */
+export const MARKET_ESCROW_ADDRESS =
+  (process.env.NEXT_PUBLIC_MARKET_ESCROW_ADDRESS ?? '').toLowerCase()
+const MARKET_ESCROW_PRIVATE_KEY = process.env.MARKET_ESCROW_PRIVATE_KEY ?? ''
+
+export function escrowConfigured(): boolean {
+  return /^0x[0-9a-f]{40}$/.test(MARKET_ESCROW_ADDRESS) && /^0x[0-9a-fA-F]{64}$/.test(MARKET_ESCROW_PRIVATE_KEY)
+}
 
 const OWNER_OF_ABI = [{
   name: 'ownerOf',
@@ -14,6 +26,38 @@ const OWNER_OF_ABI = [{
   stateMutability: 'view' as const,
   inputs: [{ name: 'tokenId', type: 'uint256' as const }],
   outputs: [{ type: 'address' as const }],
+}]
+
+const APPROVAL_ABI = [
+  {
+    name: 'getApproved',
+    type: 'function' as const,
+    stateMutability: 'view' as const,
+    inputs: [{ name: 'tokenId', type: 'uint256' as const }],
+    outputs: [{ type: 'address' as const }],
+  },
+  {
+    name: 'isApprovedForAll',
+    type: 'function' as const,
+    stateMutability: 'view' as const,
+    inputs: [
+      { name: 'owner', type: 'address' as const },
+      { name: 'operator', type: 'address' as const },
+    ],
+    outputs: [{ type: 'bool' as const }],
+  },
+]
+
+const SAFE_TRANSFER_ABI = [{
+  name: 'safeTransferFrom',
+  type: 'function' as const,
+  stateMutability: 'nonpayable' as const,
+  inputs: [
+    { name: 'from', type: 'address' as const },
+    { name: 'to', type: 'address' as const },
+    { name: 'tokenId', type: 'uint256' as const },
+  ],
+  outputs: [],
 }]
 
 const ERC721_TRANSFER_ABI = [{
@@ -45,6 +89,57 @@ export async function verifyNftOwnership(
   } catch (e) {
     console.error('[marketNft] ownerOf failed', e)
     return false
+  }
+}
+
+/** True when the escrow operator is approved to move tokenId (single-token
+ *  approval or operator-for-all from `owner`). */
+export async function verifyEscrowApproval(
+  contract: string, tokenId: string, owner: string, rpcUrl: string,
+): Promise<boolean> {
+  if (!MARKET_ESCROW_ADDRESS) return false
+  try {
+    const c = client(rpcUrl)
+    const [approved, forAll] = await Promise.all([
+      c.readContract({
+        address: contract as `0x${string}`, abi: APPROVAL_ABI,
+        functionName: 'getApproved', args: [BigInt(tokenId)],
+      }).catch(() => '0x0') as Promise<string>,
+      c.readContract({
+        address: contract as `0x${string}`, abi: APPROVAL_ABI,
+        functionName: 'isApprovedForAll', args: [owner as `0x${string}`, MARKET_ESCROW_ADDRESS as `0x${string}`],
+      }).catch(() => false) as Promise<boolean>,
+    ])
+    return String(approved).toLowerCase() === MARKET_ESCROW_ADDRESS || forAll === true
+  } catch {
+    return false
+  }
+}
+
+export type EscrowTransferResult = { ok: true; txHash: string } | { ok: false; reason: string }
+
+/** Auto-deliver: the escrow operator moves the NFT seller → buyer. Requires
+ *  the seller's prior approve() and the server-side escrow key. */
+export async function escrowTransferNft(
+  contract: string, tokenId: string, from: string, to: string, rpcUrl: string,
+): Promise<EscrowTransferResult> {
+  if (!escrowConfigured()) return { ok: false, reason: 'Escrow not configured' }
+  try {
+    const account = privateKeyToAccount(MARKET_ESCROW_PRIVATE_KEY as `0x${string}`)
+    const walletClient = createWalletClient({ account, chain: base, transport: http(rpcUrl) })
+    const publicClient = client(rpcUrl)
+    const txHash = await walletClient.writeContract({
+      address: contract as `0x${string}`,
+      abi: SAFE_TRANSFER_ABI,
+      functionName: 'safeTransferFrom',
+      args: [from as `0x${string}`, to as `0x${string}`, BigInt(tokenId)],
+    })
+    const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
+    if (receipt.status !== 'success') return { ok: false, reason: 'Escrow transfer reverted' }
+    return { ok: true, txHash }
+  } catch (e: any) {
+    console.error('[marketNft] escrow transfer failed', e)
+    return { ok: false, reason: e?.shortMessage ?? 'Escrow transfer failed' }
   }
 }
 
