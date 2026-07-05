@@ -41,7 +41,7 @@ type Listing = {
   status: string
 }
 
-type MapRow = { id: string; name: string | null; image_url: string | null; visibility: string; owner_wallet: string | null }
+type MapRow = { id: string; name: string | null; image_url: string | null; visibility: string; owner_wallet: string | null; mint_status?: string | null; mint_token_id?: string | null }
 type RentalRow = { id: string; listing_id: string; renter_wallet: string; owner_wallet: string; ends_at: string; per_day: number; days: number; status: string }
 type BidRow = { id: string; listing_id: string; bidder_wallet: string; kind: 're_rent' | 'buy'; amount: number; days: number | null; message: string | null; status: string }
 type WalletNft = { contract: string; tokenId: string; metadata: { name?: string; image?: string | null } | null; rented?: boolean }
@@ -124,6 +124,17 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string
 /** Deployed DND721Market contract (legacy env var name accepted). */
 const MARKET_ADDRESS = ((process.env.NEXT_PUBLIC_MARKET_CONTRACT_ADDRESS
   ?? process.env.NEXT_PUBLIC_MARKET_ESCROW_ADDRESS) ?? '') as `0x${string}` | ''
+
+/** DND721Maps.sol — the map NFT collection. mint(uri) mints to the caller. */
+const MAPS_NFT_ADDRESS = (process.env.NEXT_PUBLIC_MAPS_NFT_ADDRESS ?? '') as `0x${string}` | ''
+
+const MAPS_NFT_ABI = [{
+  name: 'mint',
+  type: 'function',
+  stateMutability: 'nonpayable',
+  inputs: [{ name: 'uri', type: 'string' }],
+  outputs: [{ name: 'tokenId', type: 'uint256' }],
+}] as const
 
 /** Whole (possibly fractional) DND721 tokens → wei. */
 function tokensToWei(tokens: number): bigint {
@@ -227,6 +238,28 @@ export function MarketClient() {
     return buyHash
   }
 
+  /** Mint a map NFT on the DND721Maps contract (edition 0 = creator's copy),
+   *  then record the token in the DB. Returns the minted token id. */
+  async function mintMapNft(mapId: string, edition: number): Promise<string | null> {
+    if (!MAPS_NFT_ADDRESS) return null
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    const uri = `${origin}/api/maps/nft/${mapId}${edition > 0 ? `?edition=${edition}` : ''}`
+    const hash = await writeContractAsync({
+      address: MAPS_NFT_ADDRESS,
+      abi: MAPS_NFT_ABI,
+      functionName: 'mint',
+      args: [uri],
+      chainId: 8453,
+    })
+    await publicClient?.waitForTransactionReceipt({ hash })
+    const res = await fetch('/api/maps/mint-record', {
+      method: 'POST', headers,
+      body: JSON.stringify({ mapId, txHash: hash, edition }),
+    })
+    const json = await res.json()
+    return json.ok ? String(json.tokenId) : null
+  }
+
   async function buyListing(l: Listing) {
     if (!wallet) return
     setBusy(l.id); setNotice(null)
@@ -243,13 +276,26 @@ export function MarketClient() {
         body: JSON.stringify({ listingId: l.id, txHash }),
       })
       const json = await res.json()
-      setNotice(json.ok
-        ? json.delivered
-          ? '✓ Purchased — the NFT is in your wallet!'
-          : json.status === 'awaiting_transfer'
-          ? '✓ Payment sent! The seller will now transfer the NFT to your wallet.'
-          : `✓ Purchased${json.edition ? ` — edition ${json.edition}` : ''}!`
-        : `Purchase failed: ${json.error}`)
+      if (json.ok && json.kind === 'map' && json.editionNo && MAPS_NFT_ADDRESS && l.map_id) {
+        // Edition purchased — mint the numbered edition NFT to the buyer.
+        setNotice(`✓ Edition ${json.edition} purchased — minting your NFT…`)
+        try {
+          const tokenId = await mintMapNft(l.map_id, Number(json.editionNo))
+          setNotice(tokenId
+            ? `✓ Edition ${json.edition} purchased and minted — token #${tokenId} is in your wallet!`
+            : `✓ Edition ${json.edition} purchased! (NFT mint skipped — you can mint later from this card.)`)
+        } catch {
+          setNotice(`✓ Edition ${json.edition} purchased! (NFT mint cancelled — the map is still unlocked for you.)`)
+        }
+      } else {
+        setNotice(json.ok
+          ? json.delivered
+            ? '✓ Purchased — the NFT is in your wallet!'
+            : json.status === 'awaiting_transfer'
+            ? '✓ Payment sent! The seller will now transfer the NFT to your wallet.'
+            : `✓ Purchased${json.edition ? ` — edition ${json.edition}` : ''}!`
+          : `Purchase failed: ${json.error}`)
+      }
       void load()
     } catch (e: any) {
       setNotice(e?.shortMessage ?? e?.message ?? 'Transaction cancelled')
@@ -490,9 +536,38 @@ export function MarketClient() {
           ) : awaiting ? (
             <span className="text-xs text-slate-500">Pending transfer</span>
           ) : isMine ? (
-            <button onClick={() => void cancelListing(l)} className="rounded-md border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
-              Cancel listing
-            </button>
+            <div className="flex flex-wrap justify-end gap-1.5">
+              {/* Creator's own map NFT — mint their copy on the DND721Maps contract */}
+              {l.kind === 'map' && MAPS_NFT_ADDRESS && l.map_id && mp && mp.mint_status !== 'minted' && (
+                <button
+                  disabled={busy === l.id}
+                  onClick={async () => {
+                    setBusy(l.id); setNotice(null)
+                    try {
+                      const tokenId = await mintMapNft(l.map_id!, 0)
+                      setNotice(tokenId
+                        ? `✓ Creator's copy minted — token #${tokenId} is in your wallet!`
+                        : 'Mint recorded failed — try again.')
+                      void load()
+                    } catch (e: any) {
+                      setNotice(e?.shortMessage ?? e?.message ?? 'Mint cancelled')
+                    } finally { setBusy(null) }
+                  }}
+                  className="rounded-md bg-purple-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-600 disabled:opacity-50"
+                  title="Mint your own copy of this map as an NFT (tradeable on OpenSea)"
+                >
+                  {busy === l.id ? '⏳ Minting…' : '🪙 Mint creator NFT'}
+                </button>
+              )}
+              {l.kind === 'map' && mp?.mint_status === 'minted' && (
+                <span className="rounded-md bg-purple-950/50 px-2.5 py-1.5 text-[10px] font-semibold text-purple-300 ring-1 ring-purple-700/40">
+                  Minted · #{mp.mint_token_id}
+                </span>
+              )}
+              <button onClick={() => void cancelListing(l)} className="rounded-md border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
+                Cancel listing
+              </button>
+            </div>
           ) : isRentKind ? (
             <div className="flex flex-wrap justify-end gap-1.5">
               {myAcceptedBuy ? (
@@ -657,9 +732,13 @@ function CreateListingModal({
   }, [wallet])
 
   useEffect(() => {
+    // Only PRIVATE maps qualify as map NFTs — privating a map in the map
+    // library is the deliberate first step; listing here attaches the rarity
+    // and unlocks platform use for whoever owns an edition.
     void supabase.from('maps')
       .select('id, name, image_url, visibility, owner_wallet')
       .eq('owner_wallet', wallet)
+      .eq('visibility', 'private')
       .then(({ data }) => setMyMaps((data ?? []) as MapRow[]))
   }, [wallet])
 
@@ -792,16 +871,24 @@ function CreateListingModal({
         {kind === 'map' && (
           <>
             <div>
-              <label className="mb-1 block text-[10px] font-semibold uppercase text-slate-500">Map (will become private)</label>
-              <select value={mapId} onChange={(e) => setMapId(e.target.value)} className={inputCls}>
-                <option value="">— Select —</option>
-                {myMaps.map((m) => <option key={m.id} value={m.id}>{m.name ?? m.id.slice(0, 8)}{m.visibility === 'private' ? ' (private)' : ''}</option>)}
-              </select>
+              <label className="mb-1 block text-[10px] font-semibold uppercase text-slate-500">Your private maps</label>
+              {myMaps.length === 0 ? (
+                <p className="rounded-md border border-slate-700 bg-slate-900/40 px-3 py-2 text-[11px] text-slate-400">
+                  No private maps yet. Only maps set to <span className="font-semibold text-slate-300">private</span> can
+                  be minted as map NFTs — mark one private in your map library first, then come back here to
+                  choose its rarity and list it.
+                </p>
+              ) : (
+                <select value={mapId} onChange={(e) => setMapId(e.target.value)} className={inputCls}>
+                  <option value="">— Select —</option>
+                  {myMaps.map((m) => <option key={m.id} value={m.id}>{m.name ?? m.id.slice(0, 8)}</option>)}
+                </select>
+              )}
             </div>
             <div>
               <label className="mb-1 block text-[10px] font-semibold uppercase text-slate-500">Rarity — edition size</label>
               <select value={rarity} onChange={(e) => setRarity(e.target.value)} className={inputCls}>
-                <option value="1">1:1 — unique</option>
+                <option value="1">1:1 — unique (or keep it as your personal map NFT)</option>
                 <option value="5">1:5</option>
                 <option value="10">1:10</option>
                 <option value="100">1:100</option>
@@ -810,7 +897,9 @@ function CreateListingModal({
                 <option value="2000">1:2000</option>
               </select>
               <p className="mt-1 text-[10px] text-slate-500">
-                Each buyer receives a numbered edition. Owning any edition lets them use this map in their campaigns.
+                Owning an edition unlocks this private map for use on the platform (campaigns &amp; sessions).
+                Each buyer receives a numbered edition — sell here, on OpenSea, or list a 1:1 and simply keep it
+                as your own created NFT.
               </p>
             </div>
           </>

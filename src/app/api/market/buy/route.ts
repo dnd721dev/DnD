@@ -105,7 +105,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       editions_sold: editionNo,
       ...(editionNo >= size ? { status: 'sold' } : {}),
     }).eq('id', listingId)
-    return NextResponse.json({ ok: true, kind: 'map', edition: `${editionNo} of ${size}` })
+    return NextResponse.json({ ok: true, kind: 'map', edition: `${editionNo} of ${size}`, editionNo })
   }
 
   // ── Rental buyouts require an accepted bid ──────────────────────────────────

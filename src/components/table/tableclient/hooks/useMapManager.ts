@@ -40,10 +40,14 @@ export function useMapManager(sessionId: string | null) {
   /**
    * Fetch the entire platform-wide map library. RLS returns:
    *   • every map with visibility='public', plus
-   *   • the connected GM's own private maps.
+   *   • the connected GM's own private maps, plus
+   *   • private maps where the GM holds a map-edition NFT.
    * Cap at 200 most-recent rows for UI sanity.
    */
   const loadAllMaps = useCallback(async (): Promise<SessionMap[]> => {
+    // Fire-and-forget: reconcile minted map editions with on-chain ownership
+    // so a resold edition NFT revokes/grants library access promptly.
+    void fetch('/api/maps/sync-editions', { method: 'POST' }).catch(() => { /* non-fatal */ })
     const { data, error } = await supabase
       .from('maps')
       .select('id, session_id, name, tile_data, image_url, is_tile_map, visibility, owner_wallet, mint_status, created_at')

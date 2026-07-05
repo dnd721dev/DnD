@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 import { verifyNftOwnership, verifyOnchainListing, marketContractConfigured, DND721_NFT_CONTRACT } from '@/lib/marketNft'
+import { syncMintedEditions } from '@/lib/mapEditionSync'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,6 +47,9 @@ async function expireRentals(db: ReturnType<typeof supabaseAdmin>) {
 export async function GET(req: NextRequest): Promise<Response> {
   const db = supabaseAdmin()
   await expireRentals(db)
+  // Reconcile minted map editions with on-chain ownership (throttled) so a
+  // resold edition NFT revokes the seller's map access and grants the buyer.
+  void syncMintedEditions(db).catch(() => { /* non-fatal */ })
 
   const kind = req.nextUrl.searchParams.get('kind')
   const mine = req.nextUrl.searchParams.get('mine') === '1'
@@ -69,7 +73,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       ? db.from('characters').select('id, name, level, main_job, avatar_url, wallet_address, rented_to_wallet, rental_ends_at').in('id', charIds)
       : Promise.resolve({ data: [] as any[] }),
     mapIds.length
-      ? db.from('maps').select('id, name, image_url, visibility, owner_wallet').in('id', mapIds)
+      ? db.from('maps').select('id, name, image_url, visibility, owner_wallet, mint_status, mint_token_id').in('id', mapIds)
       : Promise.resolve({ data: [] as any[] }),
     db.from('market_rentals').select('*').eq('status', 'active'),
     wallet
@@ -178,11 +182,18 @@ export async function POST(req: NextRequest): Promise<Response> {
     if (!map || String((map as any).owner_wallet ?? '').toLowerCase() !== wallet) {
       return NextResponse.json({ error: 'Not your map' }, { status: 403 })
     }
+    // Only PRIVATE maps can be minted as NFTs. Privating the map (in the map
+    // library) is the deliberate first step; the market listing then attaches
+    // the rarity and unlocks platform use for edition owners.
+    if (String((map as any).visibility) !== 'private') {
+      return NextResponse.json(
+        { error: 'Only private maps can be listed as NFTs — set the map to private in your map library first' },
+        { status: 400 },
+      )
+    }
     const { data: dup } = await db.from('market_listings')
       .select('id').eq('kind', 'map').eq('map_id', b.mapId).eq('status', 'active').maybeSingle()
     if (dup) return NextResponse.json({ error: 'Map already listed' }, { status: 409 })
-    // Privating the map is part of listing it — the owner picked a rarity.
-    await db.from('maps').update({ visibility: 'private' }).eq('id', b.mapId)
     row.map_id = b.mapId
     row.map_rarity = b.rarity
   }
