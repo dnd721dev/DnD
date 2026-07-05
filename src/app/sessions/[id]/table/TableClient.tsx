@@ -343,7 +343,9 @@ export default function TableClient({ sessionId }: TableClientProps) {
   const [libraryMaps, setLibraryMaps] = useState<import('@/components/table/tableclient/hooks/useMapManager').SessionMap[]>([])
   const [libraryLoading, setLibraryLoading] = useState(false)
   const [librarySearch, setLibrarySearch] = useState('')
-  const [libraryTab, setLibraryTab] = useState<'public' | 'mine'>('public')
+  const [libraryTab, setLibraryTab] = useState<'public' | 'mine' | 'nfts'>('public')
+  // Map ids where this wallet owns a marketplace edition NFT (unlocked maps)
+  const [ownedEditionMapIds, setOwnedEditionMapIds] = useState<Set<string>>(new Set())
   const [librarySelectedId, setLibrarySelectedId] = useState<string | null>(null)
 
   const campaignMeta = session?.campaigns?.[0]
@@ -1008,6 +1010,14 @@ export default function TableClient({ sessionId }: TableClientProps) {
       // Hide maps already attached to this session so the GM doesn't see no-op duplicates.
       const usedIds = new Set(maps.map((m) => m.id))
       setLibraryMaps(all.filter((m) => !usedIds.has(m.id)))
+      // Map-edition NFTs owned by this wallet — drives the "Bought NFTs" tab.
+      if (walletLower) {
+        const { data: eds } = await supabase
+          .from('map_editions')
+          .select('map_id')
+          .eq('owner_wallet', walletLower)
+        setOwnedEditionMapIds(new Set(((eds ?? []) as any[]).map((e) => String(e.map_id))))
+      }
     } finally {
       setLibraryLoading(false)
     }
@@ -1415,6 +1425,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
         {showNewMapModal && (() => {
           const filteredLibrary = libraryMaps.filter((m) => {
             if (libraryTab === 'mine') return m.visibility === 'private' && (m.owner_wallet?.toLowerCase() === walletLower)
+            if (libraryTab === 'nfts') return ownedEditionMapIds.has(m.id)
             if (libraryTab === 'public') return m.visibility === 'public'
             return true
           }).filter((m) => !librarySearch.trim() || m.name.toLowerCase().includes(librarySearch.trim().toLowerCase()))
@@ -1506,7 +1517,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
                 {newMapType === 'library' && (
                   <div className="mb-4 space-y-2">
                     <div className="flex items-center gap-2">
-                      {(['public', 'mine'] as const).map((tab) => (
+                      {(['public', 'mine', 'nfts'] as const).map((tab) => (
                         <button
                           key={tab}
                           type="button"
@@ -1517,7 +1528,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
                               : 'border-slate-700 bg-slate-800 text-slate-400 hover:text-slate-200'
                           }`}
                         >
-                          {tab === 'public' ? 'All Public' : '🔒 My Private'}
+                          {tab === 'public' ? 'All Public' : tab === 'mine' ? '🔒 My Private' : '🎴 Bought NFTs'}
                         </button>
                       ))}
                       <input
@@ -1530,7 +1541,11 @@ export default function TableClient({ sessionId }: TableClientProps) {
                     <div className="grid max-h-72 grid-cols-2 gap-2 overflow-y-auto rounded border border-slate-800 bg-slate-950/40 p-2">
                       {libraryLoading && <div className="col-span-2 py-4 text-center text-[11px] text-slate-500">Loading library…</div>}
                       {!libraryLoading && filteredLibrary.length === 0 && (
-                        <div className="col-span-2 py-4 text-center text-[11px] text-slate-500">No maps yet.</div>
+                        <div className="col-span-2 py-4 text-center text-[11px] text-slate-500">
+                          {libraryTab === 'nfts'
+                            ? 'No map NFTs yet — buy a map edition on the Marketplace and it will appear here, unlocked for your campaigns.'
+                            : 'No maps yet.'}
+                        </div>
                       )}
                       {filteredLibrary.map((m) => {
                         const selected = librarySelectedId === m.id
