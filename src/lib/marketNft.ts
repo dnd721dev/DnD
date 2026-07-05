@@ -9,12 +9,31 @@ import { base } from 'viem/chains'
 export const DND721_NFT_CONTRACT =
   (process.env.DND721_CONTRACT_ADDRESS ?? '0xcc734d328ae06a7014eeebe5f214d421aa633eed').toLowerCase()
 
-/** Escrow operator — sellers `approve()` this address at list time so the
- *  server can auto-deliver the NFT the moment the buyer's payment verifies.
- *  Public half is safe to expose; the private key is server-only. */
+/** MarketEscrow.sol contract address — sellers approve() THIS CONTRACT (not
+ *  a personal wallet) at list time; the backend relayer can only ever move a
+ *  seller's token via the contract's single `executeSale`, and only after
+ *  independently verifying the buyer's on-chain payment first. Wallets treat
+ *  approving a verified, source-published, single-purpose contract very
+ *  differently from approving a raw EOA — that's the point of this contract. */
 export const MARKET_ESCROW_ADDRESS =
   (process.env.NEXT_PUBLIC_MARKET_ESCROW_ADDRESS ?? '').toLowerCase()
+/** The relayer wallet registered as `relayer` on the deployed MarketEscrow. */
 const MARKET_ESCROW_PRIVATE_KEY = process.env.MARKET_ESCROW_PRIVATE_KEY ?? ''
+
+const MARKET_ESCROW_ABI = [
+  {
+    name: 'executeSale',
+    type: 'function' as const,
+    stateMutability: 'nonpayable' as const,
+    inputs: [
+      { name: 'seller', type: 'address' as const },
+      { name: 'nft', type: 'address' as const },
+      { name: 'tokenId', type: 'uint256' as const },
+      { name: 'buyer', type: 'address' as const },
+    ],
+    outputs: [],
+  },
+]
 
 export function escrowConfigured(): boolean {
   return /^0x[0-9a-f]{40}$/.test(MARKET_ESCROW_ADDRESS) && /^0x[0-9a-fA-F]{64}$/.test(MARKET_ESCROW_PRIVATE_KEY)
@@ -48,18 +67,6 @@ const APPROVAL_ABI = [
   },
 ]
 
-const SAFE_TRANSFER_ABI = [{
-  name: 'safeTransferFrom',
-  type: 'function' as const,
-  stateMutability: 'nonpayable' as const,
-  inputs: [
-    { name: 'from', type: 'address' as const },
-    { name: 'to', type: 'address' as const },
-    { name: 'tokenId', type: 'uint256' as const },
-  ],
-  outputs: [],
-}]
-
 const ERC721_TRANSFER_ABI = [{
   name: 'Transfer',
   type: 'event' as const,
@@ -92,8 +99,9 @@ export async function verifyNftOwnership(
   }
 }
 
-/** True when the escrow operator is approved to move tokenId (single-token
- *  approval or operator-for-all from `owner`). */
+/** True when the escrow contract is approved to move this token (per-token
+ *  approve() or collection-wide setApprovalForAll from the owner). Checked
+ *  at list time so a sale can never later fail for lack of approval. */
 export async function verifyEscrowApproval(
   contract: string, tokenId: string, owner: string, rpcUrl: string,
 ): Promise<boolean> {
@@ -118,8 +126,8 @@ export async function verifyEscrowApproval(
 
 export type EscrowTransferResult = { ok: true; txHash: string } | { ok: false; reason: string }
 
-/** Auto-deliver: the escrow operator moves the NFT seller → buyer. Requires
- *  the seller's prior approve() and the server-side escrow key. */
+/** Auto-deliver: the relayer calls MarketEscrow.executeSale(), which reverts
+ *  unless the seller themselves pre-authorized this exact buyer on-chain. */
 export async function escrowTransferNft(
   contract: string, tokenId: string, from: string, to: string, rpcUrl: string,
 ): Promise<EscrowTransferResult> {
@@ -129,10 +137,10 @@ export async function escrowTransferNft(
     const walletClient = createWalletClient({ account, chain: base, transport: http(rpcUrl) })
     const publicClient = client(rpcUrl)
     const txHash = await walletClient.writeContract({
-      address: contract as `0x${string}`,
-      abi: SAFE_TRANSFER_ABI,
-      functionName: 'safeTransferFrom',
-      args: [from as `0x${string}`, to as `0x${string}`, BigInt(tokenId)],
+      address: MARKET_ESCROW_ADDRESS as `0x${string}`,
+      abi: MARKET_ESCROW_ABI,
+      functionName: 'executeSale',
+      args: [from as `0x${string}`, contract as `0x${string}`, BigInt(tokenId), to as `0x${string}`],
     })
     const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
     if (receipt.status !== 'success') return { ok: false, reason: 'Escrow transfer reverted' }
