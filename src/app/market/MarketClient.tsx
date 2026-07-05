@@ -69,9 +69,61 @@ const ERC721_APPROVE_ABI = [{
   outputs: [],
 }] as const
 
-/** Escrow operator: sellers approve this address when listing so the server
- *  auto-delivers the NFT the moment a buyer pays. Empty = manual fallback. */
-const ESCROW_ADDRESS = (process.env.NEXT_PUBLIC_MARKET_ESCROW_ADDRESS ?? '') as `0x${string}` | ''
+const ERC20_APPROVE_ABI = [{
+  name: 'approve',
+  type: 'function',
+  stateMutability: 'nonpayable',
+  inputs: [
+    { name: 'spender', type: 'address' },
+    { name: 'value', type: 'uint256' },
+  ],
+  outputs: [{ type: 'bool' }],
+}] as const
+
+/** DND721Market.sol — trustless atomic swap. list/cancel by the owner only;
+ *  buy() pays the seller and delivers the NFT in one transaction. No admin,
+ *  no relayer, no custody. */
+const MARKET_ABI = [
+  {
+    name: 'list',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'nft', type: 'address' },
+      { name: 'tokenId', type: 'uint256' },
+      { name: 'currency', type: 'address' },
+      { name: 'price', type: 'uint256' },
+      { name: 'reservedBuyer', type: 'address' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'cancel',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'nft', type: 'address' },
+      { name: 'tokenId', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'buy',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'nft', type: 'address' },
+      { name: 'tokenId', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+] as const
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
+
+/** Deployed DND721Market contract (legacy env var name accepted). */
+const MARKET_ADDRESS = ((process.env.NEXT_PUBLIC_MARKET_CONTRACT_ADDRESS
+  ?? process.env.NEXT_PUBLIC_MARKET_ESCROW_ADDRESS) ?? '') as `0x${string}` | ''
 
 /** Whole (possibly fractional) DND721 tokens → wei. */
 function tokensToWei(tokens: number): bigint {
@@ -146,11 +198,44 @@ export function MarketClient() {
 
   // ── Actions ─────────────────────────────────────────────────────────────────
 
+  /** Buy through the trustless DND721Market contract: payment to the seller
+   *  and NFT delivery happen atomically in the buyer's own transaction. */
+  async function buyNftViaContract(l: Listing, bidAmountTokens?: number): Promise<string> {
+    if (!MARKET_ADDRESS || !l.nft_contract || !l.nft_token_id) throw new Error('Market contract not configured')
+    const isEth = l.currency === 'eth' && bidAmountTokens == null
+    if (!isEth) {
+      // ERC-20 path: approve the market to pull the price, then buy.
+      const tokens = bidAmountTokens ?? Number(l.price_tokens)
+      const approveHash = await writeContractAsync({
+        address: DND721_TOKEN_ADDRESS,
+        abi: ERC20_APPROVE_ABI,
+        functionName: 'approve',
+        args: [MARKET_ADDRESS, tokensToWei(tokens)],
+        chainId: 8453,
+      })
+      await publicClient?.waitForTransactionReceipt({ hash: approveHash })
+    }
+    const buyHash = await writeContractAsync({
+      address: MARKET_ADDRESS,
+      abi: MARKET_ABI,
+      functionName: 'buy',
+      args: [l.nft_contract as `0x${string}`, BigInt(l.nft_token_id)],
+      chainId: 8453,
+      ...(isEth ? { value: parseEther(String(l.price_eth)) } : {}),
+    })
+    await publicClient?.waitForTransactionReceipt({ hash: buyHash })
+    return buyHash
+  }
+
   async function buyListing(l: Listing) {
     if (!wallet) return
     setBusy(l.id); setNotice(null)
     try {
-      const txHash = l.currency === 'eth'
+      // NFT sales settle atomically through the market contract; map editions
+      // (and legacy flows) pay the seller directly.
+      const txHash = l.kind === 'nft' && MARKET_ADDRESS
+        ? await buyNftViaContract(l)
+        : l.currency === 'eth'
         ? await payEth(l.seller_wallet, Number(l.price_eth))
         : await payDnd721(l.seller_wallet, Number(l.price_tokens))
       const res = await fetch('/api/market/buy', {
@@ -160,7 +245,7 @@ export function MarketClient() {
       const json = await res.json()
       setNotice(json.ok
         ? json.delivered
-          ? '✓ Purchased — the NFT was delivered straight to your wallet!'
+          ? '✓ Purchased — the NFT is in your wallet!'
           : json.status === 'awaiting_transfer'
           ? '✓ Payment sent! The seller will now transfer the NFT to your wallet.'
           : `✓ Purchased${json.edition ? ` — edition ${json.edition}` : ''}!`
@@ -224,13 +309,19 @@ export function MarketClient() {
     if (!wallet) return
     setBusy(l.id); setNotice(null)
     try {
-      const txHash = await payDnd721(l.seller_wallet, Number(acceptedBid.amount))
+      // With the market contract, the owner accepted by listing the NFT
+      // reserved for you at the bid price — one atomic buy() completes it.
+      const txHash = l.kind === 'nft_rent' && MARKET_ADDRESS && l.nft_contract
+        ? await buyNftViaContract(l, Number(acceptedBid.amount))
+        : await payDnd721(l.seller_wallet, Number(acceptedBid.amount))
       const res = await fetch('/api/market/buy', {
         method: 'POST', headers,
         body: JSON.stringify({ listingId: l.id, txHash, bidId: acceptedBid.id }),
       })
       const json = await res.json()
-      setNotice(json.ok ? '✓ Buyout paid! The owner will now transfer the NFT to you.' : `Buyout failed: ${json.error}`)
+      setNotice(json.ok
+        ? json.delivered ? '✓ Buyout complete — the NFT is in your wallet!' : '✓ Buyout paid! The owner will now transfer the NFT to you.'
+        : `Buyout failed: ${json.error}`)
       void load()
     } catch (e: any) {
       setNotice(e?.shortMessage ?? e?.message ?? 'Transaction cancelled')
@@ -258,17 +349,66 @@ export function MarketClient() {
     void load()
   }
 
-  async function respondBid(bid: BidRow, accept: boolean) {
-    const res = await fetch('/api/market/bid', {
-      method: 'PATCH', headers,
-      body: JSON.stringify({ bidId: bid.id, accept }),
-    })
-    const json = await res.json()
-    setNotice(json.ok ? `Bid ${accept ? 'accepted — the bidder can now complete payment' : 'declined'}.` : `Failed: ${json.error}`)
-    void load()
+  async function respondBid(l: Listing, bid: BidRow, accept: boolean) {
+    try {
+      // Accepting a BUY bid on an NFT rental: the owner lists the NFT on the
+      // trustless market contract, reserved for the bidder at the bid price.
+      // The bidder's buy() then pays the owner + delivers the NFT atomically.
+      if (accept && bid.kind === 'buy' && l.kind === 'nft_rent' && MARKET_ADDRESS && l.nft_contract && l.nft_token_id) {
+        const approveHash = await writeContractAsync({
+          address: l.nft_contract as `0x${string}`,
+          abi: ERC721_APPROVE_ABI,
+          functionName: 'approve',
+          args: [MARKET_ADDRESS, BigInt(l.nft_token_id)],
+          chainId: 8453,
+        })
+        await publicClient?.waitForTransactionReceipt({ hash: approveHash })
+        const listHash = await writeContractAsync({
+          address: MARKET_ADDRESS,
+          abi: MARKET_ABI,
+          functionName: 'list',
+          args: [
+            l.nft_contract as `0x${string}`,
+            BigInt(l.nft_token_id),
+            DND721_TOKEN_ADDRESS,                       // buyouts settle in DND721
+            tokensToWei(Number(bid.amount)),
+            bid.bidder_wallet as `0x${string}`,          // reserved for the bidder
+          ],
+          chainId: 8453,
+        })
+        await publicClient?.waitForTransactionReceipt({ hash: listHash })
+      }
+      const res = await fetch('/api/market/bid', {
+        method: 'PATCH', headers,
+        body: JSON.stringify({ bidId: bid.id, accept }),
+      })
+      const json = await res.json()
+      setNotice(json.ok ? `Bid ${accept ? 'accepted — the bidder can now complete the purchase' : 'declined'}.` : `Failed: ${json.error}`)
+      void load()
+    } catch (e: any) {
+      setNotice(e?.shortMessage ?? e?.message ?? 'Transaction cancelled')
+    }
   }
 
   async function cancelListing(l: Listing) {
+    try {
+      // NFT sale listings also live on-chain — cancel there too so the
+      // approval can't be spent through a stale listing.
+      if (l.kind === 'nft' && MARKET_ADDRESS && l.nft_contract && l.nft_token_id) {
+        const hash = await writeContractAsync({
+          address: MARKET_ADDRESS,
+          abi: MARKET_ABI,
+          functionName: 'cancel',
+          args: [l.nft_contract as `0x${string}`, BigInt(l.nft_token_id)],
+          chainId: 8453,
+        })
+        await publicClient?.waitForTransactionReceipt({ hash })
+      }
+    } catch (e: any) {
+      // On-chain cancel declined/failed — still cancel the DB listing so it
+      // stops showing; the seller can revoke approval from their wallet.
+      console.warn('[market] on-chain cancel skipped:', e?.shortMessage ?? e?.message)
+    }
     await fetch(`/api/market/listings?id=${l.id}`, { method: 'DELETE', headers })
     void load()
   }
@@ -397,8 +537,8 @@ export function MarketClient() {
                   {b.message ? ` — “${b.message}”` : ''}
                 </span>
                 <span className="flex shrink-0 gap-1">
-                  <button onClick={() => void respondBid(b, true)} className="rounded bg-emerald-800 px-2 py-0.5 hover:bg-emerald-700">✓</button>
-                  <button onClick={() => void respondBid(b, false)} className="rounded bg-rose-900 px-2 py-0.5 hover:bg-rose-800">✕</button>
+                  <button onClick={() => void respondBid(l, b, true)} className="rounded bg-emerald-800 px-2 py-0.5 hover:bg-emerald-700">✓</button>
+                  <button onClick={() => void respondBid(l, b, false)} className="rounded bg-rose-900 px-2 py-0.5 hover:bg-rose-800">✕</button>
                 </span>
               </div>
             ))}
@@ -539,18 +679,34 @@ function CreateListingModal({
         body.nftName = picked.metadata?.name
         body.nftImage = picked.metadata?.image ?? undefined
         if (kind === 'nft') {
-          // Approve the escrow operator so the buyer's payment auto-delivers
-          // the NFT — no manual "send" step at sale time. One signature here.
-          if (ESCROW_ADDRESS) {
+          // List on the trustless DND721Market contract: approve the market
+          // for this token, then record the price on-chain. The buyer's own
+          // buy() later pays you and delivers the NFT atomically — no third
+          // party can ever move the token outside this listing.
+          if (MARKET_ADDRESS) {
             setErr(null)
-            const hash = await writeContractAsync({
+            const approveHash = await writeContractAsync({
               address: picked.contract as `0x${string}`,
               abi: ERC721_APPROVE_ABI,
               functionName: 'approve',
-              args: [ESCROW_ADDRESS, BigInt(picked.tokenId)],
+              args: [MARKET_ADDRESS, BigInt(picked.tokenId)],
               chainId: 8453,
             })
-            await publicClient?.waitForTransactionReceipt({ hash })
+            await publicClient?.waitForTransactionReceipt({ hash: approveHash })
+            const listHash = await writeContractAsync({
+              address: MARKET_ADDRESS,
+              abi: MARKET_ABI,
+              functionName: 'list',
+              args: [
+                picked.contract as `0x${string}`,
+                BigInt(picked.tokenId),
+                currency === 'eth' ? ZERO_ADDRESS : DND721_TOKEN_ADDRESS,
+                currency === 'eth' ? parseEther(String(Number(price))) : tokensToWei(Number(price)),
+                ZERO_ADDRESS, // open to any buyer
+              ],
+              chainId: 8453,
+            })
+            await publicClient?.waitForTransactionReceipt({ hash: listHash })
           }
           if (currency === 'dnd721') body.priceTokens = Number(price); else body.priceEth = Number(price)
         } else {
@@ -660,10 +816,11 @@ function CreateListingModal({
           </>
         )}
 
-        {kind === 'nft' && ESCROW_ADDRESS && (
+        {kind === 'nft' && MARKET_ADDRESS && (
           <p className="text-[10px] text-slate-500">
-            You&apos;ll sign one approval when listing. The NFT stays in your wallet until it sells —
-            then it&apos;s delivered to the buyer automatically the moment they pay.
+            You&apos;ll sign two transactions: an approval and the on-chain listing. The NFT stays in
+            your wallet until someone buys — payment and delivery then happen in one atomic
+            transaction, with no third party able to move the token.
           </p>
         )}
 
