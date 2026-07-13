@@ -46,18 +46,18 @@ function formatAsiMods(mods: Partial<Record<string, number>>): string {
 }
 
 const CLASS_OPTIONS = [
-  { key: 'fighter', label: 'Fighter' },
-  { key: 'rogue', label: 'Rogue' },
-  { key: 'wizard', label: 'Wizard' },
-  { key: 'barbarian', label: 'Barbarian' },
-  { key: 'paladin', label: 'Paladin' },
-  { key: 'cleric', label: 'Cleric' },
-  { key: 'ranger', label: 'Ranger' },
-  { key: 'warlock', label: 'Warlock' },
-  { key: 'sorcerer', label: 'Sorcerer' },
-  { key: 'bard', label: 'Bard' },
-  { key: 'monk', label: 'Monk' },
-  { key: 'druid', label: 'Druid' },
+  { key: 'fighter', label: 'Fighter', sigil: '⚔️', blurb: 'Master of arms and armor' },
+  { key: 'rogue', label: 'Rogue', sigil: '🗡️', blurb: 'Precision, stealth, and cunning' },
+  { key: 'wizard', label: 'Wizard', sigil: '📖', blurb: 'Arcane scholar of raw magic' },
+  { key: 'barbarian', label: 'Barbarian', sigil: '🪓', blurb: 'Rage-fueled front-line fury' },
+  { key: 'paladin', label: 'Paladin', sigil: '🛡️', blurb: 'Holy oaths and smiting steel' },
+  { key: 'cleric', label: 'Cleric', sigil: '✨', blurb: 'Divine power made manifest' },
+  { key: 'ranger', label: 'Ranger', sigil: '🏹', blurb: 'Hunter of the wild frontiers' },
+  { key: 'warlock', label: 'Warlock', sigil: '👁️', blurb: 'Pact-bound eldritch might' },
+  { key: 'sorcerer', label: 'Sorcerer', sigil: '🔥', blurb: 'Magic burning in the blood' },
+  { key: 'bard', label: 'Bard', sigil: '🎶', blurb: 'Weaponized inspiration' },
+  { key: 'monk', label: 'Monk', sigil: '🥋', blurb: 'Discipline, ki, and flying fists' },
+  { key: 'druid', label: 'Druid', sigil: '🌿', blurb: 'Nature’s shapeshifting warden' },
 ]
 
 const ALL_LANGUAGES = [
@@ -345,62 +345,104 @@ export default function NewCharacterStep2Page() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="space-y-1 text-xs">
-          <label className="font-semibold text-slate-300">
-            Class <span className="text-red-400">*</span>
-          </label>
-          <select
-            className="w-full rounded-md border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm focus:border-cyan-400 focus:outline-none"
-            value={draft.classKey ?? 'fighter'}
-            onChange={(e) => {
-              const nextClass = e.target.value as CharacterDraft['classKey']
-              const nextSubclassOptions = getSubclassOptions(String(nextClass))
-              const allowed = new Set(nextSubclassOptions.map((o) => String(o.key)))
-              const currentSubclass = String(draft.subclassKey ?? '')
+      {/* ── Class — pick your calling (iconography cards) ──────────────────── */}
+      {(() => {
+        function handleClassChange(nextClassRaw: string) {
+          const nextClass = nextClassRaw as CharacterDraft['classKey']
+          const nextSubclassOptions = getSubclassOptions(String(nextClass))
+          const allowed = new Set(nextSubclassOptions.map((o) => String(o.key)))
+          const currentSubclass = String(draft!.subclassKey ?? '')
 
-              // ── Audit Wave 2 ───────────────────────────────────────────────
-              // Auto-populate saving throw proficiencies from CLASS_DATA, and
-              // reset previously-picked class-skill proficiencies so the user
-              // re-picks from the new class's list. Background-granted skills
-              // are merged separately in step6 and are untouched here.
-              const classDef = getClassDef(String(nextClass))
-              const nextSavingThrows: CharacterDraft['savingThrows'] = classDef
-                ? {
-                    str: classDef.savingThrowProfs.includes('str'),
-                    dex: classDef.savingThrowProfs.includes('dex'),
-                    con: classDef.savingThrowProfs.includes('con'),
-                    int: classDef.savingThrowProfs.includes('int'),
-                    wis: classDef.savingThrowProfs.includes('wis'),
-                    cha: classDef.savingThrowProfs.includes('cha'),
-                  }
-                : draft.savingThrows
-              // Clear any class-skill picks but keep background-granted profs.
-              // The class skill picker (below) lets the user pick fresh.
-              const prevProfs = draft.skillProficiencies ?? {}
-              const prevClassDef = getClassDef(String(draft.classKey ?? ''))
-              const prevClassSkillSet = new Set(prevClassDef?.skillChoices.options ?? [])
-              const filteredSkillProfs: CharacterDraft['skillProficiencies'] = {}
-              for (const [k, v] of Object.entries(prevProfs)) {
-                if (!prevClassSkillSet.has(k)) filteredSkillProfs[k] = v
+          // ── Audit Wave 2 ───────────────────────────────────────────────
+          // Auto-populate saving throw proficiencies from CLASS_DATA, and
+          // reset previously-picked class-skill proficiencies so the user
+          // re-picks from the new class's list. Background-granted skills
+          // are merged separately in step6 and are untouched here.
+          const classDef = getClassDef(String(nextClass))
+          const nextSavingThrows: CharacterDraft['savingThrows'] = classDef
+            ? {
+                str: classDef.savingThrowProfs.includes('str'),
+                dex: classDef.savingThrowProfs.includes('dex'),
+                con: classDef.savingThrowProfs.includes('con'),
+                int: classDef.savingThrowProfs.includes('int'),
+                wis: classDef.savingThrowProfs.includes('wis'),
+                cha: classDef.savingThrowProfs.includes('cha'),
               }
+            : draft!.savingThrows
+          // Clear any class-skill picks but keep background-granted profs.
+          // The class skill picker (below) lets the user pick fresh.
+          const prevProfs = draft!.skillProficiencies ?? {}
+          const prevClassDef = getClassDef(String(draft!.classKey ?? ''))
+          const prevClassSkillSet = new Set(prevClassDef?.skillChoices.options ?? [])
+          const filteredSkillProfs: CharacterDraft['skillProficiencies'] = {}
+          for (const [k, v] of Object.entries(prevProfs)) {
+            if (!prevClassSkillSet.has(k)) filteredSkillProfs[k] = v
+          }
 
-              updateDraft({
-                classKey: nextClass,
-                subclassKey: currentSubclass && !allowed.has(currentSubclass) ? null : draft.subclassKey ?? null,
-                savingThrows: nextSavingThrows,
-                skillProficiencies: filteredSkillProfs,
-              })
-            }}
-          >
-            {CLASS_OPTIONS.map((opt) => (
-              <option key={opt.key} value={opt.key}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          <p className="text-[11px] text-slate-500">Determines your hit dice, primary abilities, and which spells you'll learn later.</p>
-        </div>
+          updateDraft({
+            classKey: nextClass,
+            subclassKey: currentSubclass && !allowed.has(currentSubclass) ? null : draft!.subclassKey ?? null,
+            savingThrows: nextSavingThrows,
+            skillProficiencies: filteredSkillProfs,
+          })
+        }
+
+        const currentClass = String(draft.classKey ?? 'fighter')
+        return (
+          <div className="space-y-2">
+            <label className="text-xs font-semibold" style={{ color: 'var(--text-mid)' }}>
+              Class <span style={{ color: 'var(--danger)' }}>*</span>
+              <span className="ml-2 font-normal" style={{ color: 'var(--text-low)' }}>
+                Determines your hit dice, primary abilities, and which spells you&apos;ll learn later.
+              </span>
+            </label>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" role="radiogroup" aria-label="Choose a class">
+              {CLASS_OPTIONS.map((opt) => {
+                const selected = currentClass === opt.key
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => handleClassChange(opt.key)}
+                    className="flex items-center gap-2.5 rounded-xl border p-2.5 text-left transition"
+                    style={{
+                      borderColor: selected ? 'var(--gold)' : 'var(--divider)',
+                      background: selected
+                        ? 'linear-gradient(180deg, rgba(212,169,79,0.14), rgba(212,169,79,0.05))'
+                        : 'var(--surface-1)',
+                      boxShadow: selected ? 'var(--glow-gold)' : undefined,
+                    }}
+                  >
+                    <span
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border text-lg"
+                      style={{
+                        borderColor: selected ? 'var(--edge-strong)' : 'var(--divider)',
+                        background: 'radial-gradient(circle at 50% 35%, var(--surface-3), var(--bg-abyss))',
+                      }}
+                      aria-hidden
+                    >
+                      {opt.sigil}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="font-display block text-sm font-bold leading-tight"
+                            style={{ color: selected ? 'var(--gold-bright)' : 'var(--text-hi)' }}>
+                        {opt.label}
+                      </span>
+                      <span className="block truncate text-[10px]" style={{ color: 'var(--text-low)' }}>
+                        {opt.blurb}
+                      </span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
         {(() => {
           const unlockLevel = SUBCLASS_UNLOCK_LEVEL[String(draft.classKey ?? 'fighter')] ?? 3
