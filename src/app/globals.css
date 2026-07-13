@@ -202,6 +202,30 @@ body::before {
   }
 }
 
+/* ── Dossier theme bridge ────────────────────────────────────────
+   Scoped re-theme for dense legacy panel UIs (character sheet, builder
+   steps). Re-colors the existing slate-utility panels into the fantasy
+   token palette without rewriting each panel component. The attribute
+   selectors out-specify single utility classes, so no !important. */
+.dossier [class*="border-slate-7"],
+.dossier [class*="border-slate-8"] {
+  border-color: var(--edge);
+}
+.dossier [class*="bg-slate-950"],
+.dossier [class*="bg-slate-900"] {
+  background-color: rgba(14, 19, 32, 0.78);
+}
+.dossier [class*="bg-slate-800"] {
+  background-color: rgba(26, 34, 54, 0.8);
+}
+.dossier h2, .dossier h3 {
+  font-family: var(--font-display);
+  letter-spacing: 0.03em;
+}
+.dossier [class*="rounded-xl"][class*="border"] {
+  box-shadow: var(--shadow-panel);
+}
+
 /* Skeleton shimmer */
 .skeleton {
   background: linear-gradient(90deg, var(--surface-1) 25%, var(--surface-3) 50%, var(--surface-1) 75%);

@@ -765,7 +765,7 @@ export default function CharacterSheetPage() {
   )
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-4 px-3 pb-16 md:px-6">
+    <div className="dossier mx-auto w-full max-w-6xl space-y-4 px-3 pb-16 md:px-6">
       <CharacterHeader c={c} d={d} onRename={handleRename} onDelete={() => setShowDeleteModal(true)} />
 
       {/* Level-up choices resolve in order: subclass (L3) → ASI/feat → class pick. */}
