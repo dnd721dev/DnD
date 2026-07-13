@@ -8,6 +8,8 @@ import type { CharacterDraft } from '../../../../types/characterDraft'
 import { RACE_LIST, type RaceKey } from '@/lib/races'
 import { getClassFeaturesAtLevel, formatActionType } from '@/lib/classFeatures'
 import type { ClassKey as ClassFeatureClassKey } from '@/lib/subclasses'
+import { FramedNftCard } from '@/components/character-sheet/FramedNftCard'
+import { Check } from 'lucide-react'
 
 type NftItem = {
   contract: string
@@ -360,7 +362,7 @@ export default function NewCharacterStep1Page() {
           )}
 
           {nfts.length > 0 && (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
               {nfts.map((nft, idx) => {
                 const img =
                   nft.metadata?.image ||
@@ -368,43 +370,47 @@ export default function NewCharacterStep1Page() {
                   nft.metadata?.imageUri ||
                   nft.metadata?.imageURI
                 const selected = selectedIndex === idx
+                const label = nft.metadata?.name || `Token #${nft.tokenId}`
 
                 return (
                   <button
                     key={`${nft.contract}-${nft.tokenId}-${idx}`}
                     type="button"
                     onClick={() => handleSelectNft(idx)}
-                    className={`relative rounded-xl p-3 border flex flex-col gap-2 transition ${
-                      selected
-                        ? 'border-cyan-400 bg-cyan-500/15 shadow-[0_0_25px_rgba(34,211,238,0.6)]'
-                        : 'border-slate-700 bg-slate-900/80 hover:border-slate-500'
-                    }`}
+                    aria-pressed={selected}
+                    className="group relative flex flex-col rounded-xl p-2 text-left transition"
+                    style={{
+                      border: selected ? '1px solid var(--gold)' : '1px solid var(--divider)',
+                      background: selected ? 'rgba(212,169,79,0.08)' : 'var(--surface-1)',
+                      boxShadow: selected ? 'var(--glow-gold)' : undefined,
+                    }}
                   >
-                    {img ? (
-                      <img
-                        src={img}
-                        alt="NFT"
-                        className="w-full h-32 object-cover rounded-lg"
-                      />
-                    ) : (
-                      <div className="w-full h-32 bg-slate-800 rounded-lg flex items-center justify-center text-slate-500 text-[11px]">
-                        No Image
+                    {/* The hero portrait — framed in the DND721 card border,
+                        cropped tight so the NFT's printed stats stay hidden. */}
+                    <div className="tilt-stage">
+                      <div className="tilt-card">
+                        <FramedNftCard imageUrl={img ?? null} name={label} />
                       </div>
-                    )}
-
-                    <div className="space-y-0.5 text-left">
-                      <p className="text-xs font-semibold text-white truncate">
-                        {nft.metadata?.name || `Token #${nft.tokenId}`}
-                      </p>
-                      <p className="text-[10px] text-slate-500 truncate">
-                        {nft.contract}
-                      </p>
                     </div>
 
+                    <p className="mt-2 truncate text-[10px]" style={{ color: 'var(--text-low)' }}>
+                      #{nft.tokenId}
+                    </p>
+
+                    {/* Selected medallion */}
                     {selected && (
-                      <div className="absolute -top-1 -right-1 rounded-full bg-cyan-500 text-slate-950 text-[10px] px-1.5 py-0.5 font-bold">
-                        SELECTED
-                      </div>
+                      <span
+                        className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full border text-[11px] font-bold"
+                        style={{
+                          borderColor: 'var(--gold-bright)',
+                          background: 'linear-gradient(180deg, var(--gold), var(--gold-deep))',
+                          color: '#191100',
+                          boxShadow: 'var(--glow-gold)',
+                        }}
+                        aria-label="Selected"
+                      >
+                        <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                      </span>
                     )}
                   </button>
                 )

@@ -191,53 +191,63 @@ export default function NewCharacterStep3Page() {
           return (
             <div
               key={key}
-              className="rounded-lg border border-slate-700 bg-slate-950/70 p-3 space-y-2"
+              className="relative overflow-hidden rounded-xl border p-3"
+              style={{
+                borderColor: 'var(--edge)',
+                background: 'linear-gradient(180deg, var(--surface-2), var(--surface-1))',
+                boxShadow: 'var(--shadow-panel)',
+              }}
             >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-300">
+              {/* Ability name plaque */}
+              <div className="mb-3 flex items-center justify-between">
+                <span className="font-display text-sm font-bold uppercase tracking-wider"
+                      style={{ color: 'var(--gold-bright)' }}>
                   {ABILITY_LABELS[key]}
                 </span>
-                <span className="text-[11px] text-slate-500">
-                  Modifier:{' '}
-                  <span className="font-semibold text-cyan-300">
-                    {sign}
-                    {mod}
-                  </span>
+                {/* Big engraved modifier medallion */}
+                <span
+                  className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-full border text-base font-bold leading-none"
+                  style={{
+                    borderColor: 'var(--edge-strong)',
+                    background: 'radial-gradient(circle at 50% 35%, var(--surface-3), var(--bg-abyss))',
+                    color: 'var(--gold-bright)',
+                    boxShadow: 'inset 0 1px 0 rgba(240,200,106,0.15)',
+                  }}
+                  title="Ability modifier"
+                >
+                  {sign}{mod}
+                  <span className="mt-0.5 text-[7px] uppercase tracking-widest" style={{ color: 'var(--text-low)' }}>mod</span>
                 </span>
               </div>
 
               <div className="grid grid-cols-3 gap-2 text-center text-[11px]">
-                <div className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1.5">
-                  <div className="text-[10px] text-slate-500">Base</div>
-                  <div className="text-sm font-semibold text-white">
-                    {base}
-                  </div>
+                <div className="rounded-md border px-2 py-1.5" style={{ borderColor: 'var(--divider)', background: 'rgba(7,10,18,0.6)' }}>
+                  <div className="text-[10px]" style={{ color: 'var(--text-low)' }}>Base</div>
+                  <div className="text-sm font-semibold" style={{ color: 'var(--text-hi)' }}>{base}</div>
                 </div>
-                <div className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1.5">
-                  <div className="text-[10px] text-slate-500">Background</div>
-                  <div className="text-sm font-semibold text-emerald-300">
+                <div className="rounded-md border px-2 py-1.5" style={{ borderColor: 'var(--divider)', background: 'rgba(7,10,18,0.6)' }}>
+                  <div className="text-[10px]" style={{ color: 'var(--text-low)' }}>Background</div>
+                  <div className="text-sm font-semibold" style={{ color: '#7fd6ab' }}>
                     {bgBonus >= 0 ? `+${bgBonus}` : bgBonus}
                   </div>
                 </div>
-                <div className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1.5">
-                  <div className="text-[10px] text-slate-500">Bonus</div>
+                <div className="rounded-md border px-2 py-1.5" style={{ borderColor: 'var(--divider)', background: 'rgba(7,10,18,0.6)' }}>
+                  <div className="text-[10px]" style={{ color: 'var(--text-low)' }}>Bonus</div>
                   <input
                     type="number"
-                    className="mt-0.5 w-full bg-transparent text-center text-sm font-semibold text-amber-300 outline-none"
+                    className="mt-0.5 w-full bg-transparent text-center text-sm font-semibold outline-none"
+                    style={{ color: 'var(--gold)' }}
                     value={bonus}
                     onChange={(e) => handleBonusChange(key, e.target.value)}
                   />
                 </div>
               </div>
 
-              <div className="mt-1 rounded-md bg-slate-900/60 px-2 py-1 text-center text-[11px] text-slate-300">
-                Total:{' '}
-                <span className="font-semibold text-white">{total}</span>{' '}
-                (<span className="text-cyan-300">
-                  {sign}
-                  {mod}
-                </span>
-                )
+              {/* Total bar */}
+              <div className="mt-2 flex items-center justify-between rounded-md px-3 py-1.5 text-[11px]"
+                   style={{ background: 'rgba(212,169,79,0.08)', border: '1px solid var(--edge)' }}>
+                <span className="uppercase tracking-wide" style={{ color: 'var(--text-mid)' }}>Total</span>
+                <span className="font-display text-lg font-bold" style={{ color: 'var(--text-hi)' }}>{total}</span>
               </div>
             </div>
           )

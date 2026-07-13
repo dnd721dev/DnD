@@ -118,7 +118,7 @@ export default function NewCharacterLayout({
       </nav>
 
       {/* Step content — the anvil */}
-      <main className="panel-ornate relative p-4 md:p-6">
+      <main className="builder panel-ornate relative p-4 md:p-6">
         {!mounted || profileStatus === 'loading' ? (
           <div className="flex items-center justify-center gap-3 py-16 text-sm" style={{ color: 'var(--text-mid)' }}>
             <Loader2 className="h-5 w-5 animate-spin" style={{ color: 'var(--gold)' }} />

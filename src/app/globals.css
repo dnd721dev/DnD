@@ -226,6 +226,45 @@ body::before {
   box-shadow: var(--shadow-panel);
 }
 
+/* ── Builder theme bridge ────────────────────────────────────────
+   Re-skins the shared neon-cyan/indigo builder patterns into the
+   fantasy palette across all six creation steps, without editing each
+   step's markup. Attribute selectors out-specify single utility classes
+   (no !important). Semantic emerald (valid/complete) stays green. */
+.builder [class*="bg-cyan-6"],
+.builder [class*="bg-cyan-5"],
+.builder [class*="bg-indigo-6"],
+.builder [class*="bg-indigo-5"] {
+  background-image: linear-gradient(180deg, var(--gold), var(--gold-deep));
+  background-color: var(--gold);
+  color: #191100;
+  border-color: rgba(240, 200, 106, 0.5);
+}
+.builder [class*="bg-cyan-9"],
+.builder [class*="bg-indigo-9"] {
+  background-color: rgba(212, 169, 79, 0.10);
+}
+.builder [class*="border-cyan-"],
+.builder [class*="border-indigo-"] {
+  border-color: var(--edge-strong);
+}
+.builder [class*="ring-cyan-"],
+.builder [class*="ring-indigo-"] {
+  --tw-ring-color: var(--gold);
+}
+.builder [class*="text-cyan-"],
+.builder [class*="text-indigo-"] {
+  color: var(--gold-bright);
+}
+.builder [class*="shadow-[0_0_"] { box-shadow: var(--glow-gold); }
+.builder h2, .builder h3 { font-family: var(--font-display); letter-spacing: 0.02em; }
+.builder [class*="bg-slate-900"], .builder [class*="bg-slate-950"] {
+  background-color: rgba(14, 19, 32, 0.7);
+}
+.builder [class*="border-slate-7"], .builder [class*="border-slate-8"] {
+  border-color: var(--divider);
+}
+
 /* Skeleton shimmer */
 .skeleton {
   background: linear-gradient(90deg, var(--surface-1) 25%, var(--surface-3) 50%, var(--surface-1) 75%);
