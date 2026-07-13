@@ -4,6 +4,7 @@ import { memo, useState } from 'react'
 import VoiceChat from '@/components/table/VoiceChat'
 import { RecordingButton } from './RecordingButton'
 import { SrdSearchOverlay } from '@/components/table/SrdSearchOverlay'
+import { StreamModal } from '@/components/table/StreamModal'
 import type { SessionWithCampaign } from '../types'
 import { formatDateTime } from '../utils'
 import type { SessionStatus } from '@/lib/sessionGates'
@@ -32,14 +33,32 @@ export const TableTopBar = memo(function TableTopBar(props: {
 }) {
   const { session, isGm, address, displayName, roomName, showDiceLog, onToggleDiceLog, onEndSession, onOpenShop, sessionStatus, playerIsSpellcaster } = props
   const [srdOpen, setSrdOpen] = useState(false)
+  const [streamOpen, setStreamOpen] = useState(false)
+  const [spectateCopied, setSpectateCopied] = useState(false)
   const [confirmEnd, setConfirmEnd] = useState(false)
   const [endingSession, setEndingSession] = useState(false)
   const identity = address?.toLowerCase()
   const campaignMeta = session.campaigns?.[0]
 
+  function copySpectateLink() {
+    const url = `${window.location.origin}/sessions/${session.id}/spectate`
+    void navigator.clipboard.writeText(url).then(() => {
+      setSpectateCopied(true)
+      setTimeout(() => setSpectateCopied(false), 2000)
+    })
+  }
+
   return (
     <>
     <SrdSearchOverlay open={srdOpen} onClose={() => setSrdOpen(false)} />
+    {streamOpen && identity && (
+      <StreamModal
+        sessionId={session.id}
+        roomName={roomName}
+        wallet={identity}
+        onClose={() => setStreamOpen(false)}
+      />
+    )}
     <header className="flex flex-col gap-2 rounded-xl border border-yellow-900/40 bg-slate-900/70 p-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <p className="text-xs uppercase tracking-wide text-yellow-300/60">
@@ -109,6 +128,26 @@ export const TableTopBar = memo(function TableTopBar(props: {
               title="Bishop's Shop — daily free items + paid consumables"
             >
               🏪 Bishop&apos;s Shop
+            </button>
+          )}
+          {/* Spectator link — share with anyone to listen in (no play access) */}
+          <button
+            type="button"
+            onClick={copySpectateLink}
+            className="rounded-md bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:bg-emerald-800/60 hover:text-emerald-200 transition-colors"
+            title="Copy a link anyone can open to listen in and follow the dice log — spectators can't speak or play"
+          >
+            {spectateCopied ? '✓ Copied!' : '👁 Spectate Link'}
+          </button>
+          {/* Go Live — any participant can stream the table to X/Twitch/YouTube */}
+          {identity && (
+            <button
+              type="button"
+              onClick={() => setStreamOpen(true)}
+              className="rounded-md bg-red-950 border border-red-500/40 px-2.5 py-1 text-[11px] font-medium text-red-300 hover:bg-red-900 hover:text-red-200 transition-colors"
+              title="Live stream this session to X, Twitch, or YouTube"
+            >
+              📡 Go Live
             </button>
           )}
           <button

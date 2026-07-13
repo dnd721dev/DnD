@@ -13,6 +13,9 @@ export async function GET(req: NextRequest) {
   const room      = searchParams.get('room')
   const identity  = searchParams.get('identity')
   const sessionId = searchParams.get('sessionId') ?? null
+  // Spectators get a listen-only token: they can hear the table but can
+  // never publish audio or data, and never gain admin.
+  const isSpectator = searchParams.get('role') === 'spectator'
 
   if (!room || !identity) {
     return NextResponse.json({ error: 'room and identity are required' }, { status: 400 })
@@ -56,10 +59,10 @@ export async function GET(req: NextRequest) {
   at.addGrant({
     roomJoin:       true,
     room,
-    canPublish:     true,
+    canPublish:     !isSpectator,
     canSubscribe:   true,
-    canPublishData: true,
-    roomAdmin:      isGm,  // DM gets admin privileges; players do not
+    canPublishData: !isSpectator,
+    roomAdmin:      isGm && !isSpectator,  // DM gets admin privileges; players/spectators do not
   })
 
   const token = await at.toJwt()

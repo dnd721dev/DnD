@@ -3,7 +3,9 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAccount } from 'wagmi'
+import { Scroll, Lock, DoorOpen, Plus, Crown } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { PageHeader, Panel, EmptyState, SkeletonGrid, StatusPill } from '@/components/ui/primitives'
 
 type Campaign = {
   id: string
@@ -53,100 +55,66 @@ export default function CampaignsPage() {
     ? campaigns.filter(c => c.gm_wallet?.toLowerCase() !== myAddress)
     : campaigns
 
-  return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Campaigns</h1>
-          <p className="text-sm text-slate-300">
-            Browse and open your DND721 campaigns.
-          </p>
+  const CampaignCard = ({ c, mine }: { c: Campaign; mine?: boolean }) => (
+    <Link key={c.id} href={`/campaigns/${c.id}`} className="panel card-hover group flex flex-col p-5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          {mine && <Crown className="h-4 w-4 shrink-0" style={{ color: 'var(--gold)' }} aria-label="You are GM" />}
+          <h3 className="font-display truncate text-base font-bold" style={{ color: 'var(--text-hi)' }}>{c.title}</h3>
         </div>
-
-        <Link
-          href="/campaigns/new"
-          className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
-        >
-          + New Campaign
-        </Link>
+        <StatusPill tone={c.status === 'active' ? 'ok' : 'arcane'}>{c.status ?? 'active'}</StatusPill>
       </div>
+      {c.description && (
+        <p className="mt-1.5 line-clamp-2 text-sm" style={{ color: 'var(--text-mid)' }}>{c.description}</p>
+      )}
+      <div className="mt-3 flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-low)' }}>
+        {c.join_mode === 'open'
+          ? <><DoorOpen className="h-3.5 w-3.5" /> Open to join</>
+          : <><Lock className="h-3.5 w-3.5" /> Password required</>}
+      </div>
+    </Link>
+  )
 
-      {loading && <p className="text-sm text-slate-300">Loading…</p>}
+  return (
+    <div className="mx-auto max-w-6xl">
+      <PageHeader
+        eyebrow="Your Adventures"
+        title="Campaigns"
+        subtitle="Gather a party, forge a story, and take your seat at the table."
+        actions={<Link href="/campaigns/new" className="btn btn-primary"><Plus className="h-4 w-4" /> New Campaign</Link>}
+      />
+
+      {loading && <SkeletonGrid count={4} />}
       {error && (
-        <p className="text-sm text-red-400">
-          Error loading campaigns: {error}
-        </p>
+        <Panel className="border-red-900/50 px-4 py-3 text-sm text-red-300">Error loading campaigns: {error}</Panel>
       )}
 
       {!loading && campaigns.length === 0 && (
-        <p className="text-sm text-slate-300">No campaigns yet.</p>
+        <EmptyState
+          icon={<Scroll className="h-6 w-6" />}
+          title="No campaigns yet"
+          body="Start the first one and invite your party — every legend needs a beginning."
+          action={{ href: '/campaigns/new', label: '+ Create a Campaign' }}
+        />
       )}
 
       {myCampaigns.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
-            Your Campaigns (GM)
-          </h2>
-          <div className="grid gap-3 md:grid-cols-2">
-            {myCampaigns.map(c => (
-              <Link
-                key={c.id}
-                href={`/campaigns/${c.id}`}
-                className="rounded border border-slate-700 bg-slate-900/60 p-4 hover:border-indigo-500"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="font-semibold">{c.title}</h3>
-                  <span className="rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-200">
-                    {c.status ?? 'active'}
-                  </span>
-                </div>
-                {c.description && (
-                  <p className="mt-1 line-clamp-2 text-sm text-slate-300">
-                    {c.description}
-                  </p>
-                )}
-                <p className="mt-2 text-xs text-slate-400">
-                  {c.join_mode === 'open' ? 'Open to join' : 'Password required'}
-                </p>
-              </Link>
-            ))}
+        <section className="mb-8">
+          <h2 className="eyebrow mb-3">Your Campaigns · GM</h2>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {myCampaigns.map((c) => <CampaignCard key={c.id} c={c} mine />)}
           </div>
         </section>
       )}
 
       {otherCampaigns.length > 0 && (
-        <section className="space-y-3">
-          {myCampaigns.length > 0 && (
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
-              Other Campaigns
-            </h2>
-          )}
-          <div className="grid gap-3 md:grid-cols-2">
-            {otherCampaigns.map(c => (
-              <Link
-                key={c.id}
-                href={`/campaigns/${c.id}`}
-                className="rounded border border-slate-700 bg-slate-900/60 p-4 hover:border-sky-500"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="font-semibold">{c.title}</h3>
-                  <span className="rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-200">
-                    {c.status ?? 'active'}
-                  </span>
-                </div>
-                {c.description && (
-                  <p className="mt-1 line-clamp-2 text-sm text-slate-300">
-                    {c.description}
-                  </p>
-                )}
-                <p className="mt-2 text-xs text-slate-400">
-                  {c.join_mode === 'open' ? 'Open to join' : 'Password required'}
-                </p>
-              </Link>
-            ))}
+        <section>
+          {myCampaigns.length > 0 && <h2 className="eyebrow mb-3">Other Campaigns</h2>}
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {otherCampaigns.map((c) => <CampaignCard key={c.id} c={c} />)}
           </div>
         </section>
       )}
-    </main>
+    </div>
   )
 }

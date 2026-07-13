@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { processSessionEndItems } from '@/lib/sessionItemProcessor'
+import { awardPoints } from '@/lib/rewards'
 
 type SessionStatus = 'setup' | 'lobby' | 'active' | 'paused' | 'completed'
 
@@ -151,6 +152,28 @@ export async function POST(
         .eq('status', 'active')
     } catch (err) {
       console.error('[sessions/status] end encounters error:', err)
+    }
+
+    // 4. Reward points — only for sessions that actually ran (reached active):
+    //    the GM earns dm_oneshot, every joined player earns play_oneshot.
+    //    Idempotent per session, so re-fires can't double-grant.
+    try {
+      if ((session as any).started_at) {
+        await awardPoints(db, { wallet: gmWallet, action: 'dm_oneshot', refId: sessionId })
+        const { data: players } = await db
+          .from('session_players')
+          .select('wallet_address')
+          .eq('session_id', sessionId)
+          .eq('role', 'player')
+        await Promise.all(
+          (players ?? [])
+            .map((p: any) => String(p.wallet_address ?? '').toLowerCase())
+            .filter((w) => /^0x[0-9a-f]{40}$/.test(w))
+            .map((w) => awardPoints(db, { wallet: w, action: 'play_oneshot', refId: sessionId })),
+        )
+      }
+    } catch (err) {
+      console.error('[sessions/status] reward points error:', err)
     }
   }
 

@@ -117,7 +117,10 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
   // ── Participant state rebuild ────────────────────────────────────────────────
 
   const rebuildParticipants = useCallback(async (lkRoom: Room, speakerSet?: Set<string>) => {
+    // Spectators (listen-only guests) are hidden from the player roster —
+    // they can't speak, so listing them would only add noise.
     const all = [...lkRoom.remoteParticipants.values()]
+      .filter((p) => !p.identity.startsWith('spectator-'))
     const identities = all.map((p) => p.identity)
 
     await resolveNames(identities)

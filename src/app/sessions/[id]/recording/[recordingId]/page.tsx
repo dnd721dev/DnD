@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
+import { useAccount } from 'wagmi'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { resolveDisplayName, ANON_NAME } from '@/lib/displayName'
@@ -106,6 +107,32 @@ export default function RecordingEditorPage() {
 
   // Bug 8: master audio player ref
   const masterAudioRef = useRef<HTMLAudioElement | null>(null)
+
+  // ── Reward: podcast listen (after 60s of real playback, once per recording) ──
+  const { address } = useAccount()
+  const listenedSecRef = useRef(0)
+  const listenAwardedRef = useRef(false)
+  useEffect(() => {
+    const el = masterAudioRef.current
+    if (!el || !address) return
+    let last = 0
+    const onTime = () => {
+      const t = el.currentTime
+      // Count only forward progress (ignore seeks/scrubs) toward the 60s goal.
+      if (t > last && t - last < 2) listenedSecRef.current += t - last
+      last = t
+      if (!listenAwardedRef.current && listenedSecRef.current >= 60) {
+        listenAwardedRef.current = true
+        void fetch('/api/rewards/podcast-listen', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-wallet-address': address.toLowerCase() },
+          body: JSON.stringify({ recordingId }),
+        }).catch(() => { /* non-fatal */ })
+      }
+    }
+    el.addEventListener('timeupdate', onTime)
+    return () => el.removeEventListener('timeupdate', onTime)
+  }, [address, recordingId, recording?.file_url])
 
   // ── Fetch data ─────────────────────────────────────────────────────────────
 

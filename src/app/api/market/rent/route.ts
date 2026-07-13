@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { checkRateLimit, rateLimitKey } from '@/lib/rateLimit'
 import { verifyDnd721ToSeller } from '@/lib/marketVerify'
+import { awardPoints } from '@/lib/rewards'
 
 const BASE_RPC = process.env.NEXT_PUBLIC_BASE_RPC_URL ?? 'https://mainnet.base.org'
 
@@ -105,6 +106,15 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   if (bidId) await db.from('market_bids').update({ status: 'completed' }).eq('id', bidId)
+
+  // Reward points: the OWNER earns for renting their NFT to a community
+  // member (once per rental — the rental id is the dedupe key).
+  await awardPoints(db, {
+    wallet: owner,
+    action: 'nft_rented_out',
+    refId: String((rental as any).id),
+    note: `rented to ${wallet}`,
+  })
 
   return NextResponse.json({ ok: true, rental })
 }

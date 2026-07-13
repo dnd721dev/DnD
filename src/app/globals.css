@@ -2,6 +2,238 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ════════════════════════════════════════════════════════════════
+   DND721 DESIGN SYSTEM — tokens
+   Dark medieval fantasy · arcane technology · modern game dashboard.
+   Every surface in the app draws from these variables so the whole
+   product reads as one place.
+   ════════════════════════════════════════════════════════════════ */
+:root {
+  /* Backgrounds — blackened navy & dark stone */
+  --bg-abyss:      #070a12;   /* page base */
+  --bg-stone:      #0c111c;   /* section base */
+  --surface-1:     #101624;   /* panels */
+  --surface-2:     #141b2c;   /* raised panels */
+  --surface-3:     #1a2236;   /* highest elevation */
+
+  /* Gold / brass / ember — the DND721 metal & fire range */
+  --gold:          #d4a94f;
+  --gold-bright:   #f0c86a;
+  --gold-deep:     #9a7728;
+  --brass:         #b08d57;
+  --ember:         #e2793b;
+  --crimson:       #b03636;
+  --arcane:        #8b6fc9;   /* restrained violet, used sparingly */
+
+  /* Status */
+  --ok:            #3fae7a;
+  --warn:          #d9a23e;
+  --danger:        #c94f4f;
+  --info:          #5b8fd9;
+
+  /* Text hierarchy */
+  --text-hi:       #f2ead8;   /* parchment white */
+  --text-mid:      #b8b3a4;
+  --text-low:      #7d7a6f;
+
+  /* Lines & glow */
+  --edge:          rgba(212, 169, 79, 0.16);   /* engraved gold edge */
+  --edge-strong:   rgba(212, 169, 79, 0.38);
+  --divider:       rgba(148, 141, 122, 0.12);
+  --glow-gold:     0 0 22px rgba(212, 169, 79, 0.18);
+  --glow-ember:    0 0 26px rgba(226, 121, 59, 0.22);
+  --shadow-panel:  0 10px 30px rgba(0, 0, 0, 0.45);
+
+  /* Shape & motion */
+  --radius-panel:  0.9rem;
+  --radius-ctl:    0.55rem;
+  --t-fast:        150ms cubic-bezier(.4, 0, .2, 1);
+  --t-slow:        350ms cubic-bezier(.4, 0, .2, 1);
+
+  /* Type */
+  --font-display:  var(--font-cinzel), 'Georgia', serif;
+  --font-body:     var(--font-inter), system-ui, sans-serif;
+}
+
+/* ── Page atmosphere ─────────────────────────────────────────────
+   A fixed, layered backdrop: deep vignette, faint ember warmth at
+   the horizon, and a whisper of arcane violet. Costs one element,
+   no images, sits behind everything. */
+body {
+  background-color: var(--bg-abyss);
+  color: var(--text-hi);
+  font-family: var(--font-body);
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(1100px 500px at 85% -10%, rgba(139, 111, 201, 0.07), transparent 60%),
+    radial-gradient(900px 420px at 12% 108%, rgba(226, 121, 59, 0.08), transparent 60%),
+    radial-gradient(1400px 800px at 50% 0%, rgba(20, 27, 44, 0.85), var(--bg-abyss) 75%);
+}
+
+/* Fantasy display headings */
+.font-display { font-family: var(--font-display); letter-spacing: 0.02em; }
+
+/* ── Reusable components ────────────────────────────────────────── */
+@layer components {
+  /* Panels — layered, engraved gold edge, deep shadow */
+  .panel {
+    background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+    border: 1px solid var(--edge);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-panel);
+  }
+  .panel-ornate {
+    background:
+      linear-gradient(180deg, rgba(212, 169, 79, 0.05), transparent 30%),
+      linear-gradient(180deg, var(--surface-2), var(--surface-1));
+    border: 1px solid var(--edge-strong);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-panel), inset 0 1px 0 rgba(240, 200, 106, 0.12);
+  }
+
+  /* Interactive card: lifts + edge-light on hover, presses on active */
+  .card-hover {
+    transition: transform var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast);
+  }
+  .card-hover:hover {
+    transform: translateY(-2px);
+    border-color: var(--edge-strong);
+    box-shadow: var(--shadow-panel), var(--glow-gold);
+  }
+  .card-hover:active { transform: translateY(0); }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+    border-radius: var(--radius-ctl);
+    font-weight: 600; font-size: 0.875rem;
+    padding: 0.55rem 1.1rem;
+    border: 1px solid transparent;
+    transition: transform var(--t-fast), box-shadow var(--t-fast),
+                background-color var(--t-fast), border-color var(--t-fast);
+    cursor: pointer;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .btn-primary {
+    background: linear-gradient(180deg, var(--gold), var(--gold-deep));
+    color: #191100;
+    border-color: rgba(240, 200, 106, 0.5);
+    text-shadow: 0 1px 0 rgba(255, 235, 180, 0.35);
+  }
+  .btn-primary:hover { box-shadow: var(--glow-gold); filter: brightness(1.07); }
+
+  .btn-ember {
+    background: linear-gradient(180deg, #d9713a, #9c4b1f);
+    color: #fff4e8;
+    border-color: rgba(226, 121, 59, 0.5);
+  }
+  .btn-ember:hover { box-shadow: var(--glow-ember); filter: brightness(1.07); }
+
+  .btn-ghost {
+    background: rgba(20, 27, 44, 0.6);
+    color: var(--text-hi);
+    border-color: var(--divider);
+  }
+  .btn-ghost:hover { border-color: var(--edge-strong); background: var(--surface-3); }
+
+  /* Page headers */
+  .eyebrow {
+    font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.28em;
+    color: var(--gold); opacity: 0.85; font-weight: 600;
+  }
+  .page-title {
+    font-family: var(--font-display);
+    font-size: clamp(1.6rem, 3.5vw, 2.4rem);
+    font-weight: 700;
+    color: var(--text-hi);
+    text-shadow: 0 2px 18px rgba(212, 169, 79, 0.15);
+  }
+
+  /* Inputs */
+  .input-rune {
+    width: 100%;
+    background: rgba(7, 10, 18, 0.8);
+    border: 1px solid var(--divider);
+    border-radius: var(--radius-ctl);
+    padding: 0.55rem 0.8rem;
+    font-size: 0.875rem;
+    color: var(--text-hi);
+    transition: border-color var(--t-fast), box-shadow var(--t-fast);
+  }
+  .input-rune::placeholder { color: var(--text-low); }
+  .input-rune:focus { outline: none; border-color: var(--gold); box-shadow: var(--glow-gold); }
+
+  /* Rarity badges (marketplace / shop) */
+  .badge { border-radius: 0.375rem; padding: 0.15rem 0.5rem; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.06em; }
+  .badge-gold    { background: rgba(212, 169, 79, 0.16); color: var(--gold-bright);   border: 1px solid rgba(212, 169, 79, 0.4); }
+  .badge-ember   { background: rgba(226, 121, 59, 0.16); color: #f0a273;              border: 1px solid rgba(226, 121, 59, 0.4); }
+  .badge-arcane  { background: rgba(139, 111, 201, 0.16); color: #b6a3e3;             border: 1px solid rgba(139, 111, 201, 0.4); }
+  .badge-crimson { background: rgba(176, 54, 54, 0.16);  color: #dd8383;              border: 1px solid rgba(176, 54, 54, 0.4); }
+
+  /* Ornamental divider — thin gold rule with a center diamond */
+  .rule-gold {
+    position: relative; height: 1px; border: 0;
+    background: linear-gradient(90deg, transparent, var(--edge-strong), transparent);
+  }
+  .rule-gold::after {
+    content: '◆'; position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.5rem; color: var(--gold); background: transparent;
+  }
+
+  /* 3D tilt stage for marketplace/shop cards (pure CSS perspective) */
+  .tilt-stage { perspective: 900px; }
+  .tilt-card {
+    transform-style: preserve-3d;
+    transition: transform var(--t-slow), box-shadow var(--t-slow);
+  }
+  .tilt-stage:hover .tilt-card {
+    transform: rotateX(3deg) rotateY(-4deg) translateY(-3px);
+    box-shadow: var(--shadow-panel), var(--glow-gold);
+  }
+}
+
+/* Skeleton shimmer */
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-1) 25%, var(--surface-3) 50%, var(--surface-1) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-slide 1.4s ease-in-out infinite;
+  border-radius: var(--radius-ctl);
+}
+@keyframes skeleton-slide { to { background-position: -200% 0; } }
+
+/* Ember drift — used sparingly (hero, shop) */
+@keyframes ember-rise {
+  0%   { transform: translateY(0) scale(1);       opacity: 0; }
+  12%  { opacity: 0.7; }
+  100% { transform: translateY(-46vh) scale(0.4); opacity: 0; }
+}
+.ember {
+  position: absolute; bottom: 0;
+  width: 3px; height: 3px; border-radius: 9999px;
+  background: var(--ember);
+  box-shadow: 0 0 6px 1px rgba(226, 121, 59, 0.6);
+  animation: ember-rise 7s linear infinite;
+  pointer-events: none;
+}
+
+/* Motion accessibility — kill decorative movement for reduced-motion users */
+@media (prefers-reduced-motion: reduce) {
+  .ember, .skeleton { animation: none !important; }
+  .card-hover, .tilt-card, .btn { transition: none !important; }
+  .tilt-stage:hover .tilt-card { transform: none; }
+  *, *::before, *::after { scroll-behavior: auto !important; }
+}
+
 /* ── Fullscreen map mode ─────────────────────────────────────── */
 /* When the map is in fullscreen, hide the site header and strip  */
 /* the padding from <main> so the canvas can fill the viewport.   */
