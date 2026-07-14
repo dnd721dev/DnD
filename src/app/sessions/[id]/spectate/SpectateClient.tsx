@@ -137,7 +137,7 @@ export function SpectateClient({ sessionId }: { sessionId: string }) {
   useEffect(() => () => { roomRef.current?.disconnect() }, [])
 
   return (
-    <div className="mx-auto max-w-2xl min-h-screen px-4 py-8 text-slate-100">
+    <div className="dossier mx-auto max-w-2xl min-h-screen px-4 py-8 text-slate-100">
       <p className="text-[10px] uppercase tracking-widest text-emerald-400/80 font-semibold">Spectator Mode</p>
       <h1 className="text-2xl font-bold text-yellow-100">
         {loading ? 'Loading…' : (session?.title ?? 'DND721 Session')}

@@ -240,7 +240,7 @@ export default function GiftsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl min-h-screen bg-slate-950 text-slate-100 px-4 py-8">
+    <div className="dossier mx-auto max-w-2xl min-h-screen text-slate-100 px-4 py-8">
       {/* Header */}
       <div className="mb-6">
         <a href="/shop" className="text-xs text-slate-500 hover:text-slate-300 mb-2 inline-block">

@@ -228,7 +228,7 @@ export default function SessionsClient({ campaignId }: Props) {
   }
 
   return (
-    <main className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-8">
+    <main className="dossier mx-auto flex max-w-4xl flex-col gap-6 px-4 py-8">
       {loading && <p className="text-sm text-slate-300">Loading…</p>}
       {error && (
         <p className="rounded border border-red-600 bg-red-950/40 px-3 py-2 text-sm text-red-200">

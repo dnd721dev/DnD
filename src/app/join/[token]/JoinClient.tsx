@@ -159,7 +159,7 @@ export function JoinClient({ token }: { token: string }) {
   const sessionTitle  = preview?.session?.title
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
+    <div className="dossier min-h-screen text-slate-100 flex items-center justify-center p-4">
       <div className="w-full max-w-md rounded-2xl border border-yellow-800/40 bg-slate-900/80 p-6 shadow-2xl">
         <p className="text-[11px] uppercase tracking-widest text-amber-400/80 font-semibold">You're invited</p>
         <h1 className="mt-1 text-xl font-bold text-yellow-100">

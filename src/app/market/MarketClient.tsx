@@ -14,10 +14,20 @@
 // Payments settle wallet-to-wallet on Base; the server verifies every tx.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { useAccount, useWriteContract, useSendTransaction, usePublicClient } from 'wagmi'
 import { parseEther } from 'viem'
 import { supabase } from '@/lib/supabase'
 import { DND721_TOKEN_ADDRESS, DND721_TOKEN_ABI } from '@/lib/dnd721Token'
+import { TiltCard } from '@/components/market/TiltCard'
+import type { VaultFeatured } from '@/components/market/VaultScene'
+
+// The 3D vault is heavy (three.js) — load it lazily, client-only, with a
+// skeleton while the chunk streams in.
+const VaultScene = dynamic(() => import('@/components/market/VaultScene'), {
+  ssr: false,
+  loading: () => <div className="skeleton h-full w-full" />,
+})
 
 type Tab = 'nfts' | 'rentals' | 'maps' | 'mine'
 
@@ -484,7 +494,7 @@ export function MarketClient() {
     const iAmBuyer = awaiting && l.buyer_wallet?.toLowerCase() === wallet
 
     return (
-      <div className="flex flex-col gap-2 rounded-xl border border-slate-700/60 bg-slate-900/60 p-4">
+      <TiltCard className="flex flex-col gap-2 rounded-xl border border-slate-700/60 bg-slate-900/60 p-4 hover:border-[color:var(--gold)]">
         {l.nft_image && (
           <img src={l.nft_image} alt={l.nft_name ?? 'NFT'} loading="lazy"
                className="w-full aspect-square rounded-lg border border-purple-700/40 object-cover" />
@@ -619,7 +629,7 @@ export function MarketClient() {
             ))}
           </div>
         )}
-      </div>
+      </TiltCard>
     )
   }
 
@@ -636,21 +646,69 @@ export function MarketClient() {
     { key: 'mine',    label: '📋 My Listings' },
   ]
 
+  // The Vault's featured exhibit — the newest open listing with real artwork.
+  // Real listings only; an empty vault shows an arcane gem, never fake wares.
+  const featuredListing = listings.find((l) => {
+    if (l.status !== 'active') return false
+    if (l.nft_image) return true
+    return l.kind === 'map' && !!(l.map_id && mapById[l.map_id]?.image_url)
+  }) ?? null
+  const featured: VaultFeatured | null = featuredListing
+    ? {
+        image: featuredListing.nft_image
+          ?? (featuredListing.map_id ? mapById[featuredListing.map_id]?.image_url ?? null : null),
+        name: featuredListing.kind === 'map'
+          ? (featuredListing.map_id ? mapById[featuredListing.map_id]?.name ?? 'Map NFT' : 'Map NFT')
+          : (featuredListing.nft_name ?? `DND721 #${featuredListing.nft_token_id}`),
+        accent: featuredListing.kind === 'map' ? 0x2f9e6e
+          : featuredListing.kind === 'nft_rent' ? 0x8a6fd9
+          : 0xd4a94f,
+      }
+    : null
+
   return (
-    <div className="mx-auto max-w-6xl min-h-screen px-4 py-6 text-slate-100">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-yellow-100">Marketplace</h1>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Sell your DND721 NFTs for DND721 or ETH · rent NFTs out (renters build characters with them) · map NFT editions.
-          </p>
+    <div className="dossier mx-auto max-w-6xl min-h-screen px-4 py-6 text-slate-100">
+      {/* ── The Vault — 3D showcase ──────────────────────────────────────────── */}
+      <div
+        className="relative h-[300px] overflow-hidden rounded-2xl border sm:h-[340px]"
+        style={{ borderColor: 'var(--edge-strong)', background: 'var(--bg-abyss)', boxShadow: 'var(--shadow-panel)' }}
+      >
+        <VaultScene featured={featured} />
+
+        {/* Caption + actions over the scene */}
+        <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-4 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="eyebrow">The Vault</p>
+              <h1 className="page-title text-3xl">Marketplace</h1>
+              <p className="mt-1 max-w-md text-xs" style={{ color: 'var(--text-mid)' }}>
+                Sell your DND721 NFTs for DND721 or ETH · rent NFTs out (renters build characters with them) · map NFT editions.
+              </p>
+            </div>
+            {isConnected && (
+              <button onClick={() => setShowCreate(true)} className="btn btn-primary pointer-events-auto">
+                + Create Listing
+              </button>
+            )}
+          </div>
+
+          {featuredListing && featured && (
+            <div
+              className="pointer-events-auto self-start rounded-lg border px-3 py-2 backdrop-blur-sm"
+              style={{ borderColor: 'var(--edge)', background: 'rgba(7,10,18,0.55)' }}
+            >
+              <p className="text-[10px] uppercase tracking-widest" style={{ color: 'var(--text-low)' }}>
+                Featured exhibit
+              </p>
+              <p className="text-sm font-semibold" style={{ color: 'var(--gold-bright)' }}>
+                {featured.name}
+              </p>
+              <p className="text-xs" style={{ color: 'var(--text-mid)' }}>
+                <Price l={featuredListing} />
+              </p>
+            </div>
+          )}
         </div>
-        {isConnected && (
-          <button onClick={() => setShowCreate(true)}
-                  className="rounded-md bg-amber-700 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600">
-            + Create Listing
-          </button>
-        )}
       </div>
 
       {notice && (

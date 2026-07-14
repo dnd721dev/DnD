@@ -655,7 +655,15 @@ export function ShopModal({ isModal = false, sessionId, onClose, onPurchase, ses
   if (!isModal) {
     return (
       <>
-        <div className="mx-auto max-w-3xl min-h-screen bg-slate-950 text-slate-100">
+        <div
+          className="dossier mx-auto my-4 max-w-3xl overflow-hidden rounded-2xl border text-slate-100"
+          style={{
+            borderColor: 'var(--edge-strong)',
+            background:
+              'radial-gradient(90% 40% at 50% 0%, rgba(226,121,59,0.10), transparent 70%), var(--surface-1)',
+            boxShadow: 'var(--shadow-panel)',
+          }}
+        >
           {inner}
         </div>
         {giftTarget && (
@@ -674,7 +682,14 @@ export function ShopModal({ isModal = false, sessionId, onClose, onPurchase, ses
   return (
     <>
       <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70">
-        <div className="w-full sm:w-auto sm:min-w-[480px] sm:max-w-2xl h-[90vh] sm:h-[80vh] rounded-t-2xl sm:rounded-2xl border border-slate-700 bg-slate-950 text-slate-100 flex flex-col overflow-hidden shadow-2xl">
+        <div
+          className="dossier w-full sm:w-auto sm:min-w-[480px] sm:max-w-2xl h-[90vh] sm:h-[80vh] rounded-t-2xl sm:rounded-2xl border text-slate-100 flex flex-col overflow-hidden shadow-2xl"
+          style={{
+            borderColor: 'var(--edge-strong)',
+            background:
+              'radial-gradient(90% 40% at 50% 0%, rgba(226,121,59,0.10), transparent 70%), var(--surface-1)',
+          }}
+        >
           {inner}
         </div>
       </div>

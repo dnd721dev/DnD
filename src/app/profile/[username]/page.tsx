@@ -84,7 +84,7 @@ export default function PublicProfilePage() {
 
   if (loading) {
     return (
-      <div className="max-w-2xl mx-auto mt-10 p-4">
+      <div className="dossier max-w-2xl mx-auto mt-10 p-4">
         <p className="text-sm text-gray-400">Loading profile…</p>
       </div>
     )

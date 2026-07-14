@@ -178,7 +178,7 @@ export default function EditProfilePage() {
 
   if (!isConnected) {
     return (
-      <div className="max-w-xl mx-auto mt-10 p-4">
+      <div className="dossier max-w-xl mx-auto mt-10 p-4">
         <h1 className="text-2xl font-bold mb-4">Edit Profile</h1>
         <p className="text-sm text-gray-400">Connect your wallet to create or edit your profile.</p>
       </div>

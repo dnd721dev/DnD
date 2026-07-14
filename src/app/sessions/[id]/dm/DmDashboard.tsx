@@ -439,7 +439,7 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
+    <div className="dossier min-h-screen text-slate-100">
       {/* Header */}
       <header className="flex items-center justify-between border-b border-slate-800 bg-slate-900/60 px-4 py-3">
         <div className="flex items-center gap-3">

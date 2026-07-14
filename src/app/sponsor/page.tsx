@@ -110,7 +110,7 @@ export default function SponsorPage() {
   }
 
   return (
-    <div className="mx-auto max-w-lg space-y-8">
+    <div className="dossier mx-auto max-w-lg space-y-8">
       {/* Hero */}
       <div>
         <h1 className="text-2xl font-bold text-slate-100">Sponsor a Monster</h1>

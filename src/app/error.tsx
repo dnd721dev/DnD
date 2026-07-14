@@ -16,12 +16,12 @@ export default function GlobalError({
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-8 text-center">
       <p className="text-4xl">⚔️</p>
-      <h2 className="text-xl font-bold text-slate-100">Something went wrong</h2>
-      <p className="max-w-md text-sm text-slate-400">{error.message || 'An unexpected error occurred.'}</p>
-      <button
-        onClick={reset}
-        className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700"
-      >
+      <p className="eyebrow">A critical miss</p>
+      <h2 className="page-title text-2xl">Something went wrong</h2>
+      <p className="max-w-md text-sm" style={{ color: 'var(--text-mid)' }}>
+        {error.message || 'An unexpected error occurred.'}
+      </p>
+      <button onClick={reset} className="btn btn-primary">
         Try again
       </button>
     </div>

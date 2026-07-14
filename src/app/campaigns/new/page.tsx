@@ -73,7 +73,7 @@ export default function NewCampaignPage() {
   }
 
   return (
-    <main className="mx-auto flex max-w-xl flex-col gap-6 px-4 py-8">
+    <main className="dossier mx-auto flex max-w-xl flex-col gap-6 px-4 py-8">
       <div>
         <h1 className="text-2xl font-bold">New Campaign</h1>
         <p className="text-sm text-slate-300">

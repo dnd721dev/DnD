@@ -145,7 +145,7 @@ export function RewardsClient() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl min-h-screen px-4 py-8 text-slate-100">
+    <div className="dossier mx-auto max-w-4xl min-h-screen px-4 py-8 text-slate-100">
       <p className="text-[10px] uppercase tracking-widest text-amber-400/80 font-semibold">DND721 Community</p>
       <h1 className="text-2xl font-bold text-yellow-100">Reward Points</h1>
       <p className="mt-1 text-xs text-slate-400">Earn points for being part of the community — play, DM, share, listen, rent, and win.</p>
