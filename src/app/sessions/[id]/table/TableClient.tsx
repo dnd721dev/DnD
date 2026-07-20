@@ -404,6 +404,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
   // GM: send one player to a specific map (moves their token too). Empty mapId
   // clears the override so the player follows the session map again.
   const [showPartyMaps, setShowPartyMaps] = useState(false)
+  const [showMapMenu, setShowMapMenu] = useState(false)
   const assignPlayerMap = useCallback(async (targetWallet: string, mapId: string) => {
     if (!session?.id || !walletLower || !mapId) return
     await fetch('/api/player-map', {
@@ -1627,35 +1628,40 @@ export default function TableClient({ sessionId }: TableClientProps) {
 
         <div className="relative flex-1 min-h-0 min-w-0">
           <div className="absolute inset-0 flex flex-col overflow-hidden">
-            {/* GM control bar: View As + Map selector */}
-            <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-slate-300">
-              <span>View As:</span>
-              <select
-                value={gmViewWallet ?? ''}
-                onChange={(e) => setGmViewWallet(e.target.value || null)}
-                className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100"
-              >
-                <option value="">GM Free View</option>
-                {sessionPlayers.map((p) => (
-                  <option key={p.wallet_address} value={p.wallet_address}>
-                    {resolveDisplayName({ displayName: p.display_name, username: p.username })}
-                  </option>
-                ))}
-              </select>
+            {/* GM map toolbar — one compact bar: view/map selectors on the
+                left, map actions on the right, destructive ops in overflow. */}
+            <div className="mb-2 flex h-9 items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/70 px-2 text-xs text-slate-300">
+              <label className="flex items-center gap-1.5">
+                <span className="hidden text-slate-500 sm:inline">View as</span>
+                <select
+                  value={gmViewWallet ?? ''}
+                  onChange={(e) => setGmViewWallet(e.target.value || null)}
+                  aria-label="View the map as"
+                  className="h-7 rounded border border-slate-700 bg-slate-950 px-1.5 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                >
+                  <option value="">GM Free View</option>
+                  {sessionPlayers.map((p) => (
+                    <option key={p.wallet_address} value={p.wallet_address}>
+                      {resolveDisplayName({ displayName: p.display_name, username: p.username })}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-              <span className="text-slate-600">|</span>
-
-              <span>Map:</span>
-              <select
-                value={currentMapId ?? ''}
-                onChange={(e) => handleSelectMap(e.target.value || null)}
-                className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100"
-              >
-                <option value="">— none —</option>
-                {maps.map((m) => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </select>
+              <label className="flex min-w-0 items-center gap-1.5">
+                <span className="hidden text-slate-500 sm:inline">Map</span>
+                <select
+                  value={currentMapId ?? ''}
+                  onChange={(e) => handleSelectMap(e.target.value || null)}
+                  aria-label="Current map"
+                  className="h-7 max-w-[11rem] rounded border border-slate-700 bg-slate-950 px-1.5 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                >
+                  <option value="">— none —</option>
+                  {maps.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </label>
 
               {/* Feature A: per-player map assignment. */}
               {maps.length > 1 && sessionPlayers.length > 0 && (
@@ -1712,27 +1718,49 @@ export default function TableClient({ sessionId }: TableClientProps) {
                   setLibraryTab('public')
                   setShowNewMapModal(true)
                 }}
-                className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                className="h-7 rounded border border-slate-700 bg-slate-950 px-2 text-xs font-semibold text-amber-200 hover:border-amber-600 hover:bg-slate-900"
               >
-                + New
+                + New Map
               </button>
 
-              {currentMap?.is_tile_map && (
-                <button
-                  onClick={handleEditCurrentTileMap}
-                  className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
-                >
-                  Edit
-                </button>
-              )}
-
+              {/* Overflow — uncommon + destructive map actions */}
               {currentMap && (
-                <button
-                  onClick={handleDeleteCurrentMap}
-                  className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-red-400 hover:bg-slate-800"
-                >
-                  Delete
-                </button>
+                <div className="relative ml-auto">
+                  <button
+                    onClick={() => setShowMapMenu((v) => !v)}
+                    aria-haspopup="menu"
+                    aria-expanded={showMapMenu}
+                    aria-label="Map options"
+                    title="Map options"
+                    className="grid h-7 w-8 place-items-center rounded border border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-900"
+                  >
+                    ⋯
+                  </button>
+                  {showMapMenu && (
+                    <div
+                      role="menu"
+                      className="absolute right-0 top-full z-[70] mt-1 w-48 rounded-lg border border-slate-700 bg-slate-900/95 p-1 shadow-xl backdrop-blur"
+                    >
+                      {currentMap?.is_tile_map && (
+                        <button
+                          role="menuitem"
+                          onClick={() => { setShowMapMenu(false); handleEditCurrentTileMap() }}
+                          className="block w-full rounded-md px-2.5 py-1.5 text-left text-xs text-slate-200 hover:bg-slate-800"
+                        >
+                          ✏️ Edit tile map
+                        </button>
+                      )}
+                      <button
+                        role="menuitem"
+                        onClick={() => { setShowMapMenu(false); void handleDeleteCurrentMap() }}
+                        className="block w-full rounded-md px-2.5 py-1.5 text-left text-xs text-red-300 hover:bg-red-950/60"
+                        title={`Delete "${currentMap?.name}" — asks for confirmation`}
+                      >
+                        🗑 Delete “{(currentMap?.name ?? 'map').slice(0, 18)}”…
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
@@ -1746,6 +1774,7 @@ export default function TableClient({ sessionId }: TableClientProps) {
             mode={hud.panelMode}
             isMobile={hud.isMobile}
             title="GM Controls"
+            dockSide={hud.isMobile ? 'bottom' : 'left'}
             mapExpanded={hud.mapExpanded}
             dockedHeight={hud.layout.dockedHeight}
             floatingRect={hud.layout.floatingRect}

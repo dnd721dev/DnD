@@ -17,12 +17,14 @@ export function asiSlotsForClassLevel(classKey: string, level: number): number {
   const cls = String(classKey ?? '').toLowerCase()
   const lvl = Math.max(1, Math.min(20, Math.floor(level || 1)))
 
+  // PHB ASI levels (2014 & 2024 agree on these): fighter gets bonus ASIs at
+  // 6 and 14; rogue gets one at 10. Nobody gets one at 18 — 19 is the last.
   if (cls === 'fighter') {
-    const breaks = [4, 6, 8, 10, 12, 14, 16, 18, 19]
+    const breaks = [4, 6, 8, 12, 14, 16, 19]
     return breaks.filter((b) => lvl >= b).length
   }
   if (cls === 'rogue') {
-    const breaks = [4, 8, 10, 12, 16, 18, 19]
+    const breaks = [4, 8, 10, 12, 16, 19]
     return breaks.filter((b) => lvl >= b).length
   }
   // Default (all other classes)

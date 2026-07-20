@@ -70,13 +70,21 @@ interface FloatingWindowProps {
   mapExpanded: boolean
   onOpacity?: (v: number) => void
   onSnapZone?: (z: SnapZone) => void
+  /** Docked orientation. 'bottom' (default) is the classic bottom sheet;
+   *  'left' docks as a side drawer so the map keeps its full height — the
+   *  same `dockedHeight` number is reused as the drawer WIDTH (clamped
+   *  340–560px). Floating mode is unaffected. */
+  dockSide?: 'bottom' | 'left'
 }
+
+const LEFT_DOCK_MIN = 340
+const LEFT_DOCK_MAX = 560
 
 export function FloatingWindow({
   mode, isMobile, title, headerExtras, children,
   dockedHeight, floatingRect, collapsed, opacity,
   onDockedHeight, onFloatingRect, onToggleCollapse, onToggleExpand, mapExpanded,
-  onOpacity, onSnapZone,
+  onOpacity, onSnapZone, dockSide = 'bottom',
 }: FloatingWindowProps) {
   const dragRef = useRef<{ startX: number; startY: number; rect: HudRect } | null>(null)
   const resizeRef = useRef<{ startX: number; startY: number; rect: HudRect } | null>(null)
@@ -84,16 +92,22 @@ export function FloatingWindow({
   const [hoverZone, setHoverZone] = useState<SnapZone>(null)
   const [showOpacity, setShowOpacity] = useState(false)
 
-  // ── Docked: top-edge handle resizes height (drag up = taller) ──────────────
+  // ── Docked: top-edge handle resizes height (drag up = taller).
+  //    Left dock: right-edge handle resizes width (drag right = wider). ──────
   function onDockHandleDown(e: ReactPointerEvent) {
     e.preventDefault()
     ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
-    dockRef.current = { startY: e.clientY, height: dockedHeight }
+    dockRef.current = { startY: dockSide === 'left' ? e.clientX : e.clientY, height: dockedHeight }
   }
   function onDockHandleMove(e: ReactPointerEvent) {
     const s = dockRef.current
     if (!s) return
-    onDockedHeight(s.height + (s.startY - e.clientY))
+    if (dockSide === 'left') {
+      const w = s.height + (e.clientX - s.startY)
+      onDockedHeight(Math.min(LEFT_DOCK_MAX, Math.max(LEFT_DOCK_MIN, w)))
+    } else {
+      onDockedHeight(s.height + (s.startY - e.clientY))
+    }
   }
   function onDockHandleUp(e: ReactPointerEvent) {
     if (dockRef.current) (e.target as HTMLElement).releasePointerCapture(e.pointerId)
@@ -224,16 +238,20 @@ export function FloatingWindow({
       <div
         className={floating
           ? 'pointer-events-auto fixed z-[60] flex flex-col overflow-hidden rounded-xl border border-yellow-700/40 bg-slate-950/95 text-slate-100 shadow-2xl backdrop-blur-md'
+          : dockSide === 'left'
+          ? `pointer-events-auto absolute bottom-0 left-0 top-0 z-30 flex flex-col overflow-hidden rounded-r-xl border border-l-0 border-yellow-700/40 bg-slate-950/95 text-slate-100 shadow-[4px_0_24px_rgba(0,0,0,0.7)] backdrop-blur-md${collapsed ? ' !bottom-auto' : ''}`
           : 'pointer-events-auto absolute inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden rounded-t-xl border border-b-0 border-yellow-700/40 bg-slate-950/95 text-slate-100 shadow-[0_-4px_24px_rgba(0,0,0,0.7)] backdrop-blur-md'}
         style={floating
           ? { left: floatingRect.x, top: floatingRect.y, width: floatingRect.w, height: collapsed ? undefined : floatingRect.h }
+          : dockSide === 'left'
+          ? { width: collapsed ? undefined : Math.min(LEFT_DOCK_MAX, Math.max(LEFT_DOCK_MIN, dockedHeight)) }
           : undefined}
       >
         {/* Dock resize handle slot — null when floating/collapsed. Shown on
             mobile too (touchAction:none makes the drag work for touch) so the
             bottom sheet can be pulled up; the grip is taller on mobile for an
-            easier touch target. */}
-        {!floating && !collapsed ? (
+            easier touch target. Left dock resizes via its right edge instead. */}
+        {!floating && !collapsed && dockSide !== 'left' ? (
           <div
             onPointerDown={onDockHandleDown}
             onPointerMove={onDockHandleMove}
@@ -249,16 +267,30 @@ export function FloatingWindow({
         {titleBar}
 
         {/* Body — stable position; {children} persist across docked↔floating.
-            Floating fills the window (flex-1); docked is bounded to dockedHeight
-            (NO flex-1 — the bottom-anchored container would otherwise grow to
-            fill the viewport). */}
+            Floating fills the window (flex-1); bottom dock is bounded to
+            dockedHeight (NO flex-1 — the bottom-anchored container would
+            otherwise grow to fill the viewport). Left dock fills its full
+            height (the container is inset-y bound). */}
         {!collapsed ? (
           <div
-            className={floating ? 'min-h-0 flex-1 overflow-y-auto' : 'min-h-0 overflow-y-auto'}
-            style={floating ? { opacity } : { height: dockedHeight }}
+            className={floating || dockSide === 'left' ? 'min-h-0 flex-1 overflow-y-auto' : 'min-h-0 overflow-y-auto'}
+            style={floating ? { opacity } : dockSide === 'left' ? undefined : { height: dockedHeight }}
           >
             {children}
           </div>
+        ) : null}
+
+        {/* Left-dock width-resize handle — right edge */}
+        {!floating && !collapsed && dockSide === 'left' ? (
+          <div
+            onPointerDown={onDockHandleDown}
+            onPointerMove={onDockHandleMove}
+            onPointerUp={onDockHandleUp}
+            className="absolute bottom-0 right-0 top-0 w-2 cursor-ew-resize hover:bg-yellow-500/20"
+            style={{ touchAction: 'none' }}
+            title="Drag to resize drawer"
+            aria-label="Resize GM drawer"
+          />
         ) : null}
 
         {/* Floating resize handle slot — null when docked/collapsed */}

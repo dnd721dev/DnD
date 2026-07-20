@@ -89,6 +89,15 @@ export default function GMSidebar({
   }, [activeTab]);
   const [collapsed, setCollapsed] = useState(false);
   const [combatRound, setCombatRound] = useState(1);
+  const [showMonsterLibrary, setShowMonsterLibrary] = useState(false);
+  // Turn-order strip visibility — persisted so a GM who hides it stays hidden.
+  const [showTurnStrip, setShowTurnStrip] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    return window.localStorage.getItem('dnd721:gm:turnstrip') !== 'hidden';
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem('dnd721:gm:turnstrip', showTurnStrip ? 'shown' : 'hidden'); } catch { /* ignore */ }
+  }, [showTurnStrip]);
 
   // Resizable panel
   const [panelHeight, setPanelHeight] = useState(192);
@@ -235,24 +244,28 @@ export default function GMSidebar({
           <div className="h-1.5 w-12 rounded-full bg-slate-600 hover:bg-yellow-500/60 transition-colors" />
         </div>
       )}
-      {/* Header + Tabs */}
-      {/* Single-row header: badge + tabs + DND721 */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-yellow-800/50 bg-gradient-to-r from-slate-950 via-slate-900/95 to-slate-950 px-3 py-2">
-        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-yellow-600/70 bg-slate-950/80 text-[11px] font-bold uppercase tracking-[0.2em] text-yellow-300">
+      {/* Header + Tabs — compact underline tabs with the GM chip inline */}
+      <div className="flex shrink-0 items-center gap-2 border-b border-yellow-800/50 bg-slate-950/90 px-2">
+        <div
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-yellow-600/70 bg-slate-950/80 text-[10px] font-bold uppercase tracking-widest text-yellow-300"
+          title="You are the GM"
+        >
           GM
         </div>
-        <div className="flex flex-1 gap-1 rounded-lg bg-slate-900/80 p-0.5">
+        <div className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto" role="tablist" aria-label="GM sections">
           {tabs.map((tab) => {
             const isActive = tab.key === activeTab;
             return (
               <button
                 key={tab.key}
                 type="button"
+                role="tab"
+                aria-selected={isActive}
                 onClick={() => setActiveTab(tab.key)}
-                className={`flex min-h-11 flex-1 items-center justify-center rounded-md px-2 py-2 text-xs font-medium transition ${
+                className={`h-10 shrink-0 whitespace-nowrap border-b-2 px-2.5 text-xs font-semibold transition ${
                   isActive
-                    ? 'bg-gradient-to-b from-yellow-500/80 to-amber-600/90 text-slate-950 shadow-[0_0_6px_rgba(250,204,21,0.7)]'
-                    : 'bg-slate-950/40 text-slate-200 hover:bg-slate-800/80 hover:text-yellow-200'
+                    ? 'border-amber-400 text-amber-200'
+                    : 'border-transparent text-slate-400 hover:border-slate-600 hover:text-slate-200'
                 }`}
               >
                 {tab.label}
@@ -270,9 +283,6 @@ export default function GMSidebar({
             {collapsed ? '▲' : '▼'}
           </button>
         )}
-        <div className="shrink-0 rounded-md border border-yellow-800/60 bg-slate-950/80 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide text-yellow-300">
-          DND721
-        </div>
       </div>
 
       {/* Body — 2-column grid per tab; always rendered to preserve InitiativeTracker state.
@@ -284,19 +294,38 @@ export default function GMSidebar({
         style={chromeless ? undefined : { height: panelHeight }}
       >
 
-        {/* ⚔ Combat: InitiativeTracker (left) + MonsterLibrary (right) */}
+        {/* ⚔ Combat — single column: initiative first, Monster Library opens
+            on demand via "Add Monster" (both stay mounted to preserve state). */}
         {activeTab === 'combat' && (
-          <div className="grid h-full grid-cols-1 gap-2 sm:grid-cols-2">
-            <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
+          <div className="flex h-full flex-col gap-2">
+            <div className={`min-h-0 flex-1 overflow-y-auto ${showMonsterLibrary ? 'hidden' : ''}`}>
               <InitiativeTracker encounterId={encounterId ?? null} sessionId={sessionId ?? null} currentMapId={activeMapId ?? null} onRoundChange={setCombatRound} sessionStatus={(sessionStatus ?? null) as SessionStatus | null} />
             </div>
-            <div className="overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2 shadow-inner shadow-black/40">
-              {encounterId ? (
-                <MonsterLibrary onSpawnMonster={spawnMonsterToken} onSpawnNpc={spawnNpcToken} />
-              ) : (
-                <p className="text-[11px] text-slate-400">Start an encounter to spawn monsters from the library.</p>
-              )}
+            <div className={showMonsterLibrary ? 'flex min-h-0 flex-1 flex-col gap-1.5' : 'hidden'}>
+              <button
+                type="button"
+                onClick={() => setShowMonsterLibrary(false)}
+                className="self-start rounded-md bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-slate-200 hover:bg-slate-700"
+              >
+                ← Back to Combat
+              </button>
+              <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-yellow-900/30 bg-slate-950/80 p-2">
+                {encounterId ? (
+                  <MonsterLibrary onSpawnMonster={spawnMonsterToken} onSpawnNpc={spawnNpcToken} />
+                ) : (
+                  <p className="text-[11px] text-slate-400">Start an encounter to spawn monsters from the library.</p>
+                )}
+              </div>
             </div>
+            {!showMonsterLibrary && (
+              <button
+                type="button"
+                onClick={() => setShowMonsterLibrary(true)}
+                className="shrink-0 rounded-lg border border-amber-800/50 bg-amber-950/40 px-3 py-2 text-xs font-semibold text-amber-200 hover:bg-amber-900/50"
+              >
+                🐉 Add Monster — open the Monster Library
+              </button>
+            )}
           </div>
         )}
 
@@ -389,23 +418,33 @@ export default function GMSidebar({
 
       </div>
 
-      {/* Footer: initiative strip; always rendered to preserve state */}
+      {/* Footer: initiative strip; always rendered to preserve state.
+          Collapsible — a quick-glance turn order, not a second editor. */}
       <div className={`border-t border-yellow-800/60 bg-slate-950/95 px-2.5 py-1.5${collapsed ? ' hidden' : ''}`}>
-        <div className="mb-1 flex items-center justify-between text-[10px] text-slate-400">
+        <div className="flex items-center justify-between text-[10px] text-slate-400">
           <span className="font-semibold uppercase tracking-wide text-yellow-300/90">
             Turn Order
           </span>
-          <span>
-            {loadingStrip
-              ? 'Updating…'
-              : sortedStrip.length === 0
-              ? 'No rolls yet'
-              : `${sortedStrip.length} combatant${
-                  sortedStrip.length === 1 ? '' : 's'
-                }`}
+          <span className="flex items-center gap-2">
+            {showTurnStrip && (
+              loadingStrip
+                ? 'Updating…'
+                : sortedStrip.length === 0
+                ? 'No rolls yet'
+                : `${sortedStrip.length} combatant${sortedStrip.length === 1 ? '' : 's'}`
+            )}
+            <button
+              type="button"
+              onClick={() => setShowTurnStrip((v) => !v)}
+              aria-expanded={showTurnStrip}
+              className="rounded px-1.5 py-0.5 text-slate-500 hover:bg-slate-800 hover:text-slate-300"
+              title={showTurnStrip ? 'Hide turn order strip' : 'Show turn order strip'}
+            >
+              {showTurnStrip ? 'Hide' : 'Show'}
+            </button>
           </span>
         </div>
-        <div className="flex gap-1 overflow-x-auto pb-0.5">
+        <div className={`mt-1 flex gap-1 overflow-x-auto pb-0.5${showTurnStrip ? '' : ' hidden'}`}>
           {sortedStrip.map((e) => {
             const isActive = activeName && e.name === activeName;
 

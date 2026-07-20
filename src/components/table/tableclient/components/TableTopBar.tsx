@@ -59,26 +59,27 @@ export const TableTopBar = memo(function TableTopBar(props: {
         onClose={() => setStreamOpen(false)}
       />
     )}
-    <header className="flex flex-col gap-2 rounded-xl border border-yellow-900/40 bg-slate-900/70 p-3 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <p className="text-xs uppercase tracking-wide text-yellow-300/60">
-          DND721 Session Table {isGm ? '· GM' : '· Player'}
-        </p>
-        <h1 className="text-lg font-bold text-yellow-200 sm:text-xl">
+    <header className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-yellow-900/40 bg-slate-900/70 px-3 py-1.5">
+      {/* Identity — one truncating line: title · campaign · time · role */}
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <h1 className="truncate text-sm font-bold text-yellow-200" title={session.title || 'Untitled Session'}>
           {session.title || 'Untitled Session'}
         </h1>
-        <p className="text-xs text-slate-400">
-          {campaignMeta?.title && (
-            <>
-              Campaign: <span className="text-slate-200">{campaignMeta.title}</span> ·{' '}
-            </>
-          )}
-          {formatDateTime(session.scheduled_start)} · {session.duration_minutes} min
-        </p>
+        <span className="hidden shrink-0 truncate text-[11px] text-slate-400 md:inline" title={campaignMeta?.title ?? undefined}>
+          {campaignMeta?.title ? `${campaignMeta.title} · ` : ''}{formatDateTime(session.scheduled_start)} · {session.duration_minutes} min
+        </span>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
+          session.status === 'completed' ? 'bg-slate-700 text-slate-400' : 'bg-slate-800 text-slate-200'
+        }`}>
+          {session.status}
+        </span>
+        <span className="shrink-0 rounded-full border border-yellow-700/50 bg-slate-950/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-yellow-300" title={address ? `You: ${displayName?.trim() || ANON_NAME}` : 'Connect your wallet to join this table.'}>
+          {isGm ? 'GM' : 'Player'}
+        </span>
       </div>
 
       <div className="flex flex-col items-start gap-2 text-xs text-slate-300 sm:items-end">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {isGm && (
             <RecordingButton sessionId={session.id} roomName={roomName} sessionStatus={sessionStatus} />
           )}
@@ -203,25 +204,9 @@ export const TableTopBar = memo(function TableTopBar(props: {
             )
           )}
         </div>
-
-        <div className="flex flex-col items-start gap-1 sm:items-end">
-          <span className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-wide ${
-            session.status === 'completed' ? 'bg-slate-700 text-slate-400' : 'bg-slate-800 text-slate-200'
-          }`}>
-            {session.status}
-          </span>
-          {address ? (
-            <p className="text-slate-400">
-              You:{' '}
-              <span className="text-slate-200">
-                {displayName?.trim() || ANON_NAME}
-              </span>{' '}
-              {isGm && <span className="text-emerald-400">(GM)</span>}
-            </p>
-          ) : (
-            <p className="text-xs text-amber-400">Connect your wallet to join this table.</p>
-          )}
-        </div>
+        {!address && (
+          <p className="text-[11px] text-amber-400">Connect your wallet to join this table.</p>
+        )}
       </div>
     </header>
     </>
