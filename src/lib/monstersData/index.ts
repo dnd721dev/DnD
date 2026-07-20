@@ -13,6 +13,8 @@ import { MONSTROSITIES } from './monstrosities'
 import { OOZES } from './oozes'
 import { PLANTS } from './plants'
 import { UNDEAD } from './undead'
+import { MUDDBOT_MONSTERS } from './muddbotMonsters'
+import { SUMMONS } from './summons'
 
 export const ALL_SRD_MONSTERS: Monster[] = [
   ...ABERRATIONS,
@@ -29,6 +31,8 @@ export const ALL_SRD_MONSTERS: Monster[] = [
   ...OOZES,
   ...PLANTS,
   ...UNDEAD,
+  ...MUDDBOT_MONSTERS,
+  ...SUMMONS,
 ]
 
 export * from './types'
