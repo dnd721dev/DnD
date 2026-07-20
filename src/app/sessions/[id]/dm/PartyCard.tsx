@@ -4,8 +4,10 @@ import { useMemo, useState } from 'react'
 import { CONDITIONS, type ConditionKey } from '@/lib/conditions'
 
 // ──────────────────────────────────────────────────────────────────────────────
-// One player party card. Mirrors the spec from the plan: avatar, name +
-// class/level, HP bar, AC shield, conditions row, quick HP/condition actions.
+// One player party card — compact combat card for the DM dashboard sidebar.
+// Collapsed (~80px): portrait · name/class · AC, plus the HP bar. Expanding
+// reveals HP controls, conditions, and (at 0 HP) death saves. Death saves stay
+// visible even when collapsed — a dying PC needs attention.
 // Click on the name/avatar area opens the character sheet in a new tab.
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -51,6 +53,7 @@ export function PartyCard({
   onRemoveCondition,
   onAdjustDeathSave,
 }: PartyCardProps) {
+  const [expanded, setExpanded] = useState(false)
   const [customOpen, setCustomOpen] = useState(false)
   const [customDelta, setCustomDelta] = useState('')
   const [addOpen, setAddOpen] = useState(false)
@@ -87,42 +90,66 @@ export function PartyCard({
     setCustomOpen(false)
   }
 
-  return (
-    <article className="rounded-xl border border-slate-700/60 bg-slate-900/70 p-3 shadow-sm transition hover:border-indigo-500/40">
-      {/* Top row — avatar + name (clickable) */}
-      <button
-        type="button"
-        onClick={openSheet}
-        className="flex w-full items-start gap-3 text-left"
-        title="Open character sheet in new tab"
-      >
-        {data.avatarUrl ? (
-          <img
-            src={data.avatarUrl}
-            alt={data.name}
-            className="h-14 w-14 shrink-0 rounded-lg object-cover ring-1 ring-indigo-500/40 group-hover:ring-indigo-400"
-          />
-        ) : (
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-[10px] uppercase text-slate-500 ring-1 ring-slate-700">
-            No NFT
-          </div>
-        )}
-        <div className="flex flex-1 flex-col gap-0.5">
-          <h3 className="text-sm font-bold text-white leading-tight hover:text-indigo-300">{data.name}</h3>
-          <p className="text-[11px] text-slate-400">
-            {(data.className ?? '—')} • Lv {data.level}
-          </p>
-          {data.concentratingOn && (
-            <p className="text-[10px] text-violet-300">✦ Conc: {data.concentratingOn}</p>
-          )}
-        </div>
-        <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-indigo-900/30 px-2 py-0.5 text-[11px] font-semibold text-indigo-200 ring-1 ring-indigo-700/50">
-          🛡 AC {data.ac}
-        </span>
-      </button>
+  const dying = data.hpCurrent === 0 && data.deathSaves && onAdjustDeathSave
 
-      {/* HP bar */}
-      <div className="mt-3">
+  return (
+    <article
+      className={`rounded-xl border bg-slate-900/70 p-2.5 shadow-sm transition ${
+        data.hpCurrent === 0
+          ? 'border-red-800/70'
+          : 'border-slate-700/60 hover:border-amber-500/40'
+      }`}
+    >
+      {/* Header row — portrait · name/class · AC · expand */}
+      <div className="flex items-center gap-2.5">
+        <button
+          type="button"
+          onClick={openSheet}
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+          title="Open character sheet in new tab"
+        >
+          {data.avatarUrl ? (
+            <img
+              src={data.avatarUrl}
+              alt=""
+              className="h-10 w-10 shrink-0 rounded-lg object-cover ring-1 ring-amber-600/40"
+            />
+          ) : (
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-[8px] uppercase text-slate-500 ring-1 ring-slate-700">
+              No NFT
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-sm font-bold text-white hover:text-amber-300" title={data.name}>
+              {data.name}
+            </h3>
+            <p className="truncate text-[11px] text-slate-400">
+              {(data.className ?? '—')} · Lv {data.level}
+              {data.concentratingOn && (
+                <span className="ml-1.5 text-violet-300" title={`Concentrating on ${data.concentratingOn}`}>
+                  ✦ {data.concentratingOn}
+                </span>
+              )}
+            </p>
+          </div>
+        </button>
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-slate-800/80 px-1.5 py-0.5 text-[11px] font-semibold text-amber-200 ring-1 ring-amber-700/40">
+          🛡 {data.ac}
+        </span>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          aria-label={expanded ? 'Collapse card' : 'Expand card for HP controls and conditions'}
+          title={expanded ? 'Collapse' : 'HP controls & conditions'}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-800 hover:text-slate-200"
+        >
+          <span className={`transition-transform ${expanded ? 'rotate-180' : ''}`}>▾</span>
+        </button>
+      </div>
+
+      {/* HP — always visible */}
+      <div className="mt-2">
         <div className="flex items-baseline justify-between text-[10px] text-slate-400">
           <span className="uppercase tracking-wide">HP</span>
           <span className="tabular-nums text-slate-200">
@@ -130,57 +157,20 @@ export function PartyCard({
             {data.tempHp > 0 && <span className="ml-1 text-cyan-300">(+{data.tempHp})</span>}
           </span>
         </div>
-        <div className="mt-0.5 h-2 w-full rounded-full bg-slate-800">
+        <div className="mt-0.5 h-1.5 w-full rounded-full bg-slate-800">
           <div
-            className={`h-2 rounded-full transition-all duration-300 ${hpColor(pct)}`}
+            className={`h-1.5 rounded-full transition-all duration-300 motion-reduce:transition-none ${hpColor(pct)}`}
             style={{ width: `${pct}%` }}
           />
         </div>
       </div>
 
-      {/* HP quick actions */}
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        <button onClick={() => onAdjustHp(-5)} className="rounded-md bg-red-950/50 px-2 py-1 text-[11px] font-semibold text-red-300 ring-1 ring-red-800/50 hover:bg-red-900/60">−5</button>
-        <button onClick={() => onAdjustHp(-1)} className="rounded-md bg-red-950/50 px-2 py-1 text-[11px] font-semibold text-red-300 ring-1 ring-red-800/50 hover:bg-red-900/60">−1</button>
-        <button onClick={() => onAdjustHp(+1)} className="rounded-md bg-emerald-950/50 px-2 py-1 text-[11px] font-semibold text-emerald-300 ring-1 ring-emerald-800/50 hover:bg-emerald-900/60">+1</button>
-        <button onClick={() => onAdjustHp(+5)} className="rounded-md bg-emerald-950/50 px-2 py-1 text-[11px] font-semibold text-emerald-300 ring-1 ring-emerald-800/50 hover:bg-emerald-900/60">+5</button>
-        <button
-          onClick={() => setCustomOpen((v) => !v)}
-          className="rounded-md bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-300 ring-1 ring-slate-700 hover:bg-slate-700"
-        >
-          Custom
-        </button>
-        <button
-          onClick={() => onSetHp(data.hpMax)}
-          title="Restore to full HP"
-          className="rounded-md bg-sky-950/50 px-2 py-1 text-[11px] font-semibold text-sky-300 ring-1 ring-sky-800/50 hover:bg-sky-900/60"
-        >
-          Heal Full
-        </button>
-      </div>
-
-      {customOpen && (
-        <div className="mt-2 flex items-center gap-1.5">
-          <input
-            type="number"
-            autoFocus
-            value={customDelta}
-            onChange={(e) => setCustomDelta(e.target.value)}
-            placeholder="amount"
-            className="w-20 rounded-md bg-slate-800 px-2 py-1 text-[11px] text-white ring-1 ring-slate-700 focus:ring-indigo-500 outline-none"
-          />
-          <button onClick={() => submitCustom(-1)} className="rounded-md bg-red-900/60 px-2 py-1 text-[11px] font-semibold text-red-200 hover:bg-red-800">− Damage</button>
-          <button onClick={() => submitCustom(+1)} className="rounded-md bg-emerald-900/60 px-2 py-1 text-[11px] font-semibold text-emerald-200 hover:bg-emerald-800">+ Heal</button>
-        </div>
-      )}
-
-      {/* Death saves — only while the PC is at 0 HP. Writes to the same
-          action_state.death_saves the player's own character sheet reads. */}
-      {data.hpCurrent === 0 && data.deathSaves && onAdjustDeathSave && (
-        <div className="mt-3 rounded-lg border border-red-900/40 bg-red-950/20 p-2">
+      {/* Death saves — surfaced even collapsed; a dying PC needs attention. */}
+      {dying && (
+        <div className="mt-2 rounded-lg border border-red-900/40 bg-red-950/20 p-2">
           <div className="flex items-baseline justify-between text-[10px] text-red-300/80">
             <span className="uppercase tracking-wide">💀 Death Saves</span>
-            <span className="tabular-nums">{data.deathSaves.s}/3 · {data.deathSaves.f}/3</span>
+            <span className="tabular-nums">{data.deathSaves!.s}/3 · {data.deathSaves!.f}/3</span>
           </div>
           <div className="mt-1.5 flex items-center gap-3">
             <div className="flex items-center gap-1">
@@ -189,9 +179,10 @@ export function PartyCard({
                 <button
                   key={`s${i}`}
                   type="button"
-                  onClick={() => onAdjustDeathSave('s', i <= data.deathSaves!.s ? -1 : 1)}
+                  onClick={() => onAdjustDeathSave!('s', i <= data.deathSaves!.s ? -1 : 1)}
                   className={`h-3.5 w-3.5 rounded-full border transition ${i <= data.deathSaves!.s ? 'border-emerald-500 bg-emerald-500/80' : 'border-emerald-700/50 bg-transparent hover:bg-emerald-900/40'}`}
                   title={`Success ${i}`}
+                  aria-label={`Death save success ${i}`}
                 />
               ))}
             </div>
@@ -201,9 +192,10 @@ export function PartyCard({
                 <button
                   key={`f${i}`}
                   type="button"
-                  onClick={() => onAdjustDeathSave('f', i <= data.deathSaves!.f ? -1 : 1)}
+                  onClick={() => onAdjustDeathSave!('f', i <= data.deathSaves!.f ? -1 : 1)}
                   className={`h-3.5 w-3.5 rounded-full border transition ${i <= data.deathSaves!.f ? 'border-red-500 bg-red-500/80' : 'border-red-700/50 bg-transparent hover:bg-red-900/40'}`}
                   title={`Failure ${i}`}
+                  aria-label={`Death save failure ${i}`}
                 />
               ))}
             </div>
@@ -211,30 +203,19 @@ export function PartyCard({
         </div>
       )}
 
-      {/* Conditions */}
-      <div className="mt-3">
-        <div className="flex items-baseline justify-between text-[10px] text-slate-400">
-          <span className="uppercase tracking-wide">Conditions</span>
-          <button
-            onClick={() => setAddOpen((v) => !v)}
-            className="text-indigo-300 hover:text-indigo-200"
-          >
-            {addOpen ? '× Close' : '+ Add'}
-          </button>
-        </div>
-        <div className="mt-1 flex flex-wrap gap-1">
-          {conditionEntries.length === 0 && !addOpen && (
-            <span className="text-[10px] italic text-slate-500">none</span>
-          )}
+      {/* Condition chips — visible collapsed so states are never hidden. */}
+      {conditionEntries.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
           {conditionEntries.map((c) => (
             <span
               key={String(c.key)}
-              className="inline-flex items-center gap-1 rounded-md bg-rose-900/40 px-2 py-0.5 text-[10px] font-semibold text-rose-200 ring-1 ring-rose-700/50"
+              className="inline-flex items-center gap-1 rounded-md bg-rose-900/40 px-1.5 py-0.5 text-[10px] font-semibold text-rose-200 ring-1 ring-rose-700/50"
             >
               {c.name}
               <button
                 onClick={() => onRemoveCondition(String(c.key))}
-                title="Remove"
+                title={`Remove ${c.name}`}
+                aria-label={`Remove ${c.name}`}
                 className="text-rose-300 hover:text-white"
               >
                 ✕
@@ -242,20 +223,76 @@ export function PartyCard({
             </span>
           ))}
         </div>
-        {addOpen && availableConditions.length > 0 && (
-          <div className="mt-1.5 flex flex-wrap gap-1">
-            {availableConditions.map((k) => (
-              <button
-                key={k}
-                onClick={() => { void onAddCondition(k); setAddOpen(false) }}
-                className="rounded-md bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300 ring-1 ring-slate-700 hover:bg-slate-700 hover:text-white"
-              >
-                {CONDITIONS[k].name}
-              </button>
-            ))}
+      )}
+
+      {/* Expanded — HP controls + condition management */}
+      {expanded && (
+        <>
+          <div className="mt-2 flex flex-wrap gap-1">
+            <button onClick={() => onAdjustHp(-5)} className="min-w-[2.25rem] rounded-md bg-red-950/50 px-2 py-1 text-[11px] font-semibold text-red-300 ring-1 ring-red-800/50 hover:bg-red-900/60">−5</button>
+            <button onClick={() => onAdjustHp(-1)} className="min-w-[2.25rem] rounded-md bg-red-950/50 px-2 py-1 text-[11px] font-semibold text-red-300 ring-1 ring-red-800/50 hover:bg-red-900/60">−1</button>
+            <button onClick={() => onAdjustHp(+1)} className="min-w-[2.25rem] rounded-md bg-emerald-950/50 px-2 py-1 text-[11px] font-semibold text-emerald-300 ring-1 ring-emerald-800/50 hover:bg-emerald-900/60">+1</button>
+            <button onClick={() => onAdjustHp(+5)} className="min-w-[2.25rem] rounded-md bg-emerald-950/50 px-2 py-1 text-[11px] font-semibold text-emerald-300 ring-1 ring-emerald-800/50 hover:bg-emerald-900/60">+5</button>
+            <button
+              onClick={() => setCustomOpen((v) => !v)}
+              className="rounded-md bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-300 ring-1 ring-slate-700 hover:bg-slate-700"
+            >
+              Custom
+            </button>
+            <button
+              onClick={() => onSetHp(data.hpMax)}
+              title="Restore to full HP"
+              aria-label="Restore to full HP"
+              className="rounded-md bg-sky-950/50 px-2 py-1 text-[11px] font-semibold text-sky-300 ring-1 ring-sky-800/50 hover:bg-sky-900/60"
+            >
+              ✚ Full
+            </button>
           </div>
-        )}
-      </div>
+
+          {customOpen && (
+            <div className="mt-2 flex items-center gap-1.5">
+              <input
+                type="number"
+                autoFocus
+                value={customDelta}
+                onChange={(e) => setCustomDelta(e.target.value)}
+                placeholder="amount"
+                className="w-20 rounded-md bg-slate-800 px-2 py-1 text-[11px] text-white ring-1 ring-slate-700 focus:ring-amber-500 outline-none"
+              />
+              <button onClick={() => submitCustom(-1)} className="rounded-md bg-red-900/60 px-2 py-1 text-[11px] font-semibold text-red-200 hover:bg-red-800">− Damage</button>
+              <button onClick={() => submitCustom(+1)} className="rounded-md bg-emerald-900/60 px-2 py-1 text-[11px] font-semibold text-emerald-200 hover:bg-emerald-800">+ Heal</button>
+            </div>
+          )}
+
+          <div className="mt-2">
+            <div className="flex items-baseline justify-between text-[10px] text-slate-400">
+              <span className="uppercase tracking-wide">Conditions</span>
+              <button
+                onClick={() => setAddOpen((v) => !v)}
+                className="text-amber-300 hover:text-amber-200"
+              >
+                {addOpen ? '× Close' : '+ Add condition'}
+              </button>
+            </div>
+            {conditionEntries.length === 0 && !addOpen && (
+              <p className="mt-0.5 text-[10px] italic text-slate-500">No conditions</p>
+            )}
+            {addOpen && availableConditions.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {availableConditions.map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => { void onAddCondition(k); setAddOpen(false) }}
+                    className="rounded-md bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300 ring-1 ring-slate-700 hover:bg-slate-700 hover:text-white"
+                  >
+                    {CONDITIONS[k].name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </article>
   )
 }

@@ -78,9 +78,15 @@ type InitiativeTrackerProps = {
   onRoundChange?: (round: number) => void;
   /** Current session lifecycle status — gates Start Combat button */
   sessionStatus?: SessionStatus | null;
+  /** Presentation only. 'compact' (default) is the table sidebar layout;
+   *  'wide' is the DM-dashboard Battle workspace: larger controls, labeled
+   *  buttons, truncated (not wrapped) names, taller list, and confirmation on
+   *  destructive actions. No behavioral/database differences. */
+  variant?: 'compact' | 'wide';
 };
 
-export default function InitiativeTracker({ encounterId, sessionId, currentMapId, monsterSyncMapId, onRoundChange, sessionStatus }: InitiativeTrackerProps) {
+export default function InitiativeTracker({ encounterId, sessionId, currentMapId, monsterSyncMapId, onRoundChange, sessionStatus, variant = 'compact' }: InitiativeTrackerProps) {
+  const wide = variant === 'wide';
   const [entries, setEntries] = useState<InitiativeEntry[]>([]);
   const [turnIdx, setTurnIdx] = useState(0);
   const [round, setRound] = useState(1);
@@ -915,22 +921,33 @@ export default function InitiativeTracker({ encounterId, sessionId, currentMapId
   }
 
   return (
-    <section className="flex flex-col gap-2 rounded-xl border border-slate-800 bg-slate-950/80 p-3">
+    <section className={`flex flex-col rounded-xl border border-slate-800 bg-slate-950/80 ${wide ? 'gap-3 p-4' : 'gap-2 p-3'}`}>
       {/* Combat controls — always at top */}
-      <div className="flex items-center gap-1">
+      <div className={`flex items-center ${wide ? 'gap-2' : 'gap-1'}`}>
         <button
           type="button"
           onClick={prevTurn}
           disabled={!started || sortedEntries.length === 0}
-          className="rounded bg-slate-800 px-2 py-1 text-[11px] text-slate-100 hover:bg-slate-700 disabled:opacity-40"
+          className={wide
+            ? 'rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-700 disabled:opacity-40'
+            : 'rounded bg-slate-800 px-2 py-1 text-[11px] text-slate-100 hover:bg-slate-700 disabled:opacity-40'}
           title="Previous turn"
         >
-          ◀
+          {wide ? '◀ Prev' : '◀'}
         </button>
 
-        <div className="flex flex-1 items-center justify-center gap-1.5 rounded bg-slate-900 px-2 py-1">
+        <div className={`flex flex-1 items-center justify-center gap-1.5 rounded bg-slate-900 ${wide ? 'px-3 py-2' : 'px-2 py-1'}`}>
           <span className="text-[10px] uppercase tracking-wide text-slate-400">Round</span>
-          <span className="min-w-[1.5rem] text-center text-sm font-bold text-slate-100">{round}</span>
+          <span className={`min-w-[1.5rem] text-center font-bold text-slate-100 ${wide ? 'text-lg' : 'text-sm'}`}>{round}</span>
+          {wide && started && current && (
+            <span className="ml-3 hidden min-w-0 items-center gap-1.5 truncate text-xs sm:flex">
+              <span className="text-slate-400">Acting:</span>
+              <span className={`truncate font-semibold ${current.is_pc ? 'text-emerald-300' : 'text-amber-200'}`} title={current.name}>
+                {current.name}
+              </span>
+              <span className="shrink-0 font-mono text-[11px] text-slate-400">Init {current.init}</span>
+            </span>
+          )}
         </div>
 
         <button
@@ -938,23 +955,27 @@ export default function InitiativeTracker({ encounterId, sessionId, currentMapId
           onClick={() => (started ? nextTurn() : startCombat())}
           disabled={sortedEntries.length === 0 || (!started && sessionStatus != null && !SESSION_GATES.canUseCombat(sessionStatus))}
           title={!started && sessionStatus != null && !SESSION_GATES.canUseCombat(sessionStatus) ? 'Combat can only start when session is active' : undefined}
-          className="rounded bg-emerald-700 px-3 py-1 text-[11px] font-semibold text-emerald-50 hover:bg-emerald-600 disabled:opacity-40"
+          className={wide
+            ? 'rounded-lg bg-emerald-600 px-5 py-2 text-sm font-bold text-emerald-50 shadow-[0_0_16px_rgba(16,185,129,0.25)] hover:bg-emerald-500 disabled:opacity-40 disabled:shadow-none'
+            : 'rounded bg-emerald-700 px-3 py-1 text-[11px] font-semibold text-emerald-50 hover:bg-emerald-600 disabled:opacity-40'}
         >
-          {started ? 'Next ▶' : '⚔ Start'}
+          {started ? (wide ? 'Next Turn ▶' : 'Next ▶') : (wide ? '⚔ Start Combat' : '⚔ Start')}
         </button>
 
         <button
           type="button"
-          onClick={resetCombat}
-          className="rounded bg-slate-900 px-2 py-1 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+          onClick={() => { if (!wide || window.confirm('Reset combat? This clears the round counter and turn order state.')) resetCombat(); }}
+          className={wide
+            ? 'rounded-lg bg-slate-900 px-3 py-2 text-xs text-slate-400 ring-1 ring-slate-800 hover:bg-slate-800 hover:text-slate-200'
+            : 'rounded bg-slate-900 px-2 py-1 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-slate-200'}
           title="Reset combat"
         >
-          ↺
+          {wide ? '↺ Reset' : '↺'}
         </button>
       </div>
 
-      {/* Current turn banner */}
-      {started && current && (
+      {/* Current turn banner (compact only — wide inlines it in the control bar) */}
+      {!wide && started && current && (
         <div className="rounded-lg border border-emerald-600/60 bg-emerald-900/20 px-2 py-1.5 text-xs">
           <div className="flex items-center justify-between">
             <span className="font-semibold text-emerald-100">
@@ -971,7 +992,7 @@ export default function InitiativeTracker({ encounterId, sessionId, currentMapId
       )}
 
       {/* Combatant list */}
-      <ul className="flex flex-col gap-1 overflow-y-auto rounded-md bg-slate-950/60 p-1 text-xs" style={{ maxHeight: '14rem' }}>
+      <ul className={`flex flex-col overflow-y-auto rounded-md bg-slate-950/60 p-1 text-xs ${wide ? 'gap-1.5' : 'gap-1'}`} style={{ maxHeight: wide ? '56vh' : '14rem' }}>
         {loading && sortedEntries.length === 0 && (
           <li className="py-2 text-center text-[11px] text-slate-500">Loading…</li>
         )}
@@ -1003,24 +1024,43 @@ export default function InitiativeTracker({ encounterId, sessionId, currentMapId
                 setDragOverId(null);
               }}
               onDragEnd={() => { setDragId(null); setDragOverId(null); }}
-              className={`flex flex-col gap-1 rounded px-1.5 py-1.5 transition-colors ${
+              className={`flex flex-col rounded transition-colors ${wide ? 'gap-1 px-2.5 py-2' : 'gap-1 px-1.5 py-1.5'} ${
                 isActive
-                  ? 'bg-emerald-900/40 ring-1 ring-emerald-500/70'
+                  ? wide
+                    ? 'border-l-4 border-emerald-400 bg-emerald-900/30 ring-1 ring-emerald-500/60'
+                    : 'bg-emerald-900/40 ring-1 ring-emerald-500/70'
                   : dragOverId === e.id && dragId !== e.id
                   ? 'bg-slate-700/60 ring-1 ring-amber-500/50'
+                  : wide
+                  ? 'border-l-4 border-transparent bg-slate-900/60 hover:bg-slate-900'
                   : 'bg-slate-900/60'
               }`}
             >
               {/* Row 1: name + init + controls */}
               <div className="flex items-center justify-between gap-1">
-                <div className="flex min-w-0 items-center gap-1">
+                <div className={`flex min-w-0 items-center gap-1 ${wide ? 'min-w-[9rem] flex-1' : ''}`}>
                   <span className="shrink-0 cursor-grab text-[10px] text-slate-600 active:cursor-grabbing" title="Drag to reorder">⠿</span>
                   <div className="flex min-w-0 flex-col">
-                    <span
-                      title={e.name}
-                      className={`text-xs font-semibold leading-tight break-words ${e.is_pc ? 'text-emerald-200' : 'text-slate-100'}`}
-                    >
-                      {idx + 1}. {e.name}
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span
+                        title={e.name}
+                        className={`font-semibold leading-tight ${wide ? 'truncate text-sm' : 'break-words text-xs'} ${e.is_pc ? 'text-emerald-200' : 'text-slate-100'}`}
+                      >
+                        {idx + 1}. {e.name}
+                      </span>
+                      {wide && (
+                        <span
+                          className={`shrink-0 rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide ${e.is_pc ? 'bg-emerald-950/80 text-emerald-400 ring-1 ring-emerald-800/60' : 'bg-amber-950/80 text-amber-400 ring-1 ring-amber-800/60'}`}
+                          title={e.is_pc ? 'Player character' : 'Monster / NPC'}
+                        >
+                          {e.is_pc ? 'PC' : 'NPC'}
+                        </span>
+                      )}
+                      {wide && isActive && (
+                        <span className="shrink-0 rounded bg-emerald-500/90 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-emerald-950">
+                          Acting
+                        </span>
+                      )}
                     </span>
                     {/* Init: inline GM manual override. Unrolled PCs show "waiting". */}
                     <span className="flex items-center gap-1 text-[10px] text-slate-400">
@@ -1127,8 +1167,10 @@ export default function InitiativeTracker({ encounterId, sessionId, currentMapId
                   )}
                   <button
                     type="button"
-                    onClick={() => removeEntry(e.id)}
-                    className="rounded bg-slate-900 px-1 text-[10px] text-slate-500 hover:bg-slate-800 hover:text-red-300"
+                    onClick={() => { if (!wide || window.confirm(`Remove ${e.name} from initiative?`)) void removeEntry(e.id); }}
+                    aria-label={`Remove ${e.name} from initiative`}
+                    title="Remove from initiative"
+                    className={`rounded text-[10px] text-slate-500 hover:text-red-300 ${wide ? 'bg-red-950/30 px-1.5 py-0.5 ring-1 ring-red-900/40 hover:bg-red-950/60' : 'bg-slate-900 px-1 hover:bg-slate-800'}`}
                   >
                     ✕
                   </button>

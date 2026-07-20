@@ -99,6 +99,9 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
   const [tokensByChar, setTokensByChar] = useState<Record<string, TokenRow>>({})
   const [activeTab, setActiveTab] = useState<DashboardTab>('notes')
   const [liveDot, setLiveDot] = useState(false)
+  // Battle tab's right-hand contextual drawer: Combatant details or Dice Log.
+  const [drawerTab, setDrawerTab] = useState<'combatant' | 'dice'>('combatant')
+  const [partyOpen, setPartyOpen] = useState(true)
 
   // Dice log (Battle tab) — realtime feed of session_rolls.
   const { diceLog } = useSessionRolls({ sessionId, hasMounted: true })
@@ -440,118 +443,163 @@ export function DmDashboard({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="dossier min-h-screen text-slate-100">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b border-slate-800 bg-slate-900/60 px-4 py-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-bold">🎲 DM Dashboard</h1>
-          <span className="rounded-md bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300">{sessionTitle}</span>
-          <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold ${liveDot ? 'bg-emerald-950/60 text-emerald-300 ring-1 ring-emerald-700/40' : 'bg-slate-800 text-slate-400'}`}>
-            <span className={`inline-block h-1.5 w-1.5 rounded-full ${liveDot ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+      {/* Compact header — one 56px strip */}
+      <header className="flex h-14 items-center justify-between gap-3 border-b border-slate-800/80 bg-slate-900/60 px-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <h1 className="shrink-0 font-display text-base font-bold tracking-wide">🎲 DM Dashboard</h1>
+          <span className="truncate rounded-md bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300" title={sessionTitle}>
+            {sessionTitle}
+          </span>
+          <span className={`inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold ${liveDot ? 'bg-emerald-950/60 text-emerald-300 ring-1 ring-emerald-700/40' : 'bg-slate-800 text-slate-400'}`}>
+            <span className={`inline-block h-1.5 w-1.5 rounded-full ${liveDot ? 'bg-emerald-400 animate-pulse motion-reduce:animate-none' : 'bg-slate-500'}`} />
             {liveDot ? 'Live' : 'Offline'}
+          </span>
+          <span className="hidden shrink-0 text-[11px] text-slate-500 sm:inline">
+            {cards.length} player{cards.length === 1 ? '' : 's'}
           </span>
         </div>
         <a
           href={`/sessions/${sessionId}/table`}
-          className="rounded-md bg-slate-800 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700"
+          className="shrink-0 rounded-md bg-slate-800 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700"
         >
           ← Back to table
         </a>
       </header>
 
       {/* Body */}
-      <div className="grid gap-4 p-4 lg:grid-cols-[320px,1fr]">
-        {/* Left sidebar — party cards */}
-        <aside className="space-y-3">
+      <div className={`grid gap-4 p-4 ${partyOpen ? 'lg:grid-cols-[290px,minmax(0,1fr)]' : 'lg:grid-cols-[44px,minmax(0,1fr)]'}`}>
+        {/* Left sidebar — party cards (collapsible) */}
+        <aside className="min-w-0 space-y-2">
           <div className="flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-wide text-slate-400">Party</h2>
-            <span className="text-[10px] text-slate-500">{cards.length} player{cards.length === 1 ? '' : 's'}</span>
+            {partyOpen && <h2 className="text-xs font-bold uppercase tracking-wide text-slate-400">Party</h2>}
+            <button
+              type="button"
+              onClick={() => setPartyOpen((v) => !v)}
+              aria-expanded={partyOpen}
+              aria-label={partyOpen ? 'Collapse party sidebar' : 'Expand party sidebar'}
+              title={partyOpen ? 'Collapse party' : `Party (${cards.length})`}
+              className="rounded-md px-2 py-1 text-[11px] text-slate-500 hover:bg-slate-800 hover:text-slate-300"
+            >
+              {partyOpen ? '⟨' : `⟩ ${cards.length}`}
+            </button>
           </div>
-          {cards.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-xs text-slate-500">
-              No players have joined this session yet.
-            </div>
-          ) : (
-            cards.map((card) => (
-              <PartyCard
-                key={card.characterId}
-                data={card}
-                onAdjustHp={(delta) => adjustHp(card.characterId, delta)}
-                onSetHp={(next) => setHp(card.characterId, next)}
-                onAddCondition={(k) => addCondition(card.characterId, k)}
-                onRemoveCondition={(k) => removeCondition(card.characterId, k)}
-                onAdjustDeathSave={(kind, delta) => adjustDeathSave(card.characterId, kind, delta)}
-              />
-            ))
+          {partyOpen && (
+            cards.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-xs text-slate-500">
+                No players have joined this session yet.
+              </div>
+            ) : (
+              cards.map((card) => (
+                <PartyCard
+                  key={card.characterId}
+                  data={card}
+                  onAdjustHp={(delta) => adjustHp(card.characterId, delta)}
+                  onSetHp={(next) => setHp(card.characterId, next)}
+                  onAddCondition={(k) => addCondition(card.characterId, k)}
+                  onRemoveCondition={(k) => removeCondition(card.characterId, k)}
+                  onAdjustDeathSave={(kind, delta) => adjustDeathSave(card.characterId, kind, delta)}
+                />
+              ))
+            )
           )}
         </aside>
 
-        {/* Center panel — tab switcher (Waves 2 + 4) */}
-        <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-          <nav className="mb-3 flex flex-wrap gap-2">
-            {(['battle', 'notes', 'xp', 'private-rolls', 'recordings', 'party-slots'] as DashboardTab[]).map((t) => (
+        {/* Center panel — tab switcher */}
+        <section className="min-w-0 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+          <nav className="mb-3 flex gap-1 overflow-x-auto border-b border-slate-800/80 pb-0" aria-label="Dashboard sections">
+            {(
+              [
+                ['battle', '⚔', 'Battle'],
+                ['notes', '📝', 'Notes'],
+                ['xp', '✨', 'XP Award'],
+                ['private-rolls', '🎲', 'Private Rolls'],
+                ['recordings', '🎙', 'Recordings'],
+                ['party-slots', '✦', 'Party Slots'],
+              ] as Array<[DashboardTab, string, string]>
+            ).map(([t, icon, label]) => (
               <button
                 key={t}
                 onClick={() => setActiveTab(t)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                aria-current={activeTab === t ? 'page' : undefined}
+                className={`shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-semibold transition ${
                   activeTab === t
-                    ? 'bg-indigo-600/30 text-indigo-100 ring-1 ring-indigo-500/50'
-                    : 'bg-slate-900/60 text-slate-300 hover:bg-slate-900'
+                    ? 'border-amber-400 text-amber-200'
+                    : 'border-transparent text-slate-400 hover:border-slate-600 hover:text-slate-200'
                 }`}
               >
-                {t === 'battle'
-                  ? '⚔ Battle'
-                  : t === 'notes'
-                    ? '📝 Notes'
-                    : t === 'xp'
-                      ? '✨ XP Award'
-                      : t === 'private-rolls'
-                        ? '🎲 Private Rolls'
-                        : t === 'recordings'
-                          ? '🎙️ Recordings'
-                          : '✦ Party Slots'}
+                {icon} {label}
               </button>
             ))}
           </nav>
 
-          <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-6">
+          <div className={activeTab === 'battle' ? '' : 'rounded-lg border border-slate-800 bg-slate-950/40 p-6'}>
             {activeTab === 'battle' && (
-              <div className="grid gap-3 lg:grid-cols-3">
-                {/* Combat order */}
-                <div className="min-w-0 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/50 p-2">
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),360px]">
+                {/* Central initiative workspace */}
+                <div className="min-w-0">
                   <InitiativeTracker
                     encounterId={encounterId}
                     sessionId={sessionId}
                     currentMapId={null}
                     monsterSyncMapId={currentMapId}
                     sessionStatus={(sessionStatus ?? null) as SessionStatus | null}
+                    variant="wide"
                   />
                 </div>
-                {/* Active monster's turn */}
-                <div className="min-w-0 overflow-y-auto">
-                  <BattleConsole sessionId={sessionId} encounterId={encounterId} gmWallet={wallet} />
-                </div>
-                {/* Dice log */}
-                <div className="min-w-0 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/50 p-2">
-                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">🎲 Dice Log</p>
-                  {diceLog.length === 0 ? (
-                    <p className="px-1 py-3 text-center text-[11px] text-slate-500">No rolls yet.</p>
-                  ) : (
-                    <ul className="space-y-1">
-                      {diceLog.map((d) => (
-                        <li key={d.id} className="rounded-md border border-slate-800 bg-slate-900/60 px-2 py-1 text-[11px]">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="truncate text-slate-200">{d.label || d.formula}</span>
-                            <span className="shrink-0 font-bold text-amber-300">{d.result}</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-2 text-[10px] text-slate-500">
-                            <span className="truncate">{d.roller}{d.formula ? ` · ${d.formula}` : ''}</span>
-                            {d.outcome && <span className="shrink-0 text-slate-400">{d.outcome}</span>}
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+
+                {/* Contextual combat drawer — Combatant | Dice Log */}
+                <aside className="min-w-0 rounded-xl border border-slate-800 bg-slate-950/60">
+                  <div className="flex border-b border-slate-800" role="tablist" aria-label="Combat drawer">
+                    {(
+                      [
+                        ['combatant', 'Combatant'],
+                        ['dice', 'Dice Log'],
+                      ] as Array<['combatant' | 'dice', string]>
+                    ).map(([t, label]) => (
+                      <button
+                        key={t}
+                        role="tab"
+                        aria-selected={drawerTab === t}
+                        onClick={() => setDrawerTab(t)}
+                        className={`flex-1 border-b-2 px-3 py-2 text-xs font-semibold transition ${
+                          drawerTab === t
+                            ? 'border-amber-400 text-amber-200'
+                            : 'border-transparent text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="max-h-[62vh] overflow-y-auto p-2.5">
+                    {drawerTab === 'combatant' && (
+                      <BattleConsole sessionId={sessionId} encounterId={encounterId} gmWallet={wallet} />
+                    )}
+                    {drawerTab === 'dice' && (
+                      diceLog.length === 0 ? (
+                        <p className="px-1 py-8 text-center text-[11px] text-slate-500">
+                          No rolls yet — they&apos;ll appear here in real time.
+                        </p>
+                      ) : (
+                        <ul className="divide-y divide-slate-800/70">
+                          {diceLog.map((d) => (
+                            <li key={d.id} className="flex items-center gap-2 px-1 py-1.5 text-[11px]">
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-slate-200">{d.label || d.formula}</p>
+                                <p className="truncate text-[10px] text-slate-500">
+                                  {d.roller}{d.formula ? ` · ${d.formula}` : ''}
+                                  {d.outcome ? ` · ${d.outcome}` : ''}
+                                </p>
+                              </div>
+                              <span className="shrink-0 text-sm font-bold tabular-nums text-amber-300">{d.result}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )
+                    )}
+                  </div>
+                </aside>
               </div>
             )}
             {activeTab === 'notes' && (
