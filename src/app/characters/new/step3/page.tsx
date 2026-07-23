@@ -7,7 +7,7 @@ import type { CharacterDraft } from '../../../../types/characterDraft'
 import type { Abilities } from '../../../../types/character'
 import { BACKGROUNDS, type BackgroundKey } from '@/lib/backgrounds'
 import { asiSlotsForClassLevel } from '@/lib/rules'
-import { FEAT_LIST, getFeat } from '@/lib/feats'
+import { FEAT_LIST, getFeat, getFeatAbilityBonus } from '@/lib/feats'
 
 type AbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
 
@@ -384,6 +384,35 @@ export default function NewCharacterStep3Page() {
                               <p className="text-amber-300/80">Req: {feat.prerequisite}</p>
                             )}
                             <p>{feat.summary}</p>
+                          </div>
+                        )
+                      })()}
+                      {/* Half-feat ability bump — pick which ability gets the +1
+                          (Resilient, Athlete, Observant, …). Feats with a single
+                          fixed ability just show a note; the +1 is auto-applied. */}
+                      {choice.featName && (() => {
+                        const fb = getFeatAbilityBonus(choice.featName)
+                        if (!fb) return null
+                        if (fb.abilities.length === 1) {
+                          return (
+                            <p className="text-[11px] text-amber-300/90">
+                              Also grants +{fb.amount} {ABILITY_LABELS[fb.abilities[0]]}.
+                            </p>
+                          )
+                        }
+                        const picked = choice.featAbility ?? fb.abilities[0]
+                        return (
+                          <div className="space-y-1">
+                            <label className="text-[11px] text-slate-400">+{fb.amount} to which ability?</label>
+                            <select
+                              className="rounded-md border border-slate-700 bg-slate-900/80 px-2 py-1 text-xs focus:border-cyan-400 focus:outline-none"
+                              value={picked}
+                              onChange={(e) => setChoice(i, { featAbility: e.target.value as AbilityKey })}
+                            >
+                              {fb.abilities.map((k) => (
+                                <option key={k} value={k}>{ABILITY_LABELS[k]}</option>
+                              ))}
+                            </select>
                           </div>
                         )
                       })()}

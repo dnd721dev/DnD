@@ -99,6 +99,9 @@ export interface CharacterDraft {
     ability1?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
     ability2?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
     featName?: string
+    /** Half-feat: the ability chosen to receive the feat's +1 (e.g. Resilient,
+     *  Athlete). Only set when the picked feat allows a choice of ability. */
+    featAbility?: 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
   }>
 
   // Origin Feat (2024 rules: granted by background, not player-chosen)

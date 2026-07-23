@@ -19,6 +19,7 @@ import { getPack, getGear, type PackKey } from '@/lib/equipment'
 
 import type { ClassKey } from '@/lib/subclasses'
 import { calcMaxHp } from '@/lib/hitPoints'
+import { getFeatAbilityBonus } from '@/lib/feats'
 
 const DEFAULT_ABILITIES: Abilities = {
   str: 10,
@@ -307,7 +308,10 @@ export default function NewCharacterStep6Page() {
         abilitiesPayload[k] = ((abilitiesPayload[k] as number) ?? 10) + bonus
       }
 
-      // Apply ASI numeric bumps from step3 choices
+      // Apply ASI numeric bumps from step3 choices. Half-feats (Resilient,
+      // Athlete, Observant, …) also grant an ability bump; Resilient adds a
+      // saving-throw proficiency in the chosen ability — collected here.
+      const featSaveProfs = new Set<string>()
       for (const choice of draft.asiChoices ?? []) {
         if (choice.type === 'plus2' && choice.ability1) {
           const k = choice.ability1 as keyof Abilities
@@ -320,6 +324,17 @@ export default function NewCharacterStep6Page() {
           if (choice.ability2) {
             const k = choice.ability2 as keyof Abilities
             abilitiesPayload[k] = Math.min(20, (abilitiesPayload[k] ?? 10) + 1)
+          }
+        } else if (choice.type === 'feat' && choice.featName) {
+          const fb = getFeatAbilityBonus(choice.featName)
+          if (fb) {
+            // Single fixed ability → auto-apply; multiple → the player's pick
+            // (falls back to the first allowed ability, matching the UI default).
+            const target = (fb.abilities.length === 1
+              ? fb.abilities[0]
+              : (choice.featAbility ?? fb.abilities[0])) as keyof Abilities
+            abilitiesPayload[target] = Math.min(20, (abilitiesPayload[target] ?? 10) + fb.amount)
+            if (choice.featName === 'resilient') featSaveProfs.add(String(target))
           }
         }
       }
@@ -406,11 +421,13 @@ export default function NewCharacterStep6Page() {
         // core stats
         proficiency: proficiencyBonus,
         abilities: abilitiesPayload,
-        saving_throw_profs: draft.savingThrows
-          ? Object.entries(draft.savingThrows)
-              .filter(([, v]) => !!v)
-              .map(([k]) => k)
-          : [],
+        saving_throw_profs: Array.from(new Set([
+          ...(draft.savingThrows
+            ? Object.entries(draft.savingThrows).filter(([, v]) => !!v).map(([k]) => k)
+            : []),
+          // Resilient grants a saving-throw proficiency in the chosen ability.
+          ...featSaveProfs,
+        ])),
         skill_proficiencies: finalSkillProfs,
         passive_perception: passivePerception,
 
