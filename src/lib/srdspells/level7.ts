@@ -165,7 +165,7 @@ export const LEVEL7_SPELLS: SrdSpell[] = [
     saveAbility: 'dex',
     damage: '10d6',
     notes: 'Each creature in cone struck by random color: red (10d6 fire), orange (10d6 acid), yellow (10d6 lightning), green (death), blue (petrified), indigo (restrained→petrified), violet (blinded→teleported), or hit by two colors.',
-    classes: ['sorcerer', 'wizard'],
+    classes: ['bard', 'sorcerer', 'wizard'],
   },
   {
     name: 'Project Image',

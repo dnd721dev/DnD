@@ -194,7 +194,7 @@ export const LEVEL4_SPELLS: SrdSpell[] = [
     duration: '10 minutes',
     damage: '2d8',
     notes: 'Warm (cold resistance, 2d8 fire to melee attackers) or Chill (fire resistance, 2d8 cold to melee attackers) shield.',
-    classes: ['wizard'],
+    classes: ['druid', 'sorcerer', 'wizard'],
   },
   {
     name: 'Freedom of Movement',
@@ -205,7 +205,7 @@ export const LEVEL4_SPELLS: SrdSpell[] = [
     components: 'V, S, M',
     duration: '1 hour',
     notes: 'Ignore difficult terrain, and spells/effects cannot reduce speed or paralyze/restrain the creature.',
-    classes: ['bard', 'cleric', 'druid', 'ranger'],
+    classes: ['artificer', 'bard', 'cleric', 'druid', 'ranger'],
   },
   {
     name: 'Giant Insect',

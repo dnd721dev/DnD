@@ -561,14 +561,21 @@ export default function NewCharacterStep6Page() {
         bonds: draft.bonds ?? '',
         flaws: draft.flaws ?? '',
         notes: draft.notes ?? '',
+
+        // Rebuild snapshot — the raw build inputs, so a non-CAYA character can be
+        // reopened in the builder later with correct ability/ASI/background math.
+        // Stored under action_state so no schema change is needed; playing the
+        // character (conditions, death saves) merges into the same JSONB.
+        action_state: { build_draft: { ...draft, editingId: undefined, rebuildLegacy: undefined } },
       }
 
-      const { data, error: insertError } = await supabase
-        .from('characters')
-        .insert(payload)
-        .select()
-        .limit(1)
-        .maybeSingle()
+      // Rebuild path: UPDATE the existing character (owner RLS allows the
+      // player's own row); otherwise INSERT a brand-new one.
+      const editingId = draft.editingId
+      const query = editingId
+        ? supabase.from('characters').update(payload).eq('id', editingId).eq('wallet_address', walletLower)
+        : supabase.from('characters').insert(payload)
+      const { data, error: insertError } = await query.select().limit(1).maybeSingle()
 
       if (insertError) {
         console.error(insertError)
@@ -580,7 +587,8 @@ export default function NewCharacterStep6Page() {
       clearDraft(address?.toLowerCase())
       setSaving(false)
 
-      if (data?.id) router.push(`/characters/${data.id}`)
+      const savedId = data?.id ?? editingId
+      if (savedId) router.push(`/characters/${savedId}`)
       else router.push('/characters')
     } catch (err: any) {
       console.error(err)
@@ -631,9 +639,22 @@ export default function NewCharacterStep6Page() {
       <div className="space-y-1">
         <h2 className="text-lg md:text-xl font-semibold text-white">Step 6 — Personality & Final Save</h2>
         <p className="text-xs md:text-sm text-slate-400">
-          Lock in who your character is, then save them to your DND721 roster.
+          {draft.editingId
+            ? 'Review your changes, then save to update your existing character.'
+            : 'Lock in who your character is, then save them to your DND721 roster.'}
         </p>
       </div>
+
+      {draft.editingId && (
+        <div className="rounded-lg border border-amber-700/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">
+          ✎ Rebuilding an existing character — saving <span className="font-semibold">updates</span> it in place (no duplicate).
+          {draft.rebuildLegacy && (
+            <span className="mt-1 block text-amber-300/80">
+              This character predates edit support — double-check your ability scores in Step 3 and re-pick any feats before saving.
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-300">
         Inventory to save: <span className="font-semibold">{draft.inventoryItems?.length ?? 0}</span> items
@@ -736,7 +757,9 @@ export default function NewCharacterStep6Page() {
           className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 px-4 py-2 text-xs md:text-sm font-semibold text-slate-950 shadow-[0_0_18px_rgba(16,185,129,0.55)] transition disabled:opacity-50"
           disabled={saving}
         >
-          {saving ? 'Saving Character…' : 'Save Character to DND721'}
+          {saving
+            ? (draft.editingId ? 'Updating Character…' : 'Saving Character…')
+            : (draft.editingId ? 'Update Character' : 'Save Character to DND721')}
         </button>
       </div>
     </div>

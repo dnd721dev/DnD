@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { clearDraft, saveDraft } from '@/lib/characterDraft'
+import { hydrateRebuildDraft } from '@/lib/characterRebuild'
 
 import type { Abilities } from '../../../types/character'
 import type { CharacterSheetData } from '@/components/character-sheet/types'
@@ -1123,15 +1125,32 @@ export default function CharacterSheetPage() {
           ) : (
             <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs text-slate-400">
-                Free-Level character. Convert to CAYA to play in Come-As-You-Are games — this
-                resets the character to level 1 and <span className="font-semibold text-amber-300">cannot be undone</span>.
+                Free-Level character. You can reopen it in the builder to edit or rebuild it,
+                or convert to CAYA to play in Come-As-You-Are games (that resets to level 1 and{' '}
+                <span className="font-semibold text-amber-300">cannot be undone</span>).
               </p>
-              <button
-                onClick={() => { setConvertError(null); setShowConvertModal(true) }}
-                className="shrink-0 rounded-lg border border-amber-700/50 bg-amber-600/20 px-3 py-1.5 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-600/30"
-              >
-                Convert to CAYA
-              </button>
+              <div className="flex shrink-0 gap-2">
+                <button
+                  onClick={() => {
+                    if (!c) return
+                    // Seed the builder with this character's build inputs, then
+                    // reopen the forge. Saving there UPDATEs this same character.
+                    clearDraft()
+                    saveDraft(hydrateRebuildDraft(c))
+                    router.push('/characters/new/step1')
+                  }}
+                  className="rounded-lg border border-amber-700/50 bg-amber-600/20 px-3 py-1.5 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-600/30"
+                  title="Reopen this character in the builder to edit or rebuild it"
+                >
+                  ✎ Edit / Rebuild
+                </button>
+                <button
+                  onClick={() => { setConvertError(null); setShowConvertModal(true) }}
+                  className="rounded-lg border border-slate-600/60 bg-slate-800/60 px-3 py-1.5 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-700/60"
+                >
+                  Convert to CAYA
+                </button>
+              </div>
             </div>
           )}
         </div>

@@ -1,4 +1,14 @@
 export interface CharacterDraft {
+  /**
+   * When set, the builder is REBUILDING an existing (non-CAYA) character:
+   * the final save UPDATEs this character id instead of inserting a new row.
+   * Set by the "Edit / Rebuild" button on the character sheet.
+   */
+  editingId?: string
+  /** True when this rebuild draft came from a pre-edit-support character and
+   *  was reconstructed from columns (abilities may need re-verifying). */
+  rebuildLegacy?: boolean
+
   // NFT
   nft_contract?: string | null
   nft_token_id?: string | null

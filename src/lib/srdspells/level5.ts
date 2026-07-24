@@ -68,7 +68,7 @@ export const LEVEL5_SPELLS: SrdSpell[] = [
     components: 'V',
     duration: 'Up to 10 minutes (concentration)',
     notes: 'Allies in range have advantage on saves against spells and magical effects; on a success vs. save-for-half they take no damage.',
-    classes: ['paladin'],
+    classes: ['cleric', 'paladin'],
   },
   {
     name: 'Cloudkill',
