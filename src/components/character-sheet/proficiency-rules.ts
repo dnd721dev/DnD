@@ -28,6 +28,17 @@ export function isProficientWithMainWeapon(c: CharacterSheetData): boolean {
 
   if (martial.has(job)) return true
 
+  // Subclasses that grant proficiency with ALL martial weapons (in addition to
+  // whatever their base class gives). Covers the common gap where a War-domain
+  // cleric, Hexblade, Valor bard, etc. wields a martial weapon.
+  const MARTIAL_SUBCLASSES = new Set([
+    'cleric_war', 'cleric_tempest', 'cleric_nature', 'cleric_forge',
+    'warlock_hexblade', 'bard_valor', 'wizard_bladesinger',
+  ])
+  const sub  = norm((c as any).subclass ?? '')
+  const sub2 = norm((c as any).secondary_subclass ?? '')
+  if (MARTIAL_SUBCLASSES.has(sub) || MARTIAL_SUBCLASSES.has(sub2)) return true
+
   // Bard: simple + hand crossbow, longsword, rapier, shortsword
   if (job === 'bard') {
     if (weapon.category === 'simple') return true

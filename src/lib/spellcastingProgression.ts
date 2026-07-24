@@ -342,7 +342,8 @@ export const DOMAIN_SPELLS_BY_SUBCLASS: Partial<Record<string, Record<number, st
     1: ['Guiding Bolt', 'Shield of Faith'],
     2: ['Magic Weapon', 'Spiritual Weapon'],
     3: ["Crusader's Mantle", 'Spirit Guardians'],
-    4: ['Freedom of Movement', 'Stoneskin'],
+    // 2024 War Domain dropped Stoneskin; Fire Shield is the 4th-level pairing.
+    4: ['Fire Shield', 'Freedom of Movement'],
     5: ['Flame Strike', 'Hold Monster'],
   },
   cleric_nature: {
