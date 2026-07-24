@@ -14,6 +14,8 @@ export type Feat = {
   summary: string
   /** Broad category for filtering. */
   category: 'combat' | 'spellcasting' | 'skill' | 'utility' | 'defensive'
+  /** 2024 Epic Boon — only offered at character level 19+. */
+  isEpicBoon?: boolean
 }
 
 export const FEATS: Record<string, Feat> = {
@@ -339,12 +341,116 @@ export const FEATS: Record<string, Feat> = {
     summary: '+1 STR or DEX. Gain proficiency with 4 weapons of your choice.',
     category: 'combat',
   },
+
+  // ── Epic Boons (2024 PHB) — level 19+ only ─────────────────────────────────
+  // Each boon also grants +1 to one ability score of the player's choice.
+  boonCombatProwess: {
+    key: 'boonCombatProwess',
+    name: 'Boon of Combat Prowess',
+    prerequisite: 'Level 19+',
+    summary: '+1 to one ability. Once on each of your turns when you miss with an attack roll, you can choose to hit instead.',
+    category: 'combat',
+    isEpicBoon: true,
+  },
+  boonDimensionalTravel: {
+    key: 'boonDimensionalTravel',
+    name: 'Boon of Dimensional Travel',
+    prerequisite: 'Level 19+',
+    summary: '+1 to one ability. Immediately after taking the Attack or Magic action, you can teleport up to 30 ft. to a space you can see.',
+    category: 'utility',
+    isEpicBoon: true,
+  },
+  boonEnergyResistance: {
+    key: 'boonEnergyResistance',
+    name: 'Boon of Energy Resistance',
+    prerequisite: 'Level 19+',
+    summary: '+1 to one ability. Gain resistance to two damage types of your choice (changeable each long rest). Reaction: redirect qualifying energy damage aimed at you to a creature within 60 ft.',
+    category: 'defensive',
+    isEpicBoon: true,
+  },
+  boonFate: {
+    key: 'boonFate',
+    name: 'Boon of Fate',
+    prerequisite: 'Level 19+',
+    summary: '+1 to one ability. When a creature within 60 ft. succeeds or fails a d20 test, roll 2d4 and add or subtract it from the result. Recharges on initiative or a long rest.',
+    category: 'utility',
+    isEpicBoon: true,
+  },
+  boonFortitude: {
+    key: 'boonFortitude',
+    name: 'Boon of Fortitude',
+    prerequisite: 'Level 19+',
+    summary: '+1 to one ability. Your HP maximum increases by 40, and whenever you regain HP you regain an extra amount equal to your CON modifier (once per turn).',
+    category: 'defensive',
+    isEpicBoon: true,
+  },
+  boonIrresistibleOffense: {
+    key: 'boonIrresistibleOffense',
+    name: 'Boon of Irresistible Offense',
+    prerequisite: 'Level 19+',
+    summary: '+1 STR or DEX. Your bludgeoning, piercing, and slashing damage ignores resistance. On a natural 20 attack roll, deal extra damage equal to the raised ability score.',
+    category: 'combat',
+    isEpicBoon: true,
+  },
+  boonRecovery: {
+    key: 'boonRecovery',
+    name: 'Boon of Recovery',
+    prerequisite: 'Level 19+',
+    summary: '+1 to one ability. Once per long rest when you drop to 0 HP, drop to 1 HP instead. Bonus action: regain HP equal to half your HP maximum, once per long rest.',
+    category: 'defensive',
+    isEpicBoon: true,
+  },
+  boonSkill: {
+    key: 'boonSkill',
+    name: 'Boon of Skill',
+    prerequisite: 'Level 19+',
+    summary: '+1 to one ability. Gain proficiency in one skill, and once on each of your turns you can give yourself advantage on one ability check.',
+    category: 'skill',
+    isEpicBoon: true,
+  },
+  boonSpeed: {
+    key: 'boonSpeed',
+    name: 'Boon of Speed',
+    prerequisite: 'Level 19+',
+    summary: '+1 STR or DEX. Your speed increases by 30 ft., and you can take the Disengage action as a bonus action.',
+    category: 'combat',
+    isEpicBoon: true,
+  },
+  boonSpellRecall: {
+    key: 'boonSpellRecall',
+    name: 'Boon of Spell Recall',
+    prerequisite: 'Level 19+, spellcaster',
+    summary: '+1 to one ability. When you cast a spell with a level 1–4 slot, roll 1d4 — if the roll matches the slot level, the slot is not expended.',
+    category: 'spellcasting',
+    isEpicBoon: true,
+  },
+  boonNightSpirit: {
+    key: 'boonNightSpirit',
+    name: 'Boon of the Night Spirit',
+    prerequisite: 'Level 19+',
+    summary: '+1 to one ability. While in dim light or darkness: become invisible as a bonus action (ends when you act), and you have resistance to all damage except psychic and radiant.',
+    category: 'utility',
+    isEpicBoon: true,
+  },
+  boonTruesight: {
+    key: 'boonTruesight',
+    name: 'Boon of Truesight',
+    prerequisite: 'Level 19+',
+    summary: '+1 to one ability. You have Truesight out to 60 ft. — see in normal and magical darkness, see invisible creatures, and perceive the true form of shapechangers and illusions.',
+    category: 'utility',
+    isEpicBoon: true,
+  },
 }
 
 // Ordered list for UI dropdowns
 export const FEAT_LIST: Feat[] = Object.values(FEATS).sort((a, b) =>
   a.name.localeCompare(b.name)
 )
+
+/** Standard (non-boon) feats — what most pickers should offer below level 19. */
+export const STANDARD_FEAT_LIST: Feat[] = FEAT_LIST.filter((f) => !f.isEpicBoon)
+/** 2024 Epic Boons — offered only at character level 19+. */
+export const EPIC_BOON_LIST: Feat[] = FEAT_LIST.filter((f) => !!f.isEpicBoon)
 
 // Lists filtered by category
 export const COMBAT_FEATS = FEAT_LIST.filter((f) => f.category === 'combat')
@@ -377,6 +483,21 @@ export const FEAT_ABILITY_BONUS: Record<string, { amount: number; abilities: Abi
   resilient:        { amount: 1, abilities: ['str', 'dex', 'con', 'int', 'wis', 'cha'] },
   tavernBrawler:    { amount: 1, abilities: ['str', 'con'] },
   weaponMaster:     { amount: 1, abilities: ['str', 'dex'] },
+
+  // Epic Boons (2024): every boon grants +1 to one ability of the player's
+  // choice (Irresistible Offense and Speed are restricted to STR/DEX).
+  boonCombatProwess:     { amount: 1, abilities: ['str', 'dex', 'con', 'int', 'wis', 'cha'] },
+  boonDimensionalTravel: { amount: 1, abilities: ['str', 'dex', 'con', 'int', 'wis', 'cha'] },
+  boonEnergyResistance:  { amount: 1, abilities: ['str', 'dex', 'con', 'int', 'wis', 'cha'] },
+  boonFate:              { amount: 1, abilities: ['str', 'dex', 'con', 'int', 'wis', 'cha'] },
+  boonFortitude:         { amount: 1, abilities: ['str', 'dex', 'con', 'int', 'wis', 'cha'] },
+  boonIrresistibleOffense: { amount: 1, abilities: ['str', 'dex'] },
+  boonRecovery:          { amount: 1, abilities: ['str', 'dex', 'con', 'int', 'wis', 'cha'] },
+  boonSkill:             { amount: 1, abilities: ['str', 'dex', 'con', 'int', 'wis', 'cha'] },
+  boonSpeed:             { amount: 1, abilities: ['str', 'dex'] },
+  boonSpellRecall:       { amount: 1, abilities: ['str', 'dex', 'con', 'int', 'wis', 'cha'] },
+  boonNightSpirit:       { amount: 1, abilities: ['str', 'dex', 'con', 'int', 'wis', 'cha'] },
+  boonTruesight:         { amount: 1, abilities: ['str', 'dex', 'con', 'int', 'wis', 'cha'] },
 }
 
 export function getFeatAbilityBonus(key: string) {

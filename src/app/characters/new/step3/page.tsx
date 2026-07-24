@@ -7,7 +7,7 @@ import type { CharacterDraft } from '../../../../types/characterDraft'
 import type { Abilities } from '../../../../types/character'
 import { BACKGROUNDS, type BackgroundKey } from '@/lib/backgrounds'
 import { asiSlotsForClassLevel } from '@/lib/rules'
-import { FEAT_LIST, getFeat, getFeatAbilityBonus } from '@/lib/feats'
+import { STANDARD_FEAT_LIST, EPIC_BOON_LIST, getFeat, getFeatAbilityBonus } from '@/lib/feats'
 
 type AbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
 
@@ -367,12 +367,20 @@ export default function NewCharacterStep3Page() {
                           onChange={(e) => setChoice(i, { featName: e.target.value || undefined })}
                         >
                           <option value="">— Choose a feat —</option>
-                          {FEAT_LIST.map((feat) => (
+                          {STANDARD_FEAT_LIST.map((feat) => (
                             <option key={feat.key} value={feat.key}>
                               {feat.name}
                               {feat.prerequisite ? ` (req: ${feat.prerequisite})` : ''}
                             </option>
                           ))}
+                          {/* 2024 Epic Boons unlock at character level 19 */}
+                          {((currentDraft.level ?? 1) + (currentDraft.secondaryLevel ?? 0)) >= 19 && (
+                            <optgroup label="⭐ Epic Boons (level 19+)">
+                              {EPIC_BOON_LIST.map((feat) => (
+                                <option key={feat.key} value={feat.key}>{feat.name}</option>
+                              ))}
+                            </optgroup>
+                          )}
                         </select>
                       </div>
                       {choice.featName && (() => {

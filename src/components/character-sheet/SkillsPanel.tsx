@@ -32,10 +32,13 @@ export function SkillsPanel({
             <div
               key={s.key}
               className="flex items-center justify-between rounded-md bg-slate-900/80 px-2 py-1"
+              title={info.halfSource ? `Half proficiency from ${info.halfSource}` : undefined}
             >
               <div className="flex items-center gap-1">
                 {info.mark && (
-                  <span className="text-[10px] text-emerald-400">{info.mark}</span>
+                  <span className={`text-[10px] ${info.halfSource ? 'text-sky-400' : 'text-emerald-400'}`}>
+                    {info.mark}
+                  </span>
                 )}
                 <span className="text-[11px] text-slate-100">{info.label}</span>
                 <span className="text-[9px] text-slate-500">
@@ -47,6 +50,13 @@ export function SkillsPanel({
           )
         })}
       </div>
+
+      {/* Legend — proficiency tiers */}
+      <p className="mt-2 text-[9px] text-slate-500">
+        <span className="text-emerald-400">•</span> proficient ·{' '}
+        <span className="text-emerald-400">••</span> expertise ·{' '}
+        <span className="text-sky-400">◐</span> half proficiency (Jack of All Trades / Remarkable Athlete)
+      </p>
     </section>
   )
 }

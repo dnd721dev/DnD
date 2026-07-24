@@ -25,6 +25,44 @@ export const ALL_SKILLS: SkillDef[] = [
   { key: 'survival', label: 'Survival', ability: 'wis' },
 ]
 
+function normJob(raw: unknown): string {
+  return String(raw ?? '').trim().toLowerCase()
+}
+
+/**
+ * Half-proficiency features, applied ONLY to skills with no proficiency:
+ *   • Jack of All Trades — Bard 2+: +⌊prof/2⌋ to every non-proficient check.
+ *   • Remarkable Athlete — Champion Fighter 7+: +⌈prof/2⌉ to non-proficient
+ *     STR/DEX/CON checks.
+ * Returns the larger applicable half bonus (they don't stack).
+ */
+function halfProficiencyBonus(
+  c: CharacterSheetData | null,
+  ability: keyof Abilities,
+  profBonus: number,
+): { bonus: number; source: string } | null {
+  if (!c) return null
+  const job = normJob((c as any).main_job)
+  const job2 = normJob((c as any).secondary_class)
+  const level = Math.max(1, Number((c as any).level ?? 1))
+  const level2 = Math.max(0, Number((c as any).secondary_level ?? 0))
+  const sub = normJob((c as any).subclass)
+  const sub2 = normJob((c as any).secondary_subclass)
+
+  const isBard2 = (job === 'bard' && level >= 2) || (job2 === 'bard' && level2 >= 2)
+  const champLevel = job === 'fighter' ? level : job2 === 'fighter' ? level2 : 0
+  const isChampion7 =
+    champLevel >= 7 && (sub === 'fighter_champion' || sub2 === 'fighter_champion')
+  const physical = ability === 'str' || ability === 'dex' || ability === 'con'
+
+  const jack = isBard2 ? Math.floor(profBonus / 2) : 0
+  const athlete = isChampion7 && physical ? Math.ceil(profBonus / 2) : 0
+  if (jack === 0 && athlete === 0) return null
+  return athlete >= jack
+    ? { bonus: athlete || jack, source: athlete >= jack && athlete > 0 ? 'Remarkable Athlete' : 'Jack of All Trades' }
+    : { bonus: jack, source: 'Jack of All Trades' }
+}
+
 export function skillDisplay(
   key: string,
   c: CharacterSheetData | null,
@@ -32,7 +70,7 @@ export function skillDisplay(
   profBonus: number,
 ) {
   const def = ALL_SKILLS.find((s) => s.key === key)
-  if (!def) return { label: key, total: 0, mark: '', ability: undefined as any }
+  if (!def) return { label: key, total: 0, mark: '', ability: undefined as any, halfSource: null as string | null }
 
   const profsRaw = c?.skill_proficiencies ?? {}
   const profState = profsRaw[key] ?? 'none'
@@ -40,6 +78,7 @@ export function skillDisplay(
   const base = abilityMod(abilities[def.ability])
   let bonus = 0
   let mark = ''
+  let halfSource: string | null = null
 
   if (profState === 'proficient') {
     bonus = profBonus
@@ -47,6 +86,14 @@ export function skillDisplay(
   } else if (profState === 'expertise') {
     bonus = profBonus * 2
     mark = '••'
+  } else {
+    // No proficiency — check for half-proficiency features.
+    const half = halfProficiencyBonus(c, def.ability, profBonus)
+    if (half) {
+      bonus = half.bonus
+      mark = '◐'
+      halfSource = half.source
+    }
   }
 
   return {
@@ -54,5 +101,6 @@ export function skillDisplay(
     ability: def.ability,
     total: base + bonus,
     mark,
+    halfSource,
   }
 }

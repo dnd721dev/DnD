@@ -840,7 +840,7 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
       // Session + GM check
       const { data: session } = await supabase
         .from('sessions')
-        .select('title, gm_wallet, current_map_id')
+        .select('title, gm_wallet, current_map_id, campaign_id')
         .eq('id', sessionId)
         .maybeSingle()
 
@@ -887,22 +887,34 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
         setTokens(visible as Token[])
       }
 
-      // My character — preferred path is via session_characters which is
-      // populated when a player formally joins the session via the table.
-      // Fallback chain when that row is missing:
-      //   1. token at this encounter whose owner_wallet matches → tokens.character_id
-      //   2. any character owned by the wallet (most recent updated, CAYA preferred)
-      // This makes the dashboard usable for players who placed a token but
-      // never joined via the table UI, and for solo testing.
+      // My character — resolve for THIS session, mirroring the table's logic,
+      // so the dashboard always shows the character the player is actually
+      // playing right now (not their most recently touched character):
+      //   1. session_players.character_id — the session-scoped binding written
+      //      by the join/invite flow.
+      //   2. campaign_character_selections via the session's campaign — the
+      //      "Campaign Character" pick the live table locks players to.
+      //   3. token at this encounter whose owner_wallet matches.
+      //   4. any character owned by the wallet (solo-testing fallback only).
       let charId: string | null = null
 
-      const { data: link } = await supabase
-        .from('session_characters')
+      const { data: spRow } = await supabase
+        .from('session_players')
         .select('character_id')
         .eq('session_id', sessionId)
         .eq('wallet_address', wallet)
         .maybeSingle()
-      charId = (link as any)?.character_id ?? null
+      charId = (spRow as any)?.character_id ?? null
+
+      if (!charId && (session as any).campaign_id) {
+        const { data: sel } = await supabase
+          .from('campaign_character_selections')
+          .select('character_id')
+          .eq('campaign_id', (session as any).campaign_id)
+          .eq('wallet_address', wallet)
+          .maybeSingle()
+        charId = (sel as any)?.character_id ?? null
+      }
 
       if (!charId && eid) {
         const { data: tokForChar } = await supabase

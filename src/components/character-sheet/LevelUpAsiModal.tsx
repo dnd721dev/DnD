@@ -9,7 +9,7 @@
 
 import { useState } from 'react'
 import type { CharacterSheetData } from './types'
-import { FEAT_LIST, getFeat, getFeatAbilityBonus } from '@/lib/feats'
+import { STANDARD_FEAT_LIST, EPIC_BOON_LIST, getFeat, getFeatAbilityBonus } from '@/lib/feats'
 
 type AbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
 const ABILITY_KEYS: AbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha']
@@ -179,11 +179,19 @@ export function LevelUpAsiModal({
               onChange={(e) => setFeatKey(e.target.value)}
             >
               <option value="">— Choose a feat —</option>
-              {FEAT_LIST.map((feat) => (
+              {STANDARD_FEAT_LIST.map((feat) => (
                 <option key={feat.key} value={feat.key}>
                   {feat.name}{feat.prerequisite ? ` (req: ${feat.prerequisite})` : ''}
                 </option>
               ))}
+              {/* 2024 Epic Boons unlock at character level 19 */}
+              {atLevel >= 19 && (
+                <optgroup label="⭐ Epic Boons (level 19+)">
+                  {EPIC_BOON_LIST.map((feat) => (
+                    <option key={feat.key} value={feat.key}>{feat.name}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </div>
           {featKey && (() => {
