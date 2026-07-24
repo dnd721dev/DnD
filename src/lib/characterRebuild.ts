@@ -30,6 +30,16 @@ export function hydrateRebuildDraft(row: any): CharacterDraft {
       // the snapshot was taken.
       name: row?.name ?? snapshot.name,
       avatar_url: row?.avatar_url ?? snapshot.avatar_url ?? null,
+      // LIVE state wins over the original build snapshot for anything the
+      // character can gain AFTER building — shop purchases, loot, spells
+      // learned in play. Otherwise a rebuild would silently roll these back.
+      inventoryItems: row?.inventory_items ?? snapshot.inventoryItems ?? [],
+      equipmentItems: row?.equipment_items ?? snapshot.equipmentItems ?? [],
+      knownSpells: row?.spells_known ?? snapshot.knownSpells ?? [],
+      preparedSpells: row?.spells_prepared ?? snapshot.preparedSpells ?? [],
+      wildcardSpells: row?.wildcard_spells ?? snapshot.wildcardSpells ?? [],
+      mysticArcanum: row?.mystic_arcanum ?? snapshot.mysticArcanum ?? {},
+      warlockInvocations: row?.warlock_invocations ?? snapshot.warlockInvocations ?? [],
     }
   }
 

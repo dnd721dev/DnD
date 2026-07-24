@@ -352,6 +352,14 @@ export const FEATS: Record<string, Feat> = {
     category: 'combat',
     isEpicBoon: true,
   },
+  boonDesperateResilience: {
+    key: 'boonDesperateResilience',
+    name: 'Boon of Desperate Resilience',
+    prerequisite: 'Level 19+',
+    summary: '+1 STR or CON. Defense of Body and Mind: while Bloodied (at or below half your HP maximum), you have resistance to all damage types except Force.',
+    category: 'defensive',
+    isEpicBoon: true,
+  },
   boonDimensionalTravel: {
     key: 'boonDimensionalTravel',
     name: 'Boon of Dimensional Travel',
@@ -487,6 +495,7 @@ export const FEAT_ABILITY_BONUS: Record<string, { amount: number; abilities: Abi
   // Epic Boons (2024): every boon grants +1 to one ability of the player's
   // choice (Irresistible Offense and Speed are restricted to STR/DEX).
   boonCombatProwess:     { amount: 1, abilities: ['str', 'dex', 'con', 'int', 'wis', 'cha'] },
+  boonDesperateResilience: { amount: 1, abilities: ['str', 'con'] },
   boonDimensionalTravel: { amount: 1, abilities: ['str', 'dex', 'con', 'int', 'wis', 'cha'] },
   boonEnergyResistance:  { amount: 1, abilities: ['str', 'dex', 'con', 'int', 'wis', 'cha'] },
   boonFate:              { amount: 1, abilities: ['str', 'dex', 'con', 'int', 'wis', 'cha'] },

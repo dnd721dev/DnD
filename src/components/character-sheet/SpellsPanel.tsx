@@ -286,7 +286,10 @@ export function SpellsPanel({
     if (typeof window === 'undefined') return null
     try { return JSON.parse(window.localStorage.getItem(filterStorageKey) ?? 'null') } catch { return null }
   })()
-  const [spellSearch, setSpellSearch] = useState<string>(persistedFilters?.spellSearch ?? '')
+  // Search text deliberately NOT restored from localStorage — a stale search
+  // from a previous visit silently filtered the list and looked like a broken
+  // search box. Filters persist; the search always starts fresh.
+  const [spellSearch, setSpellSearch] = useState<string>('')
   const [spellLevelFilter, setSpellLevelFilter] = useState<number | 'all'>(persistedFilters?.spellLevelFilter ?? 'all')
   const [onlyMyClassSpells, setOnlyMyClassSpells] = useState<boolean>(persistedFilters?.onlyMyClassSpells ?? false)
   // ── new filter axes (Wave C) ────────────────────────────────────────────────
@@ -457,8 +460,14 @@ export function SpellsPanel({
       spells = spells.filter((s) => s.level === spellLevelFilter)
     }
     if (spellSearch.trim()) {
-      const q = spellSearch.toLowerCase()
-      spells = spells.filter((s) => s.name.toLowerCase().includes(q) || (s.fullDescription ?? '').toLowerCase().includes(q))
+      // Match against the spell NAME and school only. Matching full rules text
+      // made searches look broken — "shield" returned every spell whose
+      // description merely mentioned a shield. Trim so trailing spaces from
+      // mobile keyboards don't silently kill matches.
+      const q = spellSearch.trim().toLowerCase()
+      spells = spells.filter((s) =>
+        s.name.toLowerCase().includes(q) ||
+        String((s as any).school ?? '').toLowerCase().includes(q))
     }
     // Wave C: new filter axes — concentration / ritual / damage type / source / known / prepared.
     if (filterConcentration) spells = spells.filter((s) => isConcentration(s))
@@ -479,14 +488,14 @@ export function SpellsPanel({
     if (typeof window === 'undefined') return
     try {
       window.localStorage.setItem(filterStorageKey, JSON.stringify({
-        spellSearch, spellLevelFilter, onlyMyClassSpells,
+        spellLevelFilter, onlyMyClassSpells,
         filterConcentration, filterRitual, filterDamageType, filterSource,
         filterOnlyPrepared, filterOnlyKnown,
       }))
     } catch { /* quota — ignore */ }
   }, [
     filterStorageKey,
-    spellSearch, spellLevelFilter, onlyMyClassSpells,
+    spellLevelFilter, onlyMyClassSpells,
     filterConcentration, filterRitual, filterDamageType, filterSource,
     filterOnlyPrepared, filterOnlyKnown,
   ])
@@ -1017,16 +1026,17 @@ export function SpellsPanel({
                 <option value="srd-5.2">SRD 5.2 (2024 PHB)</option>
                 <option value="class-gap">Class-gap fills</option>
               </select>
-              {(filterConcentration || filterRitual || filterDamageType !== 'all' || filterSource !== 'all' || filterOnlyPrepared || filterOnlyKnown) && (
+              {(spellSearch.trim() || spellLevelFilter !== 'all' || filterConcentration || filterRitual || filterDamageType !== 'all' || filterSource !== 'all' || filterOnlyPrepared || filterOnlyKnown) && (
                 <button
                   type="button"
                   onClick={() => {
-                    setFilterConcentration(false); setFilterRitual(false)
+                    setSpellSearch('');             setSpellLevelFilter('all')
+                    setFilterConcentration(false);  setFilterRitual(false)
                     setFilterDamageType('all');     setFilterSource('all')
                     setFilterOnlyPrepared(false);   setFilterOnlyKnown(false)
                   }}
                   className="rounded-md border border-slate-700 bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-700"
-                  title="Clear filters"
+                  title="Clear search and all filters"
                 >
                   ✕ Clear
                 </button>
@@ -1034,6 +1044,7 @@ export function SpellsPanel({
             </div>
 
             <div className="text-[10px] text-slate-500">
+              <span className="text-slate-400">{filteredSpells.length}</span> spell{filteredSpells.length === 1 ? '' : 's'} shown ·{' '}
               Click a spell to view details and mark Known / Prepared.
               {isPreparedCaster ? ' (This class prepares spells.)' : ''}
             </div>

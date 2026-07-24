@@ -281,6 +281,19 @@ export default function NewCharacterStep1Page() {
     const nft = nfts[index]
     if (!nft) return
 
+    // Rebuild flow: re-clicking the NFT the character is ALREADY linked to
+    // must not wipe the existing build (name/class/race/abilities). Only a
+    // genuinely different NFT triggers the metadata re-derive.
+    const sameNft =
+      current.editingId &&
+      String(current.nft_contract ?? '').toLowerCase() === String(nft.contract ?? '').toLowerCase() &&
+      String(current.nft_token_id ?? '') === String(nft.tokenId ?? '')
+    if (sameNft) {
+      setDraft(current)
+      saveDraft(current)
+      return
+    }
+
     let updated: CharacterDraft = {
       ...current,
       nft_contract: nft.contract,

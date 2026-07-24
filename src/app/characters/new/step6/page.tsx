@@ -572,6 +572,22 @@ export default function NewCharacterStep6Page() {
       // Rebuild path: UPDATE the existing character (owner RLS allows the
       // player's own row); otherwise INSERT a brand-new one.
       const editingId = draft.editingId
+      if (editingId) {
+        // Merge — don't clobber — live play state:
+        //  • action_state carries conditions, death saves, pending level-up
+        //    choices, per-turn flags. Only the build_draft key is replaced.
+        //  • experience_points must survive a rebuild (never reset XP).
+        const { data: existingRow } = await supabase
+          .from('characters')
+          .select('action_state, experience_points')
+          .eq('id', editingId)
+          .maybeSingle()
+        payload.action_state = {
+          ...(((existingRow as any)?.action_state ?? {}) as Record<string, any>),
+          build_draft: (payload.action_state as any).build_draft,
+        }
+        delete payload.experience_points
+      }
       const query = editingId
         ? supabase.from('characters').update(payload).eq('id', editingId).eq('wallet_address', walletLower)
         : supabase.from('characters').insert(payload)
