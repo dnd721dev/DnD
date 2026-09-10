@@ -182,6 +182,27 @@ export default function CharacterSheetPage() {
           }
         }
       )
+      // ALSO listen to the character row itself. When a character has no token
+      // placed (or the GM's HP change falls back to a direct characters.update
+      // rather than the token RPC), the token subscription above never fires —
+      // that's why GM HP changes "sometimes" didn't reach the sheet. Mirroring
+      // hit_points_current + temp_hp from the character row covers that path.
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'characters', filter: `id=eq.${id}` },
+        (payload) => {
+          const row: any = (payload as any).new
+          if (!row) return
+          setC((prev) => {
+            if (!prev) return prev
+            const nextHp = typeof row.hit_points_current === 'number' ? row.hit_points_current : prev.hit_points_current
+            const nextTemp = typeof row.temp_hp === 'number' ? row.temp_hp : (prev as any).temp_hp
+            if (prev.hit_points_current === nextHp && (prev as any).temp_hp === nextTemp) return prev
+            return { ...prev, hit_points_current: nextHp, temp_hp: nextTemp }
+          })
+          if (typeof row.temp_hp === 'number') setTempHpLocal(row.temp_hp)
+        }
+      )
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [id])
@@ -534,8 +555,27 @@ export default function CharacterSheetPage() {
     setActionState((prev) => clearPerRestFlags(prev, 'short'))
   }
 
-  function onLongRest() {
+  async function onLongRest() {
     if (!d) return
+
+    // ── Restore HP to full (the most visible part of a rest). Route through the
+    // same token-synced write onAdjustHp uses so the map + DM panel update too.
+    if (c?.id) {
+      const current = Number(c.hit_points_current ?? d.hpMax)
+      const healBy = Math.max(0, d.hpMax - current)
+      setTempHpLocal(0)
+      setC((prev) => (prev ? { ...prev, hit_points_current: d.hpMax, temp_hp: 0 } : prev))
+      try {
+        await supabase.from('characters').update({ temp_hp: 0 }).eq('id', c.id)
+        if (healBy > 0) {
+          await onAdjustHp(healBy)
+        } else {
+          await supabase.from('characters').update({ hit_points_current: d.hpMax }).eq('id', c.id)
+        }
+      } catch (e) {
+        console.error('[char-sheet] onLongRest HP restore failed', e)
+      }
+    }
 
     // refill resources that recharge on short or long rest + restore all spell slots
     setResourceValues((prev) => {

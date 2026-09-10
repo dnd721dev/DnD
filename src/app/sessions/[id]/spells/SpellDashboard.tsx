@@ -28,6 +28,8 @@ import {
   expendMysticArcanum,
 } from '@/lib/spellSlots'
 import { getDomainSpells, getMysticArcanumLevels } from '@/lib/spellcastingProgression'
+import { getSummonForSpell } from '@/lib/summonSpells'
+import { getSpellAura } from '@/lib/auraSpells'
 import { hasRitualCasting } from '@/lib/invocations'
 import { PartySlotsPanel } from '@/components/spells/PartySlotsPanel'
 
@@ -1027,6 +1029,60 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
     [myChar?.spells_prepared, myChar?.spells_known],
   )
 
+  // Summon spells the caster has available, resolved to their creature stat
+  // block (Find Steed → Otherworldly Steed, Animate Objects → Animated Object,
+  // etc.). Drives the "Summon" buttons that spawn the token on the map.
+  const summonables = useMemo(() => {
+    const out: { spellName: string; creature: ReturnType<typeof getSummonForSpell> }[] = []
+    for (const name of preparedNames) {
+      const creature = getSummonForSpell(name)
+      if (creature) out.push({ spellName: name, creature })
+    }
+    return out
+  }, [preparedNames])
+
+  const [summonBusy, setSummonBusy] = useState<string | null>(null)
+
+  const handleSummon = useCallback(async (spellName: string) => {
+    const creature = getSummonForSpell(spellName)
+    if (!creature || !myChar || !encounterId || !wallet) return
+    setSummonBusy(spellName)
+    try {
+      // Anchor the summon next to the caster's own token so it lands where the
+      // player is. Fall back to a default spot if the caster isn't placed.
+      const mine = tokens.find((t) => t.type === 'pc' && String(t.owner_wallet ?? '').toLowerCase() === wallet)
+      const x = (mine?.x ?? 5) + 1
+      const y = mine?.y ?? 5
+      const mapId = (mine as any)?.map_id ?? null
+      const { error } = await supabase.from('tokens').insert({
+        encounter_id: encounterId,
+        type: 'monster',
+        label: creature.name,
+        name: creature.name,
+        monster_id: creature.monsterId ?? null,
+        x,
+        y,
+        map_id: mapId,
+        owner_wallet: wallet,        // caster owns the summon (RLS + control)
+        hp: creature.hitPoints,        // null for conjured effects (Spiritual Weapon)
+        current_hp: creature.hitPoints,
+        ac: creature.armorClass,
+      })
+      if (error) { console.error('[summon] insert failed', error); return }
+      await supabase.from('session_rolls').insert({
+        session_id: sessionId,
+        roll_type: 'custom',
+        label: `✨ Summoned ${creature.name}`,
+        formula: '—',
+        result_total: 0,
+        roller_name: myChar.name,
+        roller_wallet: wallet,
+      })
+    } finally {
+      setSummonBusy(null)
+    }
+  }, [myChar, encounterId, wallet, tokens, sessionId])
+
   // Magic audit section C.3: tag domain/oath/circle spells in the dashboard
   // so players can see at a glance which spells are "always prepared" and
   // don't need to be re-prepared after a long rest.
@@ -1266,7 +1322,23 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
       .update({ action_state: next })
       .eq('id', myChar.id)
     setMyChar(prev => prev ? { ...prev, action_state: next } : prev)
-  }, [myChar])
+
+    // Stamp/clear an emanation aura on the caster's token so a radius ring is
+    // drawn on the map that follows the caster and clears when concentration
+    // ends (Spirit Guardians, Circle of Power, etc.). Guarded so it's harmless
+    // if migration 064 (token aura columns) hasn't been applied yet.
+    try {
+      const mine = tokens.find((t) => t.type === 'pc' && String(t.owner_wallet ?? '').toLowerCase() === wallet)
+      if (mine) {
+        const aura = spellName ? getSpellAura(spellName) : null
+        await supabase.from('tokens').update({
+          aura_radius_ft: aura?.radiusFt ?? null,
+          aura_label: aura?.label ?? null,
+          aura_color: aura?.color ?? null,
+        }).eq('id', mine.id)
+      }
+    } catch { /* aura is cosmetic — never block concentration on it */ }
+  }, [myChar, tokens, wallet])
 
   /**
    * Called whenever the player initiates a cast (any of attack/save/damage/heal/
@@ -1307,6 +1379,13 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
     rollType: 'attack' | 'save' | 'damage' | 'heal',
   ) => {
     if (!myChar) return
+    // A concentration spell already running is an ONGOING effect, not a new
+    // cast — re-rolling its save/damage each round must NOT expend another slot
+    // (the Spirit Guardians "keeps eating slots" bug). Capture this BEFORE the
+    // confirmation call sets concentration for a fresh cast.
+    const isConcSpell = spell.duration.toLowerCase().includes('concentration')
+    const isOngoingConcentration = isConcSpell && concentratingOn === spell.name
+
     // Wave 5: concentration auto-drop check. Skip for damage-only rolls so the
     // caster can iterate damage without re-rolling concentration prompts.
     if (rollType !== 'damage' && !requireConcentrationConfirmation(spell)) return
@@ -1389,12 +1468,14 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
       })
     }
 
-    // Expend slot on attack/save/heal rolls (not on free damage-only rolls)
-    if ((rollType === 'attack' || rollType === 'save' || rollType === 'heal') && spell.level > 0) {
+    // Expend slot on attack/save/heal rolls (not on free damage-only rolls),
+    // and NOT when this is a subsequent round of an already-running
+    // concentration spell (Spirit Guardians, Moonbeam, etc.).
+    if ((rollType === 'attack' || rollType === 'save' || rollType === 'heal') && spell.level > 0 && !isOngoingConcentration) {
       const newSlots = await expendSlot(supabase, myChar.id, slotLevel)
       if (newSlots) setSlots(newSlots)
     }
-  }, [myChar, sessionId, wallet, requireConcentrationConfirmation, getSpellStats, hasAgonizingBlast, chaMod])
+  }, [myChar, sessionId, wallet, requireConcentrationConfirmation, getSpellStats, hasAgonizingBlast, chaMod, concentratingOn])
 
   // Cast a pure support/buff spell (Guidance, Shield, Shield of Faith, Bless, …):
   // no damage/heal roll — log the cast and spend a slot (cantrips are free).
@@ -1835,6 +1916,28 @@ export function SpellDashboard({ sessionId }: { sessionId: string }) {
           {!myChar && !isGm && (
             <div className="text-[11px] text-slate-500 italic">
               No character linked to this session.
+            </div>
+          )}
+
+          {/* Summon spells — spawn the conjured creature's token on the map. */}
+          {summonables.length > 0 && (
+            <div className="rounded border border-violet-800/40 bg-violet-950/20 px-2 py-1.5">
+              <p className="mb-1 text-[10px] uppercase tracking-wide text-violet-400">✨ Summons</p>
+              <div className="flex flex-wrap gap-1">
+                {summonables.map(({ spellName, creature }) => (
+                  <button
+                    key={spellName}
+                    type="button"
+                    disabled={summonBusy === spellName || !encounterId}
+                    onClick={() => void handleSummon(spellName)}
+                    title={creature ? `Spawn ${creature.name}${creature.hitPoints != null ? ` (HP ${creature.hitPoints}, AC ${creature.armorClass})` : ' — a controllable token you move & attack with'} next to you` : spellName}
+                    className="rounded border border-violet-700/50 bg-violet-900/40 px-2 py-1 text-[10px] font-semibold text-violet-200 hover:bg-violet-900/70 disabled:opacity-50"
+                  >
+                    {summonBusy === spellName ? '⏳' : '🐾'} {creature?.name ?? spellName}
+                  </button>
+                ))}
+              </div>
+              {!encounterId && <p className="mt-0.5 text-[9px] text-slate-500">Start an encounter to summon.</p>}
             </div>
           )}
 

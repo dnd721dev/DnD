@@ -75,6 +75,16 @@ const MapBoard: React.FC<MapBoardProps> = ({
   // Token portrait image cache
   const tokenImgCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const [tokenImgVersion, setTokenImgVersion] = useState(0);
+  // Fantasy display font (Cinzel) resolved from the CSS var so token name
+  // labels match the card/folder styling. next/font hashes the family name, so
+  // we read the concrete value at runtime and fall back to Georgia serif.
+  const [displayFont, setDisplayFont] = useState<string>("Georgia, serif");
+  useEffect(() => {
+    try {
+      const v = getComputedStyle(document.documentElement).getPropertyValue('--font-cinzel').trim();
+      if (v) setDisplayFont(`${v}, Georgia, serif`);
+    } catch { /* SSR / unsupported */ }
+  }, []);
   const [activeInitiativeName, setActiveInitiativeName] = useState<string | null>(null);
   // Identity of the active combatant's token — used to highlight the SPECIFIC
   // token rather than every token sharing the same name.
@@ -477,7 +487,8 @@ const MapBoard: React.FC<MapBoardProps> = ({
                   ? { ...tok, label: t.label, x: t.x, y: t.y, color: t.color,
                       hp: t.hp, ac: t.ac, current_hp: t.current_hp, type: t.type, monster_id: t.monster_id,
                       homebrew_monster_id: t.homebrew_monster_id ?? tok.homebrew_monster_id ?? null,
-                      token_image_url: t.token_image_url, character_id: t.character_id ?? tok.character_id ?? null }
+                      token_image_url: t.token_image_url, character_id: t.character_id ?? tok.character_id ?? null,
+                      aura_radius_ft: t.aura_radius_ft ?? null, aura_label: t.aura_label ?? null, aura_color: t.aura_color ?? null }
                   : tok
               )
             );
@@ -568,6 +579,29 @@ const MapBoard: React.FC<MapBoardProps> = ({
       const ringLw = Math.max(2, gridSize * 0.07);
       const conditions = tokenConditions[t.id] ?? [];
 
+      // Spell emanation aura (Spirit Guardians, Circle of Power, …). A filled
+      // radius ring centered on the token; follows it because it's drawn every
+      // frame at the token's live position and clears when concentration ends.
+      const auraFt = (t as any).aura_radius_ft;
+      if (typeof auraFt === 'number' && auraFt > 0) {
+        const auraR = (auraFt / 5) * gridSize; // 5 ft per grid tile
+        const auraColor = (t as any).aura_color || '#a78bfa';
+        ctx.save();
+        ctx.globalAlpha = 0.12;
+        ctx.beginPath();
+        ctx.fillStyle = auraColor;
+        ctx.arc(t.x, t.y, auraR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.lineWidth = Math.max(1.5, gridSize * 0.05);
+        ctx.strokeStyle = auraColor;
+        ctx.setLineDash([gridSize * 0.25, gridSize * 0.18]);
+        ctx.arc(t.x, t.y, auraR, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       // Draw condition rings outward from the token (outermost first so innermost is on top)
       if (conditions.length > 0) {
         ctx.save();
@@ -592,6 +626,8 @@ const MapBoard: React.FC<MapBoardProps> = ({
       ctx.fill();
 
       // Highlight the SPECIFIC active token by identity, never by name —
+      // (definitions used below for the outline + name label)
+      const tokenName = String(t.label || '').trim();
       // matching by name lit up every monster sharing that name.
       const isHighlighted = Boolean(
         (highlightTokenId && t.id === highlightTokenId) ||
@@ -628,7 +664,8 @@ const MapBoard: React.FC<MapBoardProps> = ({
         ctx.restore();
       }
 
-      // Portrait image if available, otherwise text label
+      // Portrait image if available, otherwise the token's initials. Full name
+      // is drawn as a banner label beneath the token (see below).
       const tokenImg = t.token_image_url ? tokenImgCacheRef.current.get(t.token_image_url) : undefined;
       if (tokenImg && tokenImg.complete && tokenImg.naturalWidth > 0) {
         ctx.save();
@@ -638,11 +675,56 @@ const MapBoard: React.FC<MapBoardProps> = ({
         ctx.drawImage(tokenImg, t.x - r, t.y - r, r * 2, r * 2);
         ctx.restore();
       } else {
-        ctx.font = `${Math.max(12, gridSize * 0.35)}px system-ui, sans-serif`;
-        ctx.fillStyle = '#e5e7eb';
+        // No art → clear, bold initials on the colored disc (max 2 letters).
+        const initials = (tokenName || 'T')
+          .split(/\s+/)
+          .map((w) => w.charAt(0))
+          .join('')
+          .slice(0, 2)
+          .toUpperCase() || 'T';
+        ctx.font = `700 ${Math.max(12, gridSize * 0.34)}px ${displayFont}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(t.label || 'T', t.x, t.y);
+        ctx.lineWidth = Math.max(2, gridSize * 0.04);
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.lineJoin = 'round';
+        ctx.strokeText(initials, t.x, t.y);
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillText(initials, t.x, t.y);
+      }
+
+      // Crisp rim so every token stands out from busy map art: a dark base
+      // stroke ringed with the theme gold — matching the card/folder styling.
+      ctx.save();
+      ctx.beginPath();
+      ctx.lineWidth = Math.max(2, gridSize * 0.055);
+      ctx.strokeStyle = 'rgba(15,23,42,0.92)';
+      ctx.arc(t.x, t.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.lineWidth = Math.max(1, gridSize * 0.028);
+      ctx.strokeStyle = 'rgba(212,169,79,0.9)'; // --gold
+      ctx.arc(t.x, t.y, r - Math.max(1, gridSize * 0.02), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      // Name banner beneath the token — Cinzel + gold, with a dark outline so
+      // it stays legible over any map. This is the requested monster-name label.
+      if (tokenName) {
+        const fontPx = Math.max(10, Math.floor(gridSize * 0.26));
+        ctx.save();
+        ctx.font = `700 ${fontPx}px ${displayFont}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        const labelY = t.y + r + Math.max(3, gridSize * 0.09);
+        ctx.lineWidth = Math.max(2.5, fontPx * 0.28);
+        ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+        ctx.lineJoin = 'round';
+        ctx.miterLimit = 2;
+        ctx.strokeText(tokenName, t.x, labelY);
+        ctx.fillStyle = '#f0c86a'; // --gold-bright
+        ctx.fillText(tokenName, t.x, labelY);
+        ctx.restore();
       }
 
       // Resistance / immunity indicator dots (bottom-right of token)
@@ -742,7 +824,7 @@ const MapBoard: React.FC<MapBoardProps> = ({
       ctx.stroke();
       ctx.restore();
     }
-  }, [tokens, canvasSize, gridSize, highlightTokenId, activeTokenId, activeWallet, tokenConditions, tokenResistances, tokenImmunities, mapTriggers, tokenImgVersion, targetTokenId, radiusPreview]);
+  }, [tokens, canvasSize, gridSize, highlightTokenId, activeTokenId, activeWallet, tokenConditions, tokenResistances, tokenImmunities, mapTriggers, tokenImgVersion, targetTokenId, radiusPreview, displayFont]);
 
   /** Draw fog overlay (GM view: dark = unrevealed, slight green tint = revealed) */
   useEffect(() => {

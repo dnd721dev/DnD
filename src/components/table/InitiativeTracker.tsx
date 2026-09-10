@@ -374,24 +374,39 @@ export default function InitiativeTracker({ encounterId, sessionId, currentMapId
     return arr;
   }, [entries]);
 
-  // Clamp when list changes
+  // Clamp when list changes. IMPORTANT: never auto-stop combat here. The list
+  // can momentarily reload to empty (map filter change, realtime refetch), and
+  // setting started=false would persist combat_started:false and END COMBAT for
+  // every client. Combat ends only via the GM's explicit Reset.
   useEffect(() => {
-    if (sortedEntries.length === 0) {
-      setTurnIdx(0);
-      setRound(1);
-      setStarted(false);
-      lastResetEntryIdRef.current = null;
-      return;
-    }
-    if (turnIdx >= sortedEntries.length) {
-      setTurnIdx(0);
-    }
+    if (sortedEntries.length === 0) return;
+    if (turnIdx >= sortedEntries.length) setTurnIdx(0);
   }, [sortedEntries.length, turnIdx]);
 
   const current =
     sortedEntries.length > 0 && started
       ? sortedEntries[turnIdx % sortedEntries.length]
       : null;
+
+  // Anchor the active turn to a STABLE entry id. The initiative list reloads and
+  // re-sorts on every minor change (a monster takes damage, a condition toggles,
+  // a combatant is added). Because the turn is tracked by numeric index, that
+  // re-sort used to silently move the turn to a different creature. Here we
+  // remember which entry is acting and, whenever the list changes, re-point
+  // turnIdx at that same entry — so only Next/Prev ever change whose turn it is.
+  const activeEntryIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (current?.id) activeEntryIdRef.current = current.id;
+  }, [current?.id]);
+  useEffect(() => {
+    if (!started || sortedEntries.length === 0) return;
+    const wantId = activeEntryIdRef.current;
+    if (!wantId) return;
+    const idx = sortedEntries.findIndex((e) => e.id === wantId);
+    if (idx >= 0 && idx !== turnIdx) setTurnIdx(idx);
+    // Only react to list changes, not to Next/Prev (which move turnIdx on purpose).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortedEntries, started]);
 
   // Broadcast active creature to same-tab components (MapBoard, GMSidebar, PlayerSidebar)
   useEffect(() => {
@@ -823,6 +838,26 @@ export default function InitiativeTracker({ encounterId, sessionId, currentMapId
     // The persist effect will write combat_started=false, turn_index=0 to DB.
   }
 
+  // Manual environment / lair action. Lair actions fire on initiative count 20
+  // (losing ties). This announces it to everyone via the dice log and fires any
+  // map triggers the GM has tagged as lair effects (via the CustomEvent).
+  async function fireLairAction() {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dnd721-lair-action', { detail: { round } }));
+    }
+    if (sessionId) {
+      await supabase.from('session_rolls').insert({
+        session_id: sessionId,
+        roll_type: 'custom',
+        label: '🏔 Lair Action (Initiative 20)',
+        formula: '—',
+        result_total: 0,
+        roller_name: 'Environment',
+        outcome: `Round ${round}`,
+      });
+    }
+  }
+
   function toggleLegendary(entryId: string) {
     setLegendaryMap(prev => {
       const current = prev[entryId];
@@ -972,6 +1007,20 @@ export default function InitiativeTracker({ encounterId, sessionId, currentMapId
         >
           {wide ? '↺ Reset' : '↺'}
         </button>
+
+        {/* Lair action — manual environment trigger (GM), fires on Initiative 20 */}
+        {started && (
+          <button
+            type="button"
+            onClick={() => void fireLairAction()}
+            className={wide
+              ? 'rounded-lg bg-violet-950/70 px-3 py-2 text-xs font-semibold text-violet-300 ring-1 ring-violet-800/50 hover:bg-violet-900/70'
+              : 'rounded bg-violet-950/70 px-2 py-1 text-[11px] text-violet-300 ring-1 ring-violet-800/50 hover:bg-violet-900/70'}
+            title="Fire a lair / environment action (Initiative 20) — announces it to the party"
+          >
+            {wide ? '⬟ Lair Action' : '⬟'}
+          </button>
+        )}
       </div>
 
       {/* Current turn banner (compact only — wide inlines it in the control bar) */}

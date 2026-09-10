@@ -156,6 +156,14 @@ const NAME_ALIASES: Record<string, string> = {
   'Kobold Warrior': 'Kobold',
   'Minotaur of Baphomet': 'Minotaur',
   'Sahuagin Warrior': 'Sahuagin',
+  // Point close creature variants at existing art of the same silhouette so
+  // they show a picture instead of a bare token.
+  'Giant Constrictor Snake': 'constrictor_snake',
+  'Giant Ape': 'ape',
+  'Giant Octopus': 'octopus',
+  'Giant Wolf Spider': 'GiantSpider',
+  'Phase Spider': 'GiantSpider',
+  'Bat': 'GiantBat',
 }
 
 // normalized monster name → "/monsters/<File>.png"

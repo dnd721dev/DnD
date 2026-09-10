@@ -63,6 +63,8 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
 
   // Cached token: { value, fetchedAt }
   const tokenRef = useRef<{ value: string; fetchedAt: number } | null>(null)
+  // True while the player intends to be in voice (auto-rejoin on tab refocus).
+  const wantsVoiceRef = useRef(false)
 
   // Display-name cache: wallet → display name (populated lazily)
   const nameCacheRef = useRef<Record<string, string>>({})
@@ -148,6 +150,9 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
       setError('No room name provided.')
       return
     }
+    // Remember the player WANTS to be in voice, so a background-tab drop or a
+    // network blip can auto-rejoin (see the self-heal effect below).
+    wantsVoiceRef.current = true
 
     // Pre-clean: if a stale disconnected Room is still in state (e.g. the
     // RoomEvent.Disconnected handler fired but left a zombie object), remove all
@@ -265,6 +270,8 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
   // ── Disconnect ───────────────────────────────────────────────────────────────
 
   const handleLeave = () => {
+    // Explicit leave → do NOT auto-rejoin.
+    wantsVoiceRef.current = false
     fxChainRef.current?.cleanup()
     fxChainRef.current = null
     fxTrackRef.current = null
@@ -276,6 +283,30 @@ export default function VoiceChat({ roomName, identity, isGm, sessionId }: Voice
     setLocalMuted(false)
     setRoom(null)
   }
+
+  // Self-heal: browsers throttle/suspend background tabs, which can silently
+  // drop the LiveKit socket and eject a player who was just idle/AFK. When the
+  // tab returns to the foreground (or the network comes back), rejoin voice
+  // automatically if the player never explicitly left. This is the "inactive
+  // kicks people out of voice" fix.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const maybeRejoin = () => {
+      if (document.visibilityState !== 'visible') return
+      if (!wantsVoiceRef.current) return
+      if (room || isConnecting) return // already connected / connecting
+      void handleConnect()
+    }
+    document.addEventListener('visibilitychange', maybeRejoin)
+    window.addEventListener('online', maybeRejoin)
+    window.addEventListener('focus', maybeRejoin)
+    return () => {
+      document.removeEventListener('visibilitychange', maybeRejoin)
+      window.removeEventListener('online', maybeRejoin)
+      window.removeEventListener('focus', maybeRejoin)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room, isConnecting])
 
   // ── DM voice changer ─────────────────────────────────────────────────────────
   // Swaps the published mic for a Web Audio–processed track. Selecting

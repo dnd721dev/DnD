@@ -217,6 +217,8 @@ export function PlayerSidebar({
   const [sheetLoading, setSheetLoading] = useState(false)
   const [sheetError, setSheetError] = useState<string | null>(null)
   const [hpSaving, setHpSaving] = useState(false)
+  const [customHpOpen, setCustomHpOpen] = useState(false)
+  const [customHpVal, setCustomHpVal] = useState('')
 
   // Short rest hit dice modal
   const [shortRestModal, setShortRestModal] = useState(false)
@@ -1282,12 +1284,32 @@ export function PlayerSidebar({
                         {(sheet?.temp_hp ?? 0) > 0 && (
                           <p className="text-[9px] font-semibold text-teal-400 leading-tight">+{sheet!.temp_hp} tmp</p>
                         )}
-                        <div className="mt-1 flex gap-0.5">
+                        <div className="mt-1 flex flex-wrap gap-0.5">
                           <button type="button" disabled={hpSaving} onClick={() => updateHP(-5)} className="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[9px] text-slate-200 hover:border-yellow-500/60 disabled:opacity-40">-5</button>
                           <button type="button" disabled={hpSaving} onClick={() => updateHP(-1)} className="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[9px] text-slate-200 hover:border-yellow-500/60 disabled:opacity-40">-1</button>
                           <button type="button" disabled={hpSaving} onClick={() => updateHP(+1)} className="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[9px] text-slate-200 hover:border-yellow-500/60 disabled:opacity-40">+1</button>
                           <button type="button" disabled={hpSaving} onClick={() => updateHP(+5)} className="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[9px] text-slate-200 hover:border-yellow-500/60 disabled:opacity-40">+5</button>
+                          <button type="button" disabled={hpSaving} onClick={() => setCustomHpOpen((v) => !v)} title="Custom heal / damage" className="rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[9px] font-semibold text-yellow-300 hover:border-yellow-500/60 disabled:opacity-40">±</button>
                         </div>
+                        {customHpOpen && (
+                          <div className="mt-0.5 flex items-center gap-0.5">
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              autoFocus
+                              value={customHpVal}
+                              onChange={(e) => setCustomHpVal(e.target.value)}
+                              placeholder="amt"
+                              className="w-10 rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[9px] text-slate-100 outline-none focus:border-yellow-500/60"
+                            />
+                            <button type="button" disabled={hpSaving} title="Apply as damage"
+                              onClick={() => { const n = parseInt(customHpVal, 10); if (Number.isFinite(n) && n > 0) { void updateHP(-n); setCustomHpVal(''); setCustomHpOpen(false) } }}
+                              className="rounded border border-red-800/50 bg-red-950/50 px-1 py-0.5 text-[9px] font-semibold text-red-300 hover:bg-red-900/60 disabled:opacity-40">− Dmg</button>
+                            <button type="button" disabled={hpSaving} title="Apply as healing"
+                              onClick={() => { const n = parseInt(customHpVal, 10); if (Number.isFinite(n) && n > 0) { void updateHP(+n); setCustomHpVal(''); setCustomHpOpen(false) } }}
+                              className="rounded border border-emerald-800/50 bg-emerald-950/50 px-1 py-0.5 text-[9px] font-semibold text-emerald-300 hover:bg-emerald-900/60 disabled:opacity-40">+ Heal</button>
+                          </div>
+                        )}
                         <div className="mt-0.5 flex items-center gap-0.5">
                           <span className="text-[8px] text-teal-400/70">TMP</span>
                           <button type="button" disabled={hpSaving} onClick={() => updateTempHP((sheet?.temp_hp ?? 0) - 1)} className="rounded border border-teal-900/50 bg-slate-950 px-1 py-0 text-[9px] text-teal-300 hover:border-teal-500/50 disabled:opacity-40">-</button>
