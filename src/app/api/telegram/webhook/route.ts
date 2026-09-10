@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
-// Telegram pushes each group update here. We mirror text messages into
-// telegram_messages so the Community page can stream them live (read-only).
+// Telegram pushes each group update here. We mirror ONLY the DM Troll bot's
+// posts into telegram_messages so the Community page streams the bot's
+// announcements — not the group members' chatter (read-only).
 //
 // Setup: a bot in the DND721 group with privacy mode OFF, registered via
 //   setWebhook?url=<this route>&secret_token=<TELEGRAM_WEBHOOK_SECRET>
@@ -13,6 +14,11 @@ export const runtime = 'nodejs'
 
 const SECRET   = process.env.TELEGRAM_WEBHOOK_SECRET ?? ''
 const CHAT_ID  = process.env.TELEGRAM_CHAT_ID ?? ''
+// Only mirror posts from this bot (username, no leading @). Everyone else's
+// messages are ignored. Override via env if the bot is ever renamed.
+const ALLOWED_SENDER = (process.env.TELEGRAM_ALLOWED_SENDER ?? 'DND721_DM_Troll_bot')
+  .toLowerCase()
+  .replace(/^@/, '')
 
 function senderName(from: any): string {
   if (!from) return 'Member'
@@ -48,6 +54,13 @@ export async function POST(req: NextRequest) {
 
   // Scope to the configured group only.
   if (CHAT_ID && String(msg.chat?.id) !== CHAT_ID) {
+    return NextResponse.json({ ok: true })
+  }
+
+  // Only mirror the DM Troll bot's posts — drop everyone else's messages so the
+  // community feed shows just the bot, not the group members' chatter.
+  const fromUsername = String(msg.from?.username ?? '').toLowerCase()
+  if (ALLOWED_SENDER && fromUsername !== ALLOWED_SENDER) {
     return NextResponse.json({ ok: true })
   }
 
